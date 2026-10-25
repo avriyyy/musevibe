@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import Link from "next/link";
 import {
@@ -23,19 +23,9 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode }[] = [
   { id: "kode", label: "Kode", icon: <Code2 className="w-4 h-4" /> },
 ];
 
-export default function WorkspaceTabs({ syncUrl = false }: { syncUrl?: boolean }) {
-  const [active, setActive] = useState<TabId>("prompt");
+export default function WorkspaceTabs({ syncUrl = false, initialTab }: { syncUrl?: boolean; initialTab?: TabId }) {
+  const [active, setActive] = useState<TabId>(initialTab ?? "prompt");
 
-  useEffect(() => {
-    if (!syncUrl) return;
-    const timer = setTimeout(() => {
-      const params = new URLSearchParams(window.location.search);
-      const tab = params.get("tab") as TabId | null;
-      if (tab && (TAB_IDS as readonly string[]).includes(tab)) setActive(tab);
-    }, 0);
-    return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const goTo = (id: TabId) => {
     setActive(id);

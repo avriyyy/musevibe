@@ -1,15 +1,15 @@
-import React from "react";
+import React, { Suspense } from "react";
 import type { Metadata } from "next";
 import Navbar from "@/components/layout/navbar";
 import Footer from "@/components/layout/footer";
-import WorkspaceTabs from "@/components/workspace/workspace-tabs";
+import WorkspaceTabsLoader from "@/components/workspace/workspace-tabs-loader";
 
 export const metadata: Metadata = {
   title: "Workspace — MuseVibe",
   description: "Workspace 5 tab MuseVibe: Prompt, Spesifikasi, Rencana Kerja, Desain, dan Kode.",
 };
 
-export default function WorkspacePage() {
+export default function WorkspacePage({ searchParams }: { searchParams: Promise<{ tab?: string }> }) {
   return (
     <div className="min-h-screen flex flex-col bg-[#05060A] text-slate-200">
       <Navbar />
@@ -23,7 +23,9 @@ export default function WorkspacePage() {
             Aplikasi pencatat keuangan pribadi. Satu contoh yang sama di semua tab.
           </p>
         </div>
-        <WorkspaceTabs syncUrl />
+        <Suspense fallback={<p className="text-slate-400">Memuat workspace…</p>}>
+          <WorkspaceTabsLoader searchParams={searchParams} />
+        </Suspense>
       </main>
       <Footer />
     </div>

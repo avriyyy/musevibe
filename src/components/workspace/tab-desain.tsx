@@ -38,14 +38,21 @@ const fmt = (n: number) =>
 // ─── Prototipe live per halaman ──────────────────────────────────────────────
 function Prototype({ pageId }: { pageId: string }) {
   const [filter, setFilter] = useState("Semua");
-  const shown = filter === "Semua" ? TX : TX.filter((t) => t.cat === filter);
+  const [txList, setTxList] = useState(TX);
+  const [newLabel, setNewLabel] = useState("");
+  const [newAmount, setNewAmount] = useState("");
+  const [newCat, setNewCat] = useState("Makan");
+  const [newType, setNewType] = useState<"in" | "out">("out");
+  const shown = filter === "Semua" ? txList : txList.filter((t) => t.cat === filter);
+  const addedSum = txList.slice(5).reduce((s, t) => s + t.amount, 0);
+  const saldo = 3450000 + addedSum;
 
   if (pageId === "dashboard") {
     return (
       <div className="space-y-4">
         <div className="rounded-xl bg-[#0E1017] border border-white/10 p-5">
           <p className="text-sm text-slate-400">Saldo bersih</p>
-          <p className="mt-1 text-4xl font-bold text-white">Rp 3.450.000</p>
+          <p className="mt-1 text-4xl font-bold text-white">Rp {saldo.toLocaleString("id-ID")}</p>
           <p className="mt-1 text-sm text-emerald-400">+12% dari bulan lalu</p>
         </div>
         <div className="grid grid-cols-2 gap-4">
@@ -63,8 +70,29 @@ function Prototype({ pageId }: { pageId: string }) {
             <p className="font-semibold text-white">Transaksi terakhir</p>
             <button className="text-sm font-medium text-white bg-[#1E6BFF] rounded-[10px] px-4 py-2">+ Transaksi</button>
           </div>
+          <form
+            className="flex flex-wrap gap-2 mb-3"
+            onSubmit={(e) => {
+              e.preventDefault();
+              const amt = parseInt(newAmount.replace(/[^0-9]/g, ""), 10);
+              if (!newLabel.trim() || !amt) return;
+              setTxList((list) => [{ id: Date.now(), label: newLabel.trim(), cat: newCat, amount: newType === "in" ? amt : -amt, type: newType, date: "Hari ini" }, ...list]);
+              setNewLabel(""); setNewAmount("");
+            }}
+          >
+            <input value={newLabel} onChange={(e) => setNewLabel(e.target.value)} placeholder="Nama transaksi" className="flex-1 min-w-40 h-10 rounded-[10px] bg-white/5 border border-white/10 px-3 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-white/25" />
+            <input value={newAmount} onChange={(e) => setNewAmount(e.target.value)} placeholder="Nominal (Rp)" inputMode="numeric" className="w-32 h-10 rounded-[10px] bg-white/5 border border-white/10 px-3 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-white/25" />
+            <select value={newCat} onChange={(e) => setNewCat(e.target.value)} className="h-10 rounded-[10px] bg-[#0E1017] border border-white/10 px-3 text-sm text-white">
+              {CATS.filter((c) => c !== "Semua").map((c) => (<option key={c}>{c}</option>))}
+            </select>
+            <select value={newType} onChange={(e) => setNewType(e.target.value as "in" | "out")} className="h-10 rounded-[10px] bg-[#0E1017] border border-white/10 px-3 text-sm text-white">
+              <option value="out">Pengeluaran</option>
+              <option value="in">Pemasukan</option>
+            </select>
+            <button type="submit" className="h-10 px-4 rounded-[10px] bg-white text-black text-sm font-semibold">Tambah</button>
+          </form>
           <ul className="divide-y divide-white/5">
-            {TX.map((t) => (
+            {txList.map((t) => (
               <li key={t.id} className="flex items-center justify-between py-2.5">
                 <div>
                   <p className="text-sm text-white">{t.label}</p>
@@ -85,8 +113,9 @@ function Prototype({ pageId }: { pageId: string }) {
           <p className="font-semibold text-white mb-4">Tren pengeluaran 6 bulan</p>
           <div className="flex items-end gap-3 h-40">
             {MONTHS.map((m) => (
-              <div key={m.m} className="flex-1 flex flex-col items-center gap-2">
-                <div className="w-full rounded-t-lg bg-[#1E6BFF]/80" style={{ height: `${m.h}%` }} />
+              <div key={m.m} className="flex-1 flex flex-col items-center justify-end gap-1.5 h-full">
+                <span className="text-xs font-medium text-slate-300">{m.h}</span>
+                <div className="w-full rounded-t-lg bg-[#1E6BFF]" style={{ height: `${m.h}%`, minHeight: 12 }} />
                 <span className="text-xs text-slate-500">{m.m}</span>
               </div>
             ))}
@@ -217,8 +246,8 @@ export default function TabDesain({ onNextTab }: { onNextTab?: () => void }) {
               {DEMO_DESIGN_TOKENS.colors.map((c) => (
                 <li key={c.token} className="flex items-center gap-3 text-sm">
                   <span className="w-6 h-6 rounded-md border border-white/10 shrink-0" style={{ background: c.value }} />
-                  <span className="font-mono text-slate-300">{c.token}</span>
-                  <span className="text-slate-500 truncate">{c.label}</span>
+                  <span className="font-mono text-slate-300 shrink-0">{c.token}</span>
+                  <span className="text-slate-500 truncate min-w-0">{c.label}</span>
                 </li>
               ))}
             </ul>
