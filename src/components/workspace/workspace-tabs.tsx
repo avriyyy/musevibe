@@ -28,9 +28,12 @@ export default function WorkspaceTabs({ syncUrl = false }: { syncUrl?: boolean }
 
   useEffect(() => {
     if (!syncUrl) return;
-    const params = new URLSearchParams(window.location.search);
-    const tab = params.get("tab") as TabId | null;
-    if (tab && (TAB_IDS as readonly string[]).includes(tab)) setActive(tab);
+    const timer = setTimeout(() => {
+      const params = new URLSearchParams(window.location.search);
+      const tab = params.get("tab") as TabId | null;
+      if (tab && (TAB_IDS as readonly string[]).includes(tab)) setActive(tab);
+    }, 0);
+    return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
