@@ -38,14 +38,17 @@ const fmt = (n: number) =>
 // ─── Prototipe live per halaman ──────────────────────────────────────────────
 function Prototype({ pageId }: { pageId: string }) {
   const [filter, setFilter] = useState("Semua");
-  const [txList, setTxList] = useState(TX);
+  const [addedTx, setAddedTx] = useState<typeof TX>([]);
+  const txList = [...addedTx, ...TX];
   const [newLabel, setNewLabel] = useState("");
   const [newAmount, setNewAmount] = useState("");
   const [newCat, setNewCat] = useState("Makan");
   const [newType, setNewType] = useState<"in" | "out">("out");
   const shown = filter === "Semua" ? txList : txList.filter((t) => t.cat === filter);
-  const addedSum = txList.slice(5).reduce((s, t) => s + t.amount, 0);
+  const addedSum = addedTx.reduce((s, t) => s + t.amount, 0);
   const saldo = 3450000 + addedSum;
+  const incomeTotal = 9700000 + addedTx.filter((t) => t.type === "in").reduce((s, t) => s + t.amount, 0);
+  const expenseTotal = 6250000 + addedTx.filter((t) => t.type === "out").reduce((s, t) => s - t.amount, 0);
 
   if (pageId === "dashboard") {
     return (
@@ -58,11 +61,11 @@ function Prototype({ pageId }: { pageId: string }) {
         <div className="grid grid-cols-2 gap-4">
           <div className="rounded-xl bg-[#0E1017] border border-white/10 p-4">
             <p className="text-sm text-slate-400">Pemasukan</p>
-            <p className="mt-1 text-xl font-semibold text-emerald-400">Rp 9.700.000</p>
+            <p className="mt-1 text-xl font-semibold text-emerald-400">Rp {incomeTotal.toLocaleString("id-ID")}</p>
           </div>
           <div className="rounded-xl bg-[#0E1017] border border-white/10 p-4">
             <p className="text-sm text-slate-400">Pengeluaran</p>
-            <p className="mt-1 text-xl font-semibold text-red-400">Rp 6.250.000</p>
+            <p className="mt-1 text-xl font-semibold text-red-400">Rp {expenseTotal.toLocaleString("id-ID")}</p>
           </div>
         </div>
         <div className="rounded-xl bg-[#0E1017] border border-white/10 p-4">
@@ -76,7 +79,7 @@ function Prototype({ pageId }: { pageId: string }) {
               e.preventDefault();
               const amt = parseInt(newAmount.replace(/[^0-9]/g, ""), 10);
               if (!newLabel.trim() || !amt) return;
-              setTxList((list) => [{ id: Date.now(), label: newLabel.trim(), cat: newCat, amount: newType === "in" ? amt : -amt, type: newType, date: "Hari ini" }, ...list]);
+              setAddedTx((list) => [{ id: Date.now(), label: newLabel.trim(), cat: newCat, amount: newType === "in" ? amt : -amt, type: newType, date: "Hari ini" }, ...list]);
               setNewLabel(""); setNewAmount("");
             }}
           >
