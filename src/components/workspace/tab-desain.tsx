@@ -3,318 +3,341 @@
 import React, { useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { DEMO_DESIGN_TOKENS, DEMO_PAGE_PREVIEWS } from "@/lib/demo-data";
-import { Check, ExternalLink, RefreshCw, Palette } from "lucide-react";
+import {
+  Check, Copy, MessageSquare, Send, ArrowRight, Download, Layers, Palette,
+} from "lucide-react";
 
-// ─── Color swatch ─────────────────────────────────────────────────────────────
+// ─── Data demo prototipe (sama dengan DuitKu di tab lain) ────────────────────
+const TX = [
+  { id: 1, label: "Gaji Bulanan", cat: "Gaji", amount: 8500000, type: "in" as const, date: "1 Okt" },
+  { id: 2, label: "Belanja Harian", cat: "Makan", amount: -125000, type: "out" as const, date: "3 Okt" },
+  { id: 3, label: "Ojek Online", cat: "Transport", amount: -45000, type: "out" as const, date: "4 Okt" },
+  { id: 4, label: "Langganan Musik", cat: "Hiburan", amount: -55000, type: "out" as const, date: "5 Okt" },
+  { id: 5, label: "Freelance Desain", cat: "Gaji", amount: 1200000, type: "in" as const, date: "6 Okt" },
+];
+const CATS = ["Semua", "Makan", "Transport", "Gaji", "Hiburan"];
+const BREAKDOWN = [
+  { name: "Makan", pct: 34, amount: "Rp 1.170.000", color: "#1E6BFF" },
+  { name: "Transport", pct: 22, amount: "Rp 756.000", color: "#7C3AED" },
+  { name: "Hiburan", pct: 14, amount: "Rp 482.000", color: "#F472B6" },
+  { name: "Lainnya", pct: 30, amount: "Rp 1.042.000", color: "#A1A1AA" },
+];
+const MONTHS = [
+  { m: "Mei", h: 42 }, { m: "Jun", h: 58 }, { m: "Jul", h: 50 },
+  { m: "Agu", h: 70 }, { m: "Sep", h: 64 }, { m: "Okt", h: 88 },
+];
+const BUDGETS = [
+  { name: "Makan", used: 78, label: "Rp 1.170.000 / Rp 1.500.000", tone: "#F59E0B" },
+  { name: "Transport", used: 52, label: "Rp 756.000 / Rp 1.450.000", tone: "#10B981" },
+  { name: "Hiburan", used: 96, label: "Rp 482.000 / Rp 500.000", tone: "#F87171" },
+];
 
-function ColorSwatch({ token }: { token: (typeof DEMO_DESIGN_TOKENS.colors)[0] }) {
-  const [copied, setCopied] = useState(false);
+const fmt = (n: number) =>
+  (n < 0 ? "-Rp " : "Rp ") + Math.abs(n).toLocaleString("id-ID");
 
-  function handleCopy() {
-    navigator.clipboard.writeText(token.value).catch(() => {});
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1500);
+// ─── Prototipe live per halaman ──────────────────────────────────────────────
+function Prototype({ pageId }: { pageId: string }) {
+  const [filter, setFilter] = useState("Semua");
+  const shown = filter === "Semua" ? TX : TX.filter((t) => t.cat === filter);
+
+  if (pageId === "dashboard") {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl bg-[#0E1017] border border-white/10 p-5">
+          <p className="text-sm text-slate-400">Saldo bersih</p>
+          <p className="mt-1 text-4xl font-bold text-white">Rp 3.450.000</p>
+          <p className="mt-1 text-sm text-emerald-400">+12% dari bulan lalu</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4">
+          <div className="rounded-xl bg-[#0E1017] border border-white/10 p-4">
+            <p className="text-sm text-slate-400">Pemasukan</p>
+            <p className="mt-1 text-xl font-semibold text-emerald-400">Rp 9.700.000</p>
+          </div>
+          <div className="rounded-xl bg-[#0E1017] border border-white/10 p-4">
+            <p className="text-sm text-slate-400">Pengeluaran</p>
+            <p className="mt-1 text-xl font-semibold text-red-400">Rp 6.250.000</p>
+          </div>
+        </div>
+        <div className="rounded-xl bg-[#0E1017] border border-white/10 p-4">
+          <div className="flex items-center justify-between mb-3">
+            <p className="font-semibold text-white">Transaksi terakhir</p>
+            <button className="text-sm font-medium text-white bg-[#1E6BFF] rounded-[10px] px-4 py-2">+ Transaksi</button>
+          </div>
+          <ul className="divide-y divide-white/5">
+            {TX.map((t) => (
+              <li key={t.id} className="flex items-center justify-between py-2.5">
+                <div>
+                  <p className="text-sm text-white">{t.label}</p>
+                  <p className="text-sm text-slate-500">{t.cat} · {t.date}</p>
+                </div>
+                <span className={`text-sm font-semibold ${t.type === "in" ? "text-emerald-400" : "text-red-400"}`}>{fmt(t.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    );
   }
-
-  // Determine if swatch needs a border (very dark backgrounds)
-  const needsBorder =
-    token.value === "#05060A" ||
-    token.value === "#0E1017" ||
-    token.value === "#14141D";
-
+  if (pageId === "laporan") {
+    return (
+      <div className="space-y-4">
+        <div className="rounded-xl bg-[#0E1017] border border-white/10 p-5">
+          <p className="font-semibold text-white mb-4">Tren pengeluaran 6 bulan</p>
+          <div className="flex items-end gap-3 h-40">
+            {MONTHS.map((m) => (
+              <div key={m.m} className="flex-1 flex flex-col items-center gap-2">
+                <div className="w-full rounded-t-lg bg-[#1E6BFF]/80" style={{ height: `${m.h}%` }} />
+                <span className="text-xs text-slate-500">{m.m}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="rounded-xl bg-[#0E1017] border border-white/10 p-5 space-y-3">
+          <p className="font-semibold text-white">Breakdown kategori</p>
+          {BREAKDOWN.map((b) => (
+            <div key={b.name}>
+              <div className="flex justify-between text-sm mb-1">
+                <span className="text-slate-300">{b.name} · {b.pct}%</span>
+                <span className="text-slate-400">{b.amount}</span>
+              </div>
+              <div className="h-2 rounded-full bg-white/5 overflow-hidden">
+                <div className="h-full rounded-full" style={{ width: `${b.pct}%`, background: b.color }} />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (pageId === "anggaran") {
+    return (
+      <div className="grid sm:grid-cols-3 gap-4">
+        {BUDGETS.map((b) => (
+          <div key={b.name} className="rounded-xl bg-[#0E1017] border border-white/10 p-5">
+            <p className="font-semibold text-white">{b.name}</p>
+            <p className="mt-1 text-sm text-slate-400">{b.label}</p>
+            <div className="mt-4 h-2 rounded-full bg-white/5 overflow-hidden">
+              <div className="h-full rounded-full" style={{ width: `${b.used}%`, background: b.tone }} />
+            </div>
+            <p className="mt-2 text-sm text-slate-300">{b.used}% terpakai</p>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  // transaksi
   return (
-    <button
-      onClick={handleCopy}
-      className="group flex items-center gap-3 rounded-xl bg-[#0E1017] border border-white/8
-        p-3 hover:border-white/16 transition-colors text-left w-full"
-    >
-      <div
-        className="w-10 h-10 rounded-[8px] shrink-0 border"
-        style={{
-          background: token.value.startsWith("rgba") ? token.value : token.value,
-          borderColor: needsBorder
-            ? "rgba(255,255,255,0.14)"
-            : "rgba(255,255,255,0.06)",
-        }}
-      />
-      <div className="flex-1 min-w-0">
-        <p className="text-[13px] font-mono text-[#F4F4F5] truncate">{token.token}</p>
-        <p className="text-[12px] text-[#71717A]">{token.label}</p>
+    <div className="rounded-xl bg-[#0E1017] border border-white/10 p-5">
+      <div className="flex flex-wrap gap-2 mb-4">
+        {CATS.map((c) => (
+          <button
+            key={c}
+            onClick={() => setFilter(c)}
+            className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
+              filter === c ? "bg-white text-black font-medium" : "bg-white/5 text-slate-300 border border-white/10"
+            }`}
+          >
+            {c}
+          </button>
+        ))}
       </div>
-      <div className="w-5 h-5 flex items-center justify-center shrink-0">
-        {copied ? (
-          <Check className="w-3.5 h-3.5 text-emerald-400" />
-        ) : (
-          <span className="text-[11px] font-mono text-[#71717A] group-hover:text-[#A1A1AA] transition-colors">
-            {token.value.length > 8 ? "copy" : token.value}
-          </span>
-        )}
-      </div>
-    </button>
-  );
-}
-
-// ─── Typography sample ────────────────────────────────────────────────────────
-
-function TypoRow({ row }: { row: (typeof DEMO_DESIGN_TOKENS.typography)[0] }) {
-  return (
-    <div className="flex items-start gap-4 py-3 border-b border-white/8 last:border-0">
-      <div className="w-44 shrink-0">
-        <p className="text-[12px] text-[#71717A]">{row.role}</p>
-        <p className="text-[12px] font-mono text-[#A1A1AA]">
-          {row.size} · {row.weight}
-        </p>
-      </div>
-      <p
-        className="text-[#F4F4F5] leading-snug"
-        style={{
-          fontSize:
-            row.size.includes("48") || row.size.includes("36")
-              ? "28px"
-              : row.size.includes("28")
-              ? "22px"
-              : row.size.includes("12")
-              ? "12px"
-              : "15px",
-          fontWeight: row.weight === "Bold" ? 700 : row.weight === "Semibold" ? 600 : row.weight === "Medium" ? 500 : 400,
-          fontFamily: row.role.includes("mono") || row.role.includes("Kode") ? "var(--font-geist-mono)" : undefined,
-        }}
-      >
-        {row.sample}
-      </p>
+      <ul className="divide-y divide-white/5">
+        {shown.map((t) => (
+          <li key={t.id} className="flex items-center justify-between py-2.5">
+            <div>
+              <p className="text-sm text-white">{t.label}</p>
+              <p className="text-sm text-slate-500">{t.cat} · {t.date}</p>
+            </div>
+            <span className={`text-sm font-semibold ${t.type === "in" ? "text-emerald-400" : "text-red-400"}`}>{fmt(t.amount)}</span>
+          </li>
+        ))}
+        {shown.length === 0 && <li className="py-4 text-sm text-slate-500">Tidak ada transaksi untuk kategori ini.</li>}
+      </ul>
     </div>
   );
 }
 
-// ─── Page preview card ────────────────────────────────────────────────────────
+// ─── Komponen utama: Studio ala OpenDesign ───────────────────────────────────
+export default function TabDesain({ onNextTab }: { onNextTab?: () => void }) {
+  const [pageId, setPageId] = useState(DEMO_PAGE_PREVIEWS[0].id);
+  const [approved, setApproved] = useState<Record<string, boolean>>({});
+  const [refine, setRefine] = useState("");
+  const [comments, setComments] = useState([
+    { id: 1, author: "Tim produk", text: "Angka saldo di Dashboard sudah jelas, tapi tombol + Transaksi di mobile harus tetap terlihat saat scroll.", resolved: false },
+    { id: 2, author: "Desainer", text: "Warna kategori Hiburan di Laporan terlalu mirip dengan aksen utama, bedakan sedikit.", resolved: false },
+  ]);
+  const [copied, setCopied] = useState(false);
+  const page = DEMO_PAGE_PREVIEWS.find((p) => p.id === pageId) ?? DEMO_PAGE_PREVIEWS[0];
+  const approvedCount = Object.values(approved).filter(Boolean).length;
 
-function PagePreviewCard({
-  page,
-  onApprove,
-  onChange,
-  approved,
-}: {
-  page: (typeof DEMO_PAGE_PREVIEWS)[0];
-  onApprove: () => void;
-  onChange: () => void;
-  approved: boolean;
-}) {
-  return (
-    <motion.div
-      layout
-      className="rounded-xl bg-[#0E1017] border border-white/8 p-5 flex flex-col gap-4"
-    >
-      {/* Header */}
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <p className="text-base font-semibold text-[#F4F4F5]">{page.name}</p>
-            {approved && (
-              <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-medium">
-                <Check className="w-3 h-3" />
-                Disetujui
-              </span>
-            )}
-          </div>
-          <p className="text-sm text-[#A1A1AA]">{page.description}</p>
-        </div>
-        <a
-          href={`#task-${page.taskRef}`}
-          className="shrink-0 inline-flex items-center gap-1 text-[12px] text-[#71717A] hover:text-[#A1A1AA] transition-colors"
-        >
-          <ExternalLink className="w-3 h-3" />
-          {page.taskRef}
-        </a>
-      </div>
-
-      {/* Wireframe placeholder */}
-      <div className="rounded-[8px] bg-[#030507] border border-white/5 p-4 min-h-[120px] flex flex-col gap-2">
-        {/* Mock wireframe elements */}
-        <div className="flex items-center gap-2 mb-1">
-          <div className="h-2 w-16 rounded bg-white/10" />
-          <div className="h-2 w-10 rounded bg-white/5" />
-        </div>
-        {page.elements.map((el, i) => (
-          <div key={i} className="flex items-center gap-2">
-            <div
-              className="shrink-0 w-1.5 h-1.5 rounded-full"
-              style={{
-                background: i === 0 ? "#1E6BFF" : i === 1 ? "#7C3AED" : "rgba(255,255,255,0.2)",
-              }}
-            />
-            <div
-              className="h-1.5 rounded bg-white/8"
-              style={{ width: `${60 + (i * 17) % 30}%` }}
-            />
-          </div>
-        ))}
-      </div>
-
-      {/* Element list */}
-      <ul className="space-y-1">
-        {page.elements.map((el, i) => (
-          <li key={i} className="flex items-center gap-2 text-sm text-[#A1A1AA]">
-            <span className="w-1 h-1 rounded-full bg-white/20 shrink-0" />
-            {el}
-          </li>
-        ))}
-      </ul>
-
-      {/* Actions */}
-      <div className="flex gap-2 pt-1">
-        <button
-          onClick={onApprove}
-          disabled={approved}
-          className={`flex-1 h-9 rounded-[10px] text-sm font-medium transition-all border ${
-            approved
-              ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400 cursor-default"
-              : "bg-white/5 border-white/10 text-[#A1A1AA] hover:bg-emerald-500/10 hover:border-emerald-500/30 hover:text-emerald-400"
-          }`}
-        >
-          {approved ? "✓ Disetujui" : "Setujui"}
-        </button>
-        <button
-          onClick={onChange}
-          className="h-9 px-4 rounded-[10px] border border-white/10 text-sm
-            text-[#A1A1AA] hover:text-[#F4F4F5] hover:border-white/20 transition-colors
-            flex items-center gap-1.5"
-        >
-          <RefreshCw className="w-3.5 h-3.5" />
-          Ubah
-        </button>
-      </div>
-    </motion.div>
-  );
-}
-
-// ─── Main component ───────────────────────────────────────────────────────────
-
-export default function TabDesain() {
-  const [section, setSection] = useState<"tokens" | "pages">("tokens");
-  const [approvedPages, setApprovedPages] = useState<Record<string, boolean>>({});
-
-  function toggleApprove(id: string) {
-    setApprovedPages((prev) => ({ ...prev, [id]: !prev[id] }));
-  }
-
-  const approvedCount = Object.values(approvedPages).filter(Boolean).length;
+  const designMd = `# DESIGN.md — DuitKu\n\n- Tema gelap: bg #05060A, surface #0E1017, border white/8.\n- Gradient logo hanya garis tipis 1-2px, bukan background penuh.\n- Radius kartu 12px, tombol 10px, section 96-128px.\n- Teks sekunder minimal 14px, kontras cukup di background gelap.\n- Satu aksi utama per layar; aksi sekunder tidak bersaing.`;
 
   return (
-    <div className="flex flex-col gap-0 py-8">
-      {/* Toolbar */}
-      <div className="px-4 sm:px-6 pb-5 border-b border-white/8 flex items-center justify-between gap-4">
-        <div className="flex items-center gap-1 p-1 rounded-xl bg-white/5 border border-white/8">
-          {(["tokens", "pages"] as const).map((s) => (
-            <button
-              key={s}
-              onClick={() => setSection(s)}
-              className={`relative px-3 py-1.5 rounded-[8px] text-sm font-medium transition-colors ${
-                section === s
-                  ? "text-[#F4F4F5]"
-                  : "text-[#A1A1AA] hover:text-[#F4F4F5]"
-              }`}
-            >
-              {section === s && (
-                <motion.span
-                  layoutId="design-tab-indicator"
-                  className="absolute inset-0 rounded-[8px] bg-white/10"
-                  style={{ zIndex: -1 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 30 }}
-                />
-              )}
-              {s === "tokens" ? "Design System" : "Pratinjau Halaman"}
-            </button>
-          ))}
+    <div className="space-y-6">
+      {/* Studio header ala OpenDesign: sistem + aksi */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 rounded-xl bg-[#0E1017] border border-white/10 p-5">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-[#1E6BFF]/15 border border-white/10 flex items-center justify-center">
+            <Palette className="w-5 h-5 text-[#1E6BFF]" />
+          </div>
+          <div>
+            <p className="font-semibold text-white">DuitKu Design System · v1</p>
+            <p className="text-sm text-slate-400">{approvedCount} dari {DEMO_PAGE_PREVIEWS.length} halaman disetujui · aturan dari DESIGN.md yang sama di semua halaman</p>
+          </div>
         </div>
-
-        {section === "pages" && (
-          <span className="text-sm text-[#A1A1AA]">
-            {approvedCount}/{DEMO_PAGE_PREVIEWS.length} disetujui
-          </span>
-        )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            onClick={() => { navigator.clipboard.writeText(designMd).catch(() => {}); setCopied(true); setTimeout(() => setCopied(false), 1500); }}
+            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-[10px] border border-white/10 text-sm text-slate-300 hover:text-white transition-colors"
+          >
+            {copied ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+            {copied ? "Tersalin" : "Salin DESIGN.md"}
+          </button>
+          <button
+            onClick={() => setApproved(Object.fromEntries(DEMO_PAGE_PREVIEWS.map((p) => [p.id, true])))}
+            className="inline-flex items-center gap-1.5 h-10 px-4 rounded-[10px] border border-white/10 text-sm text-slate-300 hover:text-white transition-colors"
+          >
+            <Check className="w-4 h-4" /> Setujui semua
+          </button>
+          <button
+            onClick={onNextTab}
+            className="inline-flex items-center gap-1.5 h-10 px-5 rounded-[10px] bg-white text-black text-sm font-semibold hover:bg-slate-200 transition-colors"
+          >
+            Kirim ke Kode <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
       </div>
 
-      {/* Content */}
-      <div className="px-4 sm:px-6 pt-6">
-        <AnimatePresence mode="wait">
-          {section === "tokens" ? (
-            <motion.div
-              key="tokens"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-              className="flex flex-col gap-8"
-            >
-              {/* Colors */}
-              <section>
-                <div className="flex items-center gap-2 mb-4">
-                  <Palette className="w-4 h-4 text-[#1E6BFF]" />
-                  <h3 className="text-base font-semibold text-[#F4F4F5]">Warna</h3>
-                  <span className="text-sm text-[#71717A]">— klik untuk salin nilai</span>
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                  {DEMO_DESIGN_TOKENS.colors.map((c) => (
-                    <ColorSwatch key={c.token} token={c} />
-                  ))}
-                </div>
-              </section>
-
-              {/* Typography */}
-              <section>
-                <h3 className="text-base font-semibold text-[#F4F4F5] mb-4">
-                  Tipografi
-                </h3>
-                <div className="rounded-xl bg-[#0E1017] border border-white/8 px-4">
-                  {DEMO_DESIGN_TOKENS.typography.map((row, i) => (
-                    <TypoRow key={i} row={row} />
-                  ))}
-                </div>
-              </section>
-
-              {/* Components */}
-              <section>
-                <h3 className="text-base font-semibold text-[#F4F4F5] mb-4">
-                  Komponen
-                </h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {DEMO_DESIGN_TOKENS.components.map((comp, i) => (
-                    <div
-                      key={i}
-                      className="rounded-xl bg-[#0E1017] border border-white/8 p-4"
-                    >
-                      <p className="text-sm font-medium text-[#F4F4F5] mb-1">
-                        {comp.name}
-                      </p>
-                      <p className="text-[12px] font-mono text-[#71717A]">
-                        {comp.spec}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="pages"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-              className="grid grid-cols-1 md:grid-cols-2 gap-4"
-            >
-              {DEMO_PAGE_PREVIEWS.map((page) => (
-                <PagePreviewCard
-                  key={page.id}
-                  page={page}
-                  approved={approvedPages[page.id] ?? false}
-                  onApprove={() => toggleApprove(page.id)}
-                  onChange={() => {}}
-                />
+      <div className="grid lg:grid-cols-[280px_1fr] gap-6 items-start">
+        {/* Panel kiri: Design System */}
+        <aside className="space-y-6">
+          <div className="rounded-xl bg-[#0E1017] border border-white/10 p-5">
+            <p className="flex items-center gap-2 font-semibold text-white mb-3"><Layers className="w-4 h-4" /> Token warna</p>
+            <ul className="space-y-2">
+              {DEMO_DESIGN_TOKENS.colors.map((c) => (
+                <li key={c.token} className="flex items-center gap-3 text-sm">
+                  <span className="w-6 h-6 rounded-md border border-white/10 shrink-0" style={{ background: c.value }} />
+                  <span className="font-mono text-slate-300">{c.token}</span>
+                  <span className="text-slate-500 truncate">{c.label}</span>
+                </li>
               ))}
-            </motion.div>
-          )}
-        </AnimatePresence>
+            </ul>
+          </div>
+          <div className="rounded-xl bg-[#0E1017] border border-white/10 p-5">
+            <p className="font-semibold text-white mb-3">Tipografi</p>
+            <ul className="space-y-2 text-sm">
+              {DEMO_DESIGN_TOKENS.typography.map((t) => (
+                <li key={t.role} className="flex justify-between gap-3">
+                  <span className="text-slate-400">{t.role}</span>
+                  <span className="font-mono text-slate-300 text-right">{t.size} · {t.weight}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+          <div className="rounded-xl bg-[#0E1017] border border-white/10 p-5">
+            <p className="font-semibold text-white mb-3">Komponen</p>
+            <ul className="space-y-2 text-sm text-slate-400">
+              {DEMO_DESIGN_TOKENS.components.map((c) => (
+                <li key={c.name}><span className="text-slate-200">{c.name}</span> — {c.spec}</li>
+              ))}
+            </ul>
+          </div>
+          <details className="rounded-xl bg-[#0E1017] border border-white/10 p-5">
+            <summary className="cursor-pointer font-semibold text-white text-sm">Lihat DESIGN.md</summary>
+            <pre className="mt-3 whitespace-pre-wrap text-sm text-slate-400 font-mono">{designMd}</pre>
+          </details>
+        </aside>
+
+        {/* Tengah: prototipe live + refine/feedback */}
+        <div className="space-y-6 min-w-0">
+          <div>
+            <p className="font-semibold text-white mb-3">Prototipe — {page.name}</p>
+            <p className="text-sm text-slate-400 mb-4">{page.description} · tertaut ke tugas {page.taskRef} di Rencana Kerja</p>
+            <div className="flex flex-wrap gap-2 mb-4">
+              {DEMO_PAGE_PREVIEWS.map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => setPageId(p.id)}
+                  className={`px-4 py-2 rounded-[10px] text-sm font-medium border transition-colors ${
+                    pageId === p.id ? "bg-white text-black border-white" : "bg-white/5 text-slate-300 border-white/10 hover:border-white/20"
+                  }`}
+                >
+                  {p.name}
+                  {approved[p.id] ? " ✓" : ""}
+                </button>
+              ))}
+            </div>
+            <AnimatePresence mode="wait">
+              <motion.div
+                key={pageId}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+              >
+                <Prototype pageId={pageId} />
+              </motion.div>
+            </AnimatePresence>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                onClick={() => setApproved((a) => ({ ...a, [pageId]: !a[pageId] }))}
+                className={`h-10 px-5 rounded-[10px] text-sm font-medium border transition-colors ${
+                  approved[pageId] ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400" : "bg-white/5 border-white/10 text-slate-300 hover:text-white"
+                }`}
+              >
+                {approved[pageId] ? "✓ Halaman disetujui" : "Setujui halaman ini"}
+              </button>
+              <button
+                onClick={() => { navigator.clipboard.writeText(`DESIGN.md DuitKu — halaman ${page.name}`).catch(() => {}); }}
+                className="inline-flex items-center gap-1.5 h-10 px-4 rounded-[10px] border border-white/10 text-sm text-slate-300 hover:text-white transition-colors"
+              >
+                <Download className="w-4 h-4" /> Ekspor halaman
+              </button>
+            </div>
+          </div>
+
+          {/* Refine + feedback ala OpenDesign Studio */}
+          <div className="rounded-xl bg-[#0E1017] border border-white/10 p-5">
+            <p className="flex items-center gap-2 font-semibold text-white mb-1"><MessageSquare className="w-4 h-4" /> Refine & feedback</p>
+            <p className="text-sm text-slate-400 mb-4">Minta perubahan atau beri komentar di proyek yang sama — prototipe diperbarui di tempat, tidak pindah alat.</p>
+            <div className="flex gap-2 mb-5">
+              <input
+                value={refine}
+                onChange={(e) => setRefine(e.target.value)}
+                placeholder="Minta perubahan desain, misal: perbesar angka saldo di mobile…"
+                className="flex-1 min-w-0 h-11 rounded-[10px] bg-white/5 border border-white/10 px-3.5 text-sm text-white placeholder:text-slate-500 focus:outline-none focus:border-white/25"
+              />
+              <button
+                onClick={() => {
+                  if (!refine.trim()) return;
+                  setComments((c) => [{ id: Date.now(), author: "Kamu", text: refine.trim(), resolved: false }, ...c]);
+                  setRefine("");
+                }}
+                className="inline-flex items-center gap-1.5 h-11 px-4 rounded-[10px] bg-white text-black text-sm font-semibold hover:bg-slate-200 transition-colors shrink-0"
+              >
+                <Send className="w-4 h-4" /> Kirim
+              </button>
+            </div>
+            <ul className="space-y-3">
+              {comments.map((c) => (
+                <li key={c.id} className="flex items-start justify-between gap-3 rounded-xl bg-white/[0.03] border border-white/5 p-4">
+                  <div>
+                    <p className="text-sm font-medium text-white">{c.author}</p>
+                    <p className="mt-0.5 text-sm text-slate-400 leading-relaxed">{c.text}</p>
+                  </div>
+                  <button
+                    onClick={() => setComments((cs) => cs.map((x) => (x.id === c.id ? { ...x, resolved: !x.resolved } : x)))}
+                    className={`shrink-0 text-sm px-3 py-1.5 rounded-full border transition-colors ${
+                      c.resolved ? "border-emerald-500/30 text-emerald-400" : "border-white/10 text-slate-400 hover:text-white"
+                    }`}
+                  >
+                    {c.resolved ? "✓ Selesai" : "Tandai selesai"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
       </div>
     </div>
   );

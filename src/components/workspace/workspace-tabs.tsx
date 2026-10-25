@@ -55,7 +55,7 @@ export default function WorkspaceTabs({ syncUrl = false }: { syncUrl?: boolean }
       case "rencana-kerja":
         return <TabRencanaKerja />;
       case "desain":
-        return <TabDesain />;
+        return <TabDesain onNextTab={() => goTo("kode")} />;
       case "kode":
         return <TabKode />;
     }
