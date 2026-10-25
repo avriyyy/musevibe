@@ -580,6 +580,46 @@ export const DEMO_FILE_TREE: FileNode[] = [
 ];
 
 export const DEMO_CODE_FILES: Record<string, { language: string; code: string }> = {
+  "src/app/layout.tsx": {
+    language: "typescript",
+    code: `// DuitKu — Root layout
+// Satu-satunya layout: tema gelap, font, dan metadata aplikasi.
+
+import type { Metadata } from "next";
+import "./globals.css";
+
+export const metadata: Metadata = {
+  title: "DuitKu — Catat Keuangan Pribadi",
+  description: "Aplikasi pencatat keuangan pribadi: saldo, transaksi, anggaran, dan laporan.",
+};
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="id">
+      <body className="bg-[#05060A] text-slate-100 antialiased">
+        {children}
+      </body>
+    </html>
+  );
+}`,
+  },
+  "src/lib/utils.ts": {
+    language: "typescript",
+    code: `// DuitKu — Helpers
+// Format rupiah, gabung class, dan hitung saldo dari pemasukan-pengeluaran.
+
+export function formatRupiah(n: number): string {
+  return "Rp " + n.toLocaleString("id-ID");
+}
+
+export function cn(...classes: (string | false | null | undefined)[]): string {
+  return classes.filter(Boolean).join(" ");
+}
+
+export function calcBalance(income: number, expense: number): number {
+  return income - expense;
+}`,
+  },
   "src/lib/types.ts": {
     language: "typescript",
     code: `// DuitKu — Type definitions

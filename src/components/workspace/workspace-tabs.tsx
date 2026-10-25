@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useMemo, useState } from "react";
-import { motion, AnimatePresence } from "framer-motion";
+import { motion } from "framer-motion";
 import Link from "next/link";
 import {
   Sparkles, FileText, GitBranch, Palette, Code2, ArrowRight,
@@ -85,18 +85,15 @@ export default function WorkspaceTabs({ syncUrl = false, initialTab }: { syncUrl
           );
         })}
       </div>
-      <AnimatePresence mode="wait">
         <motion.div
           key={active}
           initial={{ opacity: 0, y: 12 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -8 }}
           transition={{ duration: 0.25, ease: "easeOut" }}
           className="pt-8"
         >
           {content}
         </motion.div>
-      </AnimatePresence>
       {!syncUrl && (
         <div className="mt-8 flex justify-center">
           <Link
