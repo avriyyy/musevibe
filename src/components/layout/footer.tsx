@@ -60,9 +60,9 @@ export default function Footer() {
         </div>
 
         {/* Bottom */}
-        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs text-slate-500">
+        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-3 text-sm text-slate-400">
           <p>© 2026 MuseVibe. Hak cipta dilindungi.</p>
-          <p>Prompt → Spesifikasi → Tugas → Desain → Kode</p>
+          <p>Prompt → Spesifikasi → Rencana Kerja → Desain → Kode</p>
         </div>
       </div>
     </footer>

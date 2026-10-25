@@ -74,7 +74,7 @@ export default function WorkflowStages() {
               className="group relative flex flex-col gap-4 p-6 rounded-2xl bg-[#0E1017] border border-white/10 hover:border-white/20 transition-all duration-200 hover:bg-[#111520]"
             >
               {/* Number */}
-              <span className="text-4xl font-bold text-white/8 select-none leading-none">
+              <span className="text-4xl font-bold text-white/25 select-none leading-none">
                 {stage.number}
               </span>
 

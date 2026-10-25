@@ -92,7 +92,7 @@ export default function WorkspaceShell({
           </span>
           <ChevronRight className="w-3.5 h-3.5 text-white/20" />
           <span className={activeStage === "3" ? "text-indigo-400 font-semibold" : ""}>
-            Tugas
+            Rencana Kerja
           </span>
           <ChevronRight className="w-3.5 h-3.5 text-white/20" />
           <span className={activeStage === "4" ? "text-violet-400 font-semibold" : ""}>
@@ -175,7 +175,7 @@ export default function WorkspaceShell({
             {[
               { id: "1", title: "01 Prompt", icon: Sparkles, status: "Selesai" },
               { id: "2", title: "02 Spesifikasi", icon: FileText, status: "Selesai" },
-              { id: "3", title: "03 Tugas", icon: Layers, status: "Selesai" },
+              { id: "3", title: "03 Rencana Kerja", icon: Layers, status: "Selesai" },
               { id: "4", title: "04 Desain", icon: Palette, status: "Selesai" },
               { id: "5", title: "05 Kode", icon: Code2, status: "Siap" },
             ].map((stage) => {
@@ -206,7 +206,7 @@ export default function WorkspaceShell({
           {/* Emitted Files */}
           <div className="mt-auto pt-3 border-t border-white/10 flex flex-col gap-1 text-[11px] font-mono text-slate-500">
             <span className="font-sans font-semibold text-slate-500 uppercase text-[10px] mb-1">
-              File yang dihasilkan (5)
+              File yang dihasilkan (4)
             </span>
             <div className="flex items-center gap-1.5 text-slate-400">
               <FileCode2 className="w-3 h-3 text-[#1E6BFF]" />
