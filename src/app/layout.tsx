@@ -14,21 +14,12 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "MuseVibe — Autonomous Software Synthesis Engine",
+  title: "MuseVibe — Dari Prompt Jadi PRD, Task, Desain, Lalu Kode",
   description:
-    "Scaffold software from Prompt to PRD to Task to Design to Code in one continuous flow. Meta-style clean architecture with interactive 3D flow topology and Next.js 16 native emission.",
-  keywords: [
-    "MuseVibe",
-    "Autonomous Development",
-    "Prompt to Code",
-    "PRD Studio",
-    "Task Engine",
-    "Design Studio",
-    "Next.js 16",
-    "Turbopack",
-    "Three.js",
-    "TypeScript",
-  ],
+    "MuseVibe menyederhanakan alur pembuatan aplikasi: dari prompt alami menjadi PRD, pemecahan tugas, desain antarmuka, hingga siap dieksekusi menjadi kode produksi.",
+  icons: {
+    icon: "/logo-musevibe.jpg",
+  },
 };
 
 export default function RootLayout({
@@ -38,10 +29,10 @@ export default function RootLayout({
 }>) {
   return (
     <html
-      lang="en"
+      lang="id"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased scroll-smooth`}
     >
-      <body className="min-h-full flex flex-col bg-white text-slate-900 font-sans">
+      <body className="min-h-full flex flex-col bg-[#05060A] text-slate-200 font-sans selection:bg-[#7C3AED]/30 selection:text-white">
         <LenisProvider>{children}</LenisProvider>
       </body>
     </html>

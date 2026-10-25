@@ -2,74 +2,58 @@
 
 import React, { useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Terminal, ArrowRight, Menu, X } from "lucide-react";
+import { ArrowRight, Menu, X } from "lucide-react";
 
 export default function Navbar() {
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   return (
-    <header className="sticky top-0 z-50 w-full bg-white/80 backdrop-blur-md border-b border-slate-200/80">
+    <header className="sticky top-0 z-50 w-full bg-[#05060A]/90 backdrop-blur-md border-b border-white/10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         {/* Brand Logo */}
-        <Link href="/" className="flex items-center gap-2.5 group">
-          <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 via-indigo-600 to-blue-500 flex items-center justify-center text-white font-bold text-sm shadow-sm group-hover:scale-105 transition-transform">
-            MV
+        <Link
+          href="/"
+          className="flex items-center gap-3 group rounded-lg focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E6BFF] focus-visible:ring-offset-2 focus-visible:ring-offset-[#05060A]"
+          aria-label="MuseVibe Beranda"
+        >
+          <div className="relative h-9 w-[54px] sm:h-10 sm:w-[60px] bg-black rounded-lg overflow-hidden shrink-0">
+            <Image
+              src="/logo-musevibe.jpg"
+              alt="Logo resmi MuseVibe"
+              fill
+              sizes="60px"
+              priority
+              className="object-contain"
+            />
           </div>
-          <div className="flex flex-col">
-            <span className="font-bold text-base text-slate-900 tracking-tight leading-none">
-              MuseVibe
-            </span>
-            <span className="text-[10px] text-slate-500 font-mono tracking-tight leading-tight mt-0.5">
-              Engine · Meta Style
-            </span>
-          </div>
+          <span className="font-bold text-base sm:text-lg text-white tracking-tight">
+            MuseVibe
+          </span>
         </Link>
 
         {/* Desktop Navigation Links */}
-        <nav className="hidden md:flex items-center gap-6 text-sm font-medium text-slate-600">
+        <nav className="hidden md:flex items-center gap-8 text-sm font-medium text-slate-300">
           <a
             href="#workflow"
-            className="hover:text-blue-600 transition-colors"
+            className="hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E6BFF] rounded-md px-1 py-0.5"
           >
-            5-Stage Pipeline
-          </a>
-          <a
-            href="#workspace-preview"
-            className="hover:text-blue-600 transition-colors"
-          >
-            Workspace Shell
+            Workflow
           </a>
           <Link
             href="/workspace"
-            className="hover:text-blue-600 transition-colors flex items-center gap-1"
+            className="hover:text-white transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E6BFF] rounded-md px-1 py-0.5"
           >
-            <span>Live Shell</span>
-            <Badge variant="meta" className="text-[9px] px-1.5 py-0 h-4">
-              Interactive
-            </Badge>
-          </Link>
-          <Link
-            href="/api/health"
-            target="_blank"
-            className="hover:text-blue-600 transition-colors flex items-center gap-1"
-          >
-            <Terminal className="w-3.5 h-3.5 text-slate-400" />
-            <span>Health API</span>
+            Workspace
           </Link>
         </nav>
 
-        {/* Action Buttons */}
-        <div className="hidden sm:flex items-center gap-3">
-          <Link href="/api/health" target="_blank">
-            <Button variant="ghost" size="sm" className="text-xs text-slate-600">
-              API Status
-            </Button>
-          </Link>
+        {/* 1 Main Action Button */}
+        <div className="hidden md:flex items-center">
           <Link href="/workspace">
-            <Button size="sm" className="text-xs shadow-sm shadow-blue-500/10">
-              <span>Open Workspace</span>
+            <Button size="sm" className="font-semibold shadow-lg shadow-[#1E6BFF]/20 px-4">
+              <span>Buka Workspace</span>
               <ArrowRight className="w-3.5 h-3.5 ml-1.5" />
             </Button>
           </Link>
@@ -78,8 +62,9 @@ export default function Navbar() {
         {/* Mobile menu trigger */}
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="md:hidden p-2 rounded-lg text-slate-600 hover:text-slate-900 hover:bg-slate-100"
-          aria-label="Toggle navigation menu"
+          className="md:hidden p-2 rounded-lg text-slate-300 hover:text-white hover:bg-white/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#1E6BFF]"
+          aria-label={mobileMenuOpen ? "Tutup menu navigasi" : "Buka menu navigasi"}
+          aria-expanded={mobileMenuOpen}
         >
           {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
         </button>
@@ -87,42 +72,26 @@ export default function Navbar() {
 
       {/* Mobile Menu Dropdown */}
       {mobileMenuOpen && (
-        <div className="md:hidden border-b border-slate-200 bg-white px-4 pt-2 pb-4 flex flex-col gap-3 text-sm font-medium text-slate-700">
+        <div className="md:hidden border-b border-white/10 bg-[#05060A] px-4 pt-3 pb-5 flex flex-col gap-3 text-sm font-medium text-slate-300">
           <a
             href="#workflow"
             onClick={() => setMobileMenuOpen(false)}
-            className="py-1.5 hover:text-blue-600"
+            className="py-2 hover:text-white transition-colors"
           >
-            5-Stage Pipeline
-          </a>
-          <a
-            href="#workspace-preview"
-            onClick={() => setMobileMenuOpen(false)}
-            className="py-1.5 hover:text-blue-600"
-          >
-            Workspace Shell
+            Workflow
           </a>
           <Link
             href="/workspace"
             onClick={() => setMobileMenuOpen(false)}
-            className="py-1.5 hover:text-blue-600 flex items-center justify-between"
+            className="py-2 hover:text-white transition-colors"
           >
-            <span>Launch Workspace</span>
-            <Badge variant="meta" className="text-[10px]">Active</Badge>
+            Workspace
           </Link>
-          <Link
-            href="/api/health"
-            target="_blank"
-            onClick={() => setMobileMenuOpen(false)}
-            className="py-1.5 hover:text-blue-600 flex items-center gap-1.5"
-          >
-            <Terminal className="w-4 h-4 text-slate-400" />
-            <span>/api/health Endpoint</span>
-          </Link>
-          <div className="pt-2 border-t border-slate-100">
+          <div className="pt-2 border-t border-white/10">
             <Link href="/workspace" onClick={() => setMobileMenuOpen(false)}>
-              <Button className="w-full text-xs">
-                Launch Workspace
+              <Button className="w-full font-semibold">
+                <span>Buka Workspace</span>
+                <ArrowRight className="w-4 h-4 ml-1.5" />
               </Button>
             </Link>
           </div>

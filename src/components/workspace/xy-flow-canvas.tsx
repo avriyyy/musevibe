@@ -24,57 +24,70 @@ import {
 } from "lucide-react";
 
 // Custom Node for the 5 Pipeline Stages
-function PipelineNode({ data }: { data: { label: string; step: string; status: string; desc: string; icon: string; isActive?: boolean } }) {
+function PipelineNode({
+  data,
+}: {
+  data: {
+    label: string;
+    step: string;
+    status: string;
+    desc: string;
+    icon: string;
+    isActive?: boolean;
+  };
+}) {
   const getIcon = () => {
     switch (data.icon) {
       case "prompt":
-        return <Sparkles className="w-4 h-4 text-blue-600" />;
+        return <Sparkles className="w-4 h-4 text-[#60a5fa]" />;
       case "prd":
-        return <FileCode className="w-4 h-4 text-sky-600" />;
+        return <FileCode className="w-4 h-4 text-sky-400" />;
       case "task":
-        return <Layers className="w-4 h-4 text-indigo-600" />;
+        return <Layers className="w-4 h-4 text-indigo-400" />;
       case "design":
-        return <Palette className="w-4 h-4 text-violet-600" />;
+        return <Palette className="w-4 h-4 text-violet-400" />;
       case "build":
-        return <CheckCircle className="w-4 h-4 text-emerald-600" />;
+        return <CheckCircle className="w-4 h-4 text-emerald-400" />;
       default:
-        return <Sparkles className="w-4 h-4 text-blue-600" />;
+        return <Sparkles className="w-4 h-4 text-[#60a5fa]" />;
     }
   };
 
   return (
     <div
-      className={`px-4 py-3 rounded-2xl border bg-white shadow-md transition-all duration-200 min-w-[210px] text-left ${
+      className={`px-4 py-3 rounded-2xl border bg-[#0E1017] shadow-lg transition-all duration-200 min-w-[180px] text-left ${
         data.isActive
-          ? "border-blue-500 ring-2 ring-blue-100 shadow-blue-500/10"
-          : "border-slate-200/90 hover:border-slate-300"
+          ? "border-[#1E6BFF]/60 ring-2 ring-[#1E6BFF]/20"
+          : "border-white/10 hover:border-white/20"
       }`}
     >
       <Handle
         type="target"
         position={Position.Left}
-        className="!w-2.5 !h-2.5 !bg-blue-600 !border-2 !border-white"
+        className="!w-2.5 !h-2.5 !bg-[#1E6BFF] !border-2 !border-[#05060A]"
       />
 
       <div className="flex items-center justify-between mb-1.5">
         <div className="flex items-center gap-2">
-          <div className="p-1.5 rounded-lg bg-slate-100">{getIcon()}</div>
-          <span className="text-xs font-mono font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">
+          <div className="p-1.5 rounded-lg bg-white/5">{getIcon()}</div>
+          <span className="text-xs font-mono font-bold px-1.5 py-0.5 rounded bg-white/8 text-slate-300">
             {data.step}
           </span>
         </div>
-        <span className="text-[10px] font-medium text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200">
+        <span className="text-[10px] font-medium text-emerald-400 bg-emerald-950/60 px-2 py-0.5 rounded-full border border-emerald-500/20">
           {data.status}
         </span>
       </div>
 
-      <div className="font-semibold text-slate-900 text-sm">{data.label}</div>
-      <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">{data.desc}</div>
+      <div className="font-semibold text-slate-100 text-sm">{data.label}</div>
+      <div className="text-[11px] text-slate-500 mt-0.5 line-clamp-1">
+        {data.desc}
+      </div>
 
       <Handle
         type="source"
         position={Position.Right}
-        className="!w-2.5 !h-2.5 !bg-blue-600 !border-2 !border-white"
+        className="!w-2.5 !h-2.5 !bg-[#1E6BFF] !border-2 !border-[#05060A]"
       />
     </div>
   );
@@ -91,9 +104,9 @@ const INITIAL_NODES: Node[] = [
     position: { x: 50, y: 150 },
     data: {
       step: "01",
-      label: "Discovery Prompt",
-      desc: "Intent extraction & constraints",
-      status: "Ready",
+      label: "Prompt",
+      desc: "Tulis kebutuhan aplikasimu",
+      status: "Selesai",
       icon: "prompt",
       isActive: true,
     },
@@ -101,48 +114,48 @@ const INITIAL_NODES: Node[] = [
   {
     id: "2",
     type: "pipeline",
-    position: { x: 330, y: 60 },
+    position: { x: 310, y: 60 },
     data: {
       step: "02",
-      label: "PRD Studio",
-      desc: "RFC-204 & Acceptance tests",
-      status: "Verified",
+      label: "Spesifikasi",
+      desc: "PRD & kriteria penerimaan",
+      status: "Selesai",
       icon: "prd",
     },
   },
   {
     id: "3",
     type: "pipeline",
-    position: { x: 330, y: 240 },
+    position: { x: 310, y: 240 },
     data: {
       step: "03",
-      label: "Task Engine",
-      desc: "Acyclic DAG schedule",
-      status: "Compiled",
+      label: "Rencana Kerja",
+      desc: "Daftar tugas terurut (DAG)",
+      status: "Selesai",
       icon: "task",
     },
   },
   {
     id: "4",
     type: "pipeline",
-    position: { x: 610, y: 60 },
+    position: { x: 570, y: 60 },
     data: {
       step: "04",
-      label: "Design Studio",
-      desc: "Tokens & WCAG AAA UI",
-      status: "Validated",
+      label: "Desain",
+      desc: "Komponen & token visual",
+      status: "Selesai",
       icon: "design",
     },
   },
   {
     id: "5",
     type: "pipeline",
-    position: { x: 610, y: 240 },
+    position: { x: 570, y: 240 },
     data: {
       step: "05",
-      label: "Build-ready",
-      desc: "Next.js 16 TSX emission",
-      status: "Ready",
+      label: "Kode",
+      desc: "Next.js siap produksi",
+      status: "Siap",
       icon: "build",
     },
   },
@@ -199,7 +212,9 @@ export default function XYFlowCanvas({
   const [edges, , onEdgesChange] = useEdgesState(INITIAL_EDGES);
 
   return (
-    <div className={`relative rounded-2xl overflow-hidden border border-slate-200/80 bg-slate-50/40 ${className}`}>
+    <div
+      className={`relative rounded-2xl overflow-hidden border border-white/10 bg-[#030507] ${className}`}
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -211,13 +226,19 @@ export default function XYFlowCanvas({
         fitViewOptions={{ padding: 0.25 }}
         minZoom={0.5}
         maxZoom={1.5}
+        colorMode="dark"
       >
-        <Background variant={BackgroundVariant.Dots} gap={16} size={1} color="#cbd5e1" />
-        <Controls className="!bg-white !border-slate-200/90 !rounded-xl !shadow-sm" />
+        <Background
+          variant={BackgroundVariant.Dots}
+          gap={16}
+          size={1}
+          color="#1e293b"
+        />
+        <Controls className="!bg-[#0E1017] !border-white/10 !rounded-xl !shadow-sm" />
         <MiniMap
-          nodeColor="#e2e8f0"
-          maskColor="rgba(241, 245, 249, 0.7)"
-          className="!rounded-xl !border !border-slate-200/80 !shadow-sm"
+          nodeColor="#1e293b"
+          maskColor="rgba(5, 6, 10, 0.7)"
+          className="!rounded-xl !border !border-white/10 !shadow-sm"
         />
       </ReactFlow>
     </div>

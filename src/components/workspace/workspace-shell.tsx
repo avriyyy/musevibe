@@ -52,28 +52,28 @@ export default function WorkspaceShell({
 
   return (
     <div
-      className={`flex flex-col bg-slate-900/5 rounded-3xl border border-slate-200/90 shadow-xl overflow-hidden font-sans ${
+      className={`flex flex-col bg-[#05060A] rounded-3xl border border-white/10 shadow-xl overflow-hidden font-sans ${
         isFullScreen ? "h-screen rounded-none border-none" : "min-h-[720px]"
       }`}
     >
       {/* Shell Top Navigation Bar */}
-      <div className="h-14 bg-white border-b border-slate-200/80 px-4 flex items-center justify-between gap-4 shrink-0">
+      <div className="h-14 bg-[#080B10] border-b border-white/10 px-4 flex items-center justify-between gap-4 shrink-0">
         <div className="flex items-center gap-3">
           <Link href="/" className="flex items-center gap-2 group">
-            <div className="w-7 h-7 rounded-lg bg-blue-600 flex items-center justify-center text-white font-bold text-xs shadow-sm">
+            <div className="w-7 h-7 rounded-lg bg-[#1E6BFF] flex items-center justify-center text-white font-bold text-xs shadow-sm">
               MV
             </div>
-            <span className="font-bold text-slate-900 tracking-tight text-sm hidden sm:inline">
+            <span className="font-bold text-white tracking-tight text-sm hidden sm:inline">
               MuseVibe
             </span>
           </Link>
 
-          <span className="text-slate-300">/</span>
+          <span className="text-white/20">/</span>
 
-          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-700 bg-slate-100/80 px-2.5 py-1 rounded-lg border border-slate-200/60">
-            <FolderGit2 className="w-3.5 h-3.5 text-slate-500" />
-            <span className="font-mono text-slate-900 font-semibold">
-              nexus-doc-engine
+          <div className="flex items-center gap-1.5 text-xs font-medium text-slate-300 bg-white/5 px-2.5 py-1 rounded-lg border border-white/10">
+            <FolderGit2 className="w-3.5 h-3.5 text-slate-400" />
+            <span className="font-mono text-slate-200 font-semibold">
+              my-project
             </span>
             <Badge variant="outline" className="text-[9px] px-1.5 py-0 h-4">
               main
@@ -83,24 +83,24 @@ export default function WorkspaceShell({
 
         {/* Center Breadcrumb */}
         <div className="hidden md:flex items-center gap-1 text-xs text-slate-500">
-          <span className={activeStage === "1" ? "text-blue-600 font-semibold" : ""}>
-            Discovery
+          <span className={activeStage === "1" ? "text-[#1E6BFF] font-semibold" : ""}>
+            Prompt
           </span>
-          <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-          <span className={activeStage === "2" ? "text-sky-600 font-semibold" : ""}>
-            PRD Studio
+          <ChevronRight className="w-3.5 h-3.5 text-white/20" />
+          <span className={activeStage === "2" ? "text-sky-400 font-semibold" : ""}>
+            Spesifikasi
           </span>
-          <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-          <span className={activeStage === "3" ? "text-indigo-600 font-semibold" : ""}>
-            Task Engine
+          <ChevronRight className="w-3.5 h-3.5 text-white/20" />
+          <span className={activeStage === "3" ? "text-indigo-400 font-semibold" : ""}>
+            Tugas
           </span>
-          <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-          <span className={activeStage === "4" ? "text-violet-600 font-semibold" : ""}>
-            Design Studio
+          <ChevronRight className="w-3.5 h-3.5 text-white/20" />
+          <span className={activeStage === "4" ? "text-violet-400 font-semibold" : ""}>
+            Desain
           </span>
-          <ChevronRight className="w-3.5 h-3.5 text-slate-300" />
-          <span className={activeStage === "5" ? "text-emerald-600 font-semibold" : ""}>
-            Build-ready
+          <ChevronRight className="w-3.5 h-3.5 text-white/20" />
+          <span className={activeStage === "5" ? "text-emerald-400 font-semibold" : ""}>
+            Kode
           </span>
         </div>
 
@@ -110,17 +110,17 @@ export default function WorkspaceShell({
             size="sm"
             onClick={runSimulation}
             disabled={isRunning}
-            className="h-8 text-xs gap-1.5 shadow-sm"
+            className="h-8 text-xs gap-1.5"
           >
             {isRunning ? (
               <>
                 <RotateCcw className="w-3.5 h-3.5 animate-spin" />
-                <span>Synthesizing ({pipelineProgress}%)...</span>
+                <span>Memproses ({pipelineProgress}%)...</span>
               </>
             ) : (
               <>
                 <Play className="w-3.5 h-3.5 fill-current" />
-                <span>Run Pipeline</span>
+                <span>Jalankan</span>
               </>
             )}
           </Button>
@@ -130,10 +130,10 @@ export default function WorkspaceShell({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs gap-1 text-slate-700 hidden sm:flex"
+                className="h-8 text-xs gap-1 hidden sm:flex"
               >
                 <Maximize2 className="w-3.5 h-3.5" />
-                <span>Fullscreen</span>
+                <span>Buka Workspace</span>
               </Button>
             </Link>
           ) : (
@@ -141,43 +141,43 @@ export default function WorkspaceShell({
               <Button
                 variant="outline"
                 size="sm"
-                className="h-8 text-xs text-slate-700"
+                className="h-8 text-xs"
               >
-                Exit to Landing
+                Kembali
               </Button>
             </Link>
           )}
         </div>
       </div>
 
-      {/* Main Workspace Workspace Layout */}
-      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden bg-slate-100/50">
+      {/* Main Workspace Layout */}
+      <div className="flex-1 flex flex-col lg:flex-row overflow-hidden bg-[#05060A]">
         {/* Left Sidebar: Controls & Stages */}
-        <div className="w-full lg:w-72 bg-white border-r border-slate-200/80 flex flex-col p-4 gap-4 shrink-0">
+        <div className="w-full lg:w-72 bg-[#080B10] border-r border-white/10 flex flex-col p-4 gap-4 shrink-0">
           <div>
-            <label className="text-xs font-semibold text-slate-900 block mb-1.5 flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-              Developer Prompt Input
+            <label className="text-xs font-semibold text-slate-300 block mb-1.5 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-[#1E6BFF]" />
+              Promptmu
             </label>
             <textarea
               value={userPrompt}
               onChange={(e) => setUserPrompt(e.target.value)}
               rows={3}
-              className="w-full text-xs p-2.5 rounded-xl border border-slate-200 bg-slate-50 text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white resize-none"
-              placeholder="Describe your target application..."
+              className="w-full text-xs p-2.5 rounded-xl border border-white/10 bg-white/5 text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-[#1E6BFF] focus:bg-white/8 resize-none"
+              placeholder="Ceritakan aplikasi yang ingin kamu buat..."
             />
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-1">
-              Workflow Stages
+            <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-wider mb-1">
+              Tahapan
             </span>
             {[
-              { id: "1", title: "01 Discovery", icon: Sparkles, status: "Done" },
-              { id: "2", title: "02 PRD Studio", icon: FileText, status: "Done" },
-              { id: "3", title: "03 Task Engine", icon: Layers, status: "Done" },
-              { id: "4", title: "04 Design Studio", icon: Palette, status: "Done" },
-              { id: "5", title: "05 Build-ready", icon: Code2, status: "Ready" },
+              { id: "1", title: "01 Prompt", icon: Sparkles, status: "Selesai" },
+              { id: "2", title: "02 Spesifikasi", icon: FileText, status: "Selesai" },
+              { id: "3", title: "03 Tugas", icon: Layers, status: "Selesai" },
+              { id: "4", title: "04 Desain", icon: Palette, status: "Selesai" },
+              { id: "5", title: "05 Kode", icon: Code2, status: "Siap" },
             ].map((stage) => {
               const Icon = stage.icon;
               const isSelected = activeStage === stage.id;
@@ -187,15 +187,15 @@ export default function WorkspaceShell({
                   onClick={() => setActiveStage(stage.id)}
                   className={`flex items-center justify-between p-2 rounded-xl text-xs font-medium transition-colors cursor-pointer text-left ${
                     isSelected
-                      ? "bg-blue-50 text-blue-700 border border-blue-200/80 font-semibold"
-                      : "text-slate-600 hover:bg-slate-50 hover:text-slate-900 border border-transparent"
+                      ? "bg-[#1E6BFF]/15 text-[#60a5fa] border border-[#1E6BFF]/30 font-semibold"
+                      : "text-slate-400 hover:bg-white/5 hover:text-slate-200 border border-transparent"
                   }`}
                 >
                   <div className="flex items-center gap-2">
                     <Icon className="w-3.5 h-3.5" />
                     <span>{stage.title}</span>
                   </div>
-                  <span className="text-[10px] text-emerald-600 font-mono font-bold bg-emerald-50 px-1.5 py-0.5 rounded">
+                  <span className="text-[10px] text-emerald-400 font-mono font-bold bg-emerald-950/60 px-1.5 py-0.5 rounded border border-emerald-500/20">
                     {stage.status}
                   </span>
                 </button>
@@ -203,26 +203,26 @@ export default function WorkspaceShell({
             })}
           </div>
 
-          {/* Emitted Workspace Files */}
-          <div className="mt-auto pt-3 border-t border-slate-100 flex flex-col gap-1 text-[11px] font-mono text-slate-500">
-            <span className="font-sans font-semibold text-slate-400 uppercase text-[10px] mb-1">
-              Synthesized Files (5)
+          {/* Emitted Files */}
+          <div className="mt-auto pt-3 border-t border-white/10 flex flex-col gap-1 text-[11px] font-mono text-slate-500">
+            <span className="font-sans font-semibold text-slate-500 uppercase text-[10px] mb-1">
+              File yang dihasilkan (5)
             </span>
-            <div className="flex items-center gap-1.5 text-slate-700">
-              <FileCode2 className="w-3 h-3 text-blue-500" />
+            <div className="flex items-center gap-1.5 text-slate-400">
+              <FileCode2 className="w-3 h-3 text-[#1E6BFF]" />
               <span>src/app/page.tsx</span>
             </div>
-            <div className="flex items-center gap-1.5 text-slate-700">
-              <FileCode2 className="w-3 h-3 text-blue-500" />
+            <div className="flex items-center gap-1.5 text-slate-400">
+              <FileCode2 className="w-3 h-3 text-[#1E6BFF]" />
               <span>src/lib/crdt.ts</span>
             </div>
-            <div className="flex items-center gap-1.5 text-slate-700">
-              <FileText className="w-3 h-3 text-sky-500" />
-              <span>docs/rfc-204-spec.md</span>
+            <div className="flex items-center gap-1.5 text-slate-400">
+              <FileText className="w-3 h-3 text-sky-400" />
+              <span>docs/spec.md</span>
             </div>
-            <div className="flex items-center gap-1.5 text-slate-700">
-              <Layers className="w-3 h-3 text-indigo-500" />
-              <span>tasks/dag-sprint.json</span>
+            <div className="flex items-center gap-1.5 text-slate-400">
+              <Layers className="w-3 h-3 text-indigo-400" />
+              <span>tasks/dag.json</span>
             </div>
           </div>
         </div>
@@ -231,15 +231,15 @@ export default function WorkspaceShell({
         <div className="flex-1 flex flex-col p-4 overflow-hidden min-h-[380px]">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
-              <span className="text-xs font-semibold text-slate-900">
-                Workflow Topology Canvas
+              <span className="text-xs font-semibold text-slate-200">
+                Peta Alur
               </span>
               <span className="text-[11px] text-slate-500">
-                (Click nodes to inspect stage properties)
+                (klik simpul untuk detail)
               </span>
             </div>
             <Badge variant="meta" className="text-[10px]">
-              Active Graph: 5 Nodes · 5 Edges
+              5 Tahap · 5 Koneksi
             </Badge>
           </div>
 
@@ -252,50 +252,52 @@ export default function WorkspaceShell({
         </div>
 
         {/* Right Panel: Output & Inspector */}
-        <div className="w-full lg:w-80 bg-white border-l border-slate-200/80 flex flex-col shrink-0">
+        <div className="w-full lg:w-80 bg-[#080B10] border-l border-white/10 flex flex-col shrink-0">
           {/* Inspector Header Tabs */}
-          <div className="flex border-b border-slate-200/80 bg-slate-50/70 p-1.5 gap-1 text-xs">
+          <div className="flex border-b border-white/10 bg-[#05060A] p-1.5 gap-1 text-xs">
             <button
               onClick={() => setActiveInspectorTab("code")}
               className={`flex-1 py-1.5 text-center rounded-lg font-medium transition-colors cursor-pointer ${
                 activeInspectorTab === "code"
-                  ? "bg-white text-slate-900 font-semibold shadow-xs"
-                  : "text-slate-500 hover:text-slate-900"
+                  ? "bg-white/10 text-white font-semibold"
+                  : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              TypeScript
+              Kode
             </button>
             <button
               onClick={() => setActiveInspectorTab("prd")}
               className={`flex-1 py-1.5 text-center rounded-lg font-medium transition-colors cursor-pointer ${
                 activeInspectorTab === "prd"
-                  ? "bg-white text-slate-900 font-semibold shadow-xs"
-                  : "text-slate-500 hover:text-slate-900"
+                  ? "bg-white/10 text-white font-semibold"
+                  : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              PRD RFC
+              Spesifikasi
             </button>
             <button
               onClick={() => setActiveInspectorTab("logs")}
               className={`flex-1 py-1.5 text-center rounded-lg font-medium transition-colors cursor-pointer ${
                 activeInspectorTab === "logs"
-                  ? "bg-white text-slate-900 font-semibold shadow-xs"
-                  : "text-slate-500 hover:text-slate-900"
+                  ? "bg-white/10 text-white font-semibold"
+                  : "text-slate-500 hover:text-slate-300"
               }`}
             >
-              Logs
+              Log
             </button>
           </div>
 
           {/* Inspector Content */}
-          <div className="flex-1 p-3 overflow-y-auto max-h-[360px] lg:max-h-none font-mono text-[11px] leading-relaxed bg-slate-950 text-slate-200">
+          <div className="flex-1 p-3 overflow-y-auto max-h-[360px] lg:max-h-none font-mono text-[11px] leading-relaxed bg-[#030507] text-slate-300">
             {activeInspectorTab === "code" && (
               <pre className="whitespace-pre-wrap">
                 {`// src/app/editor/page.tsx
 import { CRDTSession } from "@/lib/crdt";
 import { DocumentCanvas } from "@/components/canvas";
 
-export default async function EditorPage({ params }: { params: { id: string } }) {
+export default async function EditorPage(
+  { params }: { params: { id: string } }
+) {
   const session = await CRDTSession.connect({
     docId: params.id,
     mode: "collaborative",
@@ -313,56 +315,56 @@ export default async function EditorPage({ params }: { params: { id: string } })
 
             {activeInspectorTab === "prd" && (
               <pre className="whitespace-pre-wrap">
-                {`# Specification: Document Canvas
-Target: Release Candidate 1
-Authored by: MuseVibe Studio Engine
+                {`# Spesifikasi: Document Canvas
+Versi: Release Candidate 1
+Dibuat oleh: MuseVibe
 
-1. System Invariants
-- Zero lost keystrokes during offline reconnection.
-- CRDT state vectors capped under 1MB per revision chunk.
-- Client socket reconnect backoff: Exponential jittered (100ms - 5s).`}
+1. Invariant Sistem
+- Nol keystroke hilang saat reconect.
+- State CRDT maks 1MB per revisi.
+- Backoff reconect: eksponensial (100ms–5s).`}
               </pre>
             )}
 
             {activeInspectorTab === "logs" && (
               <pre className="whitespace-pre-wrap text-emerald-400">
-                {`[12:28:10] AST Parser initialized.
-[12:28:11] Semantic prompt tokens parsed: 14 entities.
-[12:28:11] PRD RFC-204 generated & schema compiled.
-[12:28:12] Task DAG topological resolution: PASS.
-[12:28:12] Design tokens mapped to Tailwind v4 theme.
-[12:28:13] Next.js 16 build verified. 0 TS errors.`}
+                {`[12:28:10] Parser diinisialisasi.
+[12:28:11] 14 entitas prompt diparsing.
+[12:28:11] Spesifikasi dibuat & schema dikompilasi.
+[12:28:12] Urutan tugas DAG: LULUS.
+[12:28:12] Token desain dipetakan ke Tailwind v4.
+[12:28:13] Build Next.js 16 terverifikasi. 0 error.`}
               </pre>
             )}
           </div>
 
           {/* Inspector Footer Actions */}
-          <div className="p-3 border-t border-slate-200/80 bg-slate-50 flex items-center justify-between text-xs">
-            <span className="text-emerald-700 font-medium flex items-center gap-1.5">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              AST Verified
+          <div className="p-3 border-t border-white/10 bg-[#080B10] flex items-center justify-between text-xs">
+            <span className="text-emerald-400 font-medium flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5" />
+              Terverifikasi
             </span>
-            <Button size="sm" variant="outline" className="h-7 text-xs gap-1 text-slate-700 bg-white">
+            <Button size="sm" variant="outline" className="h-7 text-xs gap-1">
               <Download className="w-3.5 h-3.5" />
-              <span>Export</span>
+              <span>Ekspor</span>
             </Button>
           </div>
         </div>
       </div>
 
       {/* Shell Status Bar */}
-      <div className="h-8 bg-slate-900 text-slate-400 px-4 flex items-center justify-between text-[11px] font-mono border-t border-slate-800 shrink-0">
+      <div className="h-8 bg-[#030507] text-slate-500 px-4 flex items-center justify-between text-[11px] font-mono border-t border-white/8 shrink-0">
         <div className="flex items-center gap-3">
-          <span className="text-emerald-400 font-semibold">● Next.js 16 Turbopack</span>
-          <span className="hidden sm:inline">|</span>
-          <span className="hidden sm:inline">TypeScript 5.9.3 Strict</span>
-          <span className="hidden sm:inline">|</span>
-          <span className="hidden sm:inline">React 19.3</span>
+          <span className="text-emerald-400 font-semibold">● Next.js 16</span>
+          <span className="hidden sm:inline text-white/20">|</span>
+          <span className="hidden sm:inline">TypeScript 5.9 Strict</span>
+          <span className="hidden sm:inline text-white/20">|</span>
+          <span className="hidden sm:inline">React 19</span>
         </div>
         <div className="flex items-center gap-3">
-          <Link href="/api/health" target="_blank" className="hover:text-white flex items-center gap-1">
-            <Terminal className="w-3 h-3 text-blue-400" />
-            <span>Health Endpoint</span>
+          <Link href="/api/health" target="_blank" className="hover:text-slate-300 flex items-center gap-1 transition-colors">
+            <Terminal className="w-3 h-3 text-[#1E6BFF]" />
+            <span>/api/health</span>
           </Link>
           <span>v1.0.0</span>
         </div>
