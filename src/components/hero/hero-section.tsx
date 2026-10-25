@@ -4,6 +4,8 @@ import React from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { Button } from "@/components/ui/button";
+import dynamic from "next/dynamic";
+const HeroWireframe = dynamic(() => import("./hero-wireframe"), { ssr: false });
 import { ArrowRight, ChevronDown } from "lucide-react";
 
 export default function HeroSection() {
@@ -94,6 +96,12 @@ export default function HeroSection() {
             </Button>
           </a>
         </div>
+      </div>
+
+      {/* Three.js wireframe hero visual */}
+      <div className="relative z-10 w-full max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 mt-10">
+        <HeroWireframe />
+        <p className="mt-3 text-center text-sm text-slate-500">Prompt &rarr; Spesifikasi &rarr; Rencana Kerja &rarr; Desain &rarr; Kode</p>
       </div>
 
       {/* Scroll hint */}
