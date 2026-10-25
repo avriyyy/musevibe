@@ -27,7 +27,7 @@ export default function WorkspacePreview() {
     },
     {
       icon: <GitBranch className="w-4 h-4 text-indigo-400" />,
-      label: "Rencana",
+      label: "Rencana Kerja",
       done: true,
     },
     {
