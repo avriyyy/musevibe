@@ -191,8 +191,8 @@ export default function Home() {
                 : `No projects match "${query.trim()}".`}
             </p>
           ) : (
-            <div className="mt-3 flex-1 min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#17181d]">
-              <ul className="list-scroll h-full divide-y divide-white/10 overflow-y-auto">
+            <div className="mt-3 flex-1 min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#17181d] p-2">
+              <ul className="list-scroll h-full divide-y divide-white/10 overflow-y-auto rounded-xl">
                 {visible.map((p) => (
                   <li key={p.id} className="flex items-center gap-3 px-5 py-3">
                     <div className="flex-1 min-w-0">
