@@ -29,11 +29,31 @@ export default function Home() {
   const [typed, setTyped] = useState("");
   const [query, setQuery] = useState("");
   const [now, setNow] = useState<number | null>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const profileRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setNow(Date.now());
   }, []);
+
+  useEffect(() => {
+    if (!profileOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!profileRef.current?.contains(event.target as Node)) {
+        setProfileOpen(false);
+      }
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setProfileOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [profileOpen]);
 
   useEffect(() => {
     if (idea || focused) return;
@@ -99,10 +119,77 @@ export default function Home() {
 
   return (
     <div className="h-screen flex flex-col bg-[#0b0c10] text-[#f5f6f8] overflow-hidden">
-      <header className="px-5 py-3 shrink-0">
+      <header className="px-5 py-3 shrink-0 flex items-center justify-between gap-4">
         <Link href="/" className="text-[15px] font-bold tracking-tight">
           MuseVibe
         </Link>
+
+        <div ref={profileRef} className="relative">
+          <button
+            type="button"
+            onClick={() => setProfileOpen((open) => !open)}
+            aria-label="Open profile menu"
+            aria-expanded={profileOpen}
+            aria-controls="profile-menu"
+            className="w-9 h-9 rounded-full border border-white/15 bg-white/5 text-[#c9cdd6] flex items-center justify-center hover:bg-white/10 hover:text-white"
+          >
+            <svg
+              aria-hidden
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.8"
+              strokeLinecap="round"
+            >
+              <circle cx="12" cy="8.5" r="3.5" />
+              <path d="M5.5 19.5c0-3.2 2.9-5.2 6.5-5.2s6.5 2 6.5 5.2" />
+            </svg>
+          </button>
+
+          {profileOpen && (
+            <div
+              id="profile-menu"
+              className="absolute right-0 top-full z-50 mt-2 w-60 rounded-2xl border border-white/10 bg-[#17181d] p-1.5 shadow-2xl"
+            >
+              <div className="px-3 py-2.5">
+                <p className="text-[13px] font-semibold text-[#f5f6f8]">
+                  Local session
+                </p>
+                <p className="mt-0.5 text-[11px] leading-relaxed text-[#9aa0ae]">
+                  {projects.length}{" "}
+                  {projects.length === 1 ? "project" : "projects"}. Resets when
+                  you reload.
+                </p>
+              </div>
+              <div aria-hidden className="my-1 h-px bg-white/10" />
+              <a
+                href="https://github.com/avriyyy/musevibe"
+                target="_blank"
+                rel="noreferrer"
+                onClick={() => setProfileOpen(false)}
+                className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white"
+              >
+                GitHub repository
+                <svg
+                  aria-hidden
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M7 17 17 7" />
+                  <path d="M9 7h8v8" />
+                </svg>
+              </a>
+            </div>
+          )}
+        </div>
       </header>
 
       <main className="flex-1 min-h-0 flex flex-col items-center px-5 pt-10 pb-6">
