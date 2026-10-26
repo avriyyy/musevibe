@@ -1,8 +1,6 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useVibe, seedId } from "@/lib/store";
 
 const PHRASES = [
   "A habit tracker that never guilt-trips",
@@ -12,8 +10,6 @@ const PHRASES = [
 ];
 
 export default function Home() {
-  const router = useRouter();
-  const { addProject } = useVibe();
   const [idea, setIdea] = useState("");
   const [focused, setFocused] = useState(false);
   const [typed, setTyped] = useState("");
@@ -53,12 +49,9 @@ export default function Home() {
   }, [idea, focused]);
 
   const submit = () => {
-    const text = idea.trim();
-    if (!text) return;
-    const id = seedId();
-    const name = text.split(/\s+/).slice(0, 5).join(" ").slice(0, 40) || "Untitled project";
-    addProject({ id, name, idea: text, createdAt: new Date().toISOString() });
-    router.push(`/projects/${id}/plan`);
+    if (!idea.trim()) return;
+    setIdea("");
+    fileRef.current && (fileRef.current.value = "");
   };
 
   const attach = async (f: File | undefined) => {
