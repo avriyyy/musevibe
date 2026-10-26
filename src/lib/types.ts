@@ -5,6 +5,7 @@ export interface Project {
   name: string;
   idea: string;
   createdAt: string;
+  lastOpenedAt?: string;
 }
 
 export interface Prd {

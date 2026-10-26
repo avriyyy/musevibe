@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { useVibe, seedId } from "@/lib/store";
 
 const PHRASES = [
   "A habit tracker that never guilt-trips",
@@ -9,11 +10,29 @@ const PHRASES = [
   "A Discord bot for async standups",
 ];
 
+function timeAgo(iso: string | undefined, now: number | null) {
+  if (!iso || now === null) return "…";
+  const s = Math.floor((now - new Date(iso).getTime()) / 1000);
+  if (s < 60) return "just now";
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+}
+
 export default function Home() {
+  const { projects, addProject, touchProject } = useVibe();
   const [idea, setIdea] = useState("");
   const [focused, setFocused] = useState(false);
   const [typed, setTyped] = useState("");
+  const [query, setQuery] = useState("");
+  const [now, setNow] = useState<number | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setNow(Date.now());
+  }, []);
 
   useEffect(() => {
     if (idea || focused) return;
@@ -49,9 +68,13 @@ export default function Home() {
   }, [idea, focused]);
 
   const submit = () => {
-    if (!idea.trim()) return;
+    const text = idea.trim();
+    if (!text) return;
+    const id = seedId();
+    const name = text.split(/\s+/).slice(0, 5).join(" ").slice(0, 40) || "Untitled project";
+    addProject({ id, name, idea: text, createdAt: new Date().toISOString() });
     setIdea("");
-    fileRef.current && (fileRef.current.value = "");
+    if (fileRef.current) fileRef.current.value = "";
   };
 
   const attach = async (f: File | undefined) => {
@@ -60,37 +83,52 @@ export default function Home() {
     setIdea((prev) => (prev ? prev + "\n\n" : "") + `--- ${f.name} ---\n` + text.slice(0, 2000));
   };
 
+  const openProject = (id: string, ideaText: string) => {
+    touchProject(id);
+    setIdea(ideaText);
+  };
+
+  const visible = [...projects]
+    .sort((a, b) => (b.lastOpenedAt || "").localeCompare(a.lastOpenedAt || ""))
+    .filter((p) => {
+      const q = query.trim().toLowerCase();
+      if (!q) return true;
+      return p.name.toLowerCase().includes(q) || p.idea.toLowerCase().includes(q);
+    });
+
   return (
-    <div className="flex-1 flex flex-col bg-[#0b0c10] text-[#f5f6f8]">
-      <header className="px-5 py-3">
+    <div className="h-screen flex flex-col bg-[#0b0c10] text-[#f5f6f8] overflow-hidden">
+      <header className="px-5 py-3 shrink-0">
         <Link href="/" className="text-[15px] font-bold tracking-tight">
           MuseVibe
         </Link>
       </header>
 
-      <main className="flex-1 flex flex-col items-center justify-center px-5 pb-24">
-        <h1 className="text-[32px] leading-tight font-semibold tracking-tight text-center">
+      <main className="flex-1 min-h-0 flex flex-col items-center px-5 pt-10 pb-6">
+        <h1 className="text-[28px] leading-tight font-semibold tracking-tight text-center shrink-0">
           MuseVibe, what are we building?
         </h1>
 
         <div className="w-full max-w-[680px] mt-8 rounded-2xl border border-white/10 bg-[#17181d] shadow-2xl transition-colors focus-within:border-white/25">
-          <textarea
-            id="idea"
-            aria-label="Describe your project idea"
-            value={idea}
-            onChange={(e) => setIdea(e.target.value)}
-            onFocus={() => setFocused(true)}
-            onBlur={() => setFocused(false)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                submit();
-              }
-            }}
-            rows={3}
-            placeholder={idea || focused ? "" : `${typed}▍`}
-            className="composer-scroll w-full bg-transparent px-5 pt-4 pb-2 text-[15px] placeholder:text-[#5b6472] focus:outline-none focus-visible:outline-none resize-none"
-          />
+          <div className="overflow-hidden rounded-t-2xl pt-2 pb-1">
+            <textarea
+              id="idea"
+              aria-label="Describe your project idea"
+              value={idea}
+              onChange={(e) => setIdea(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onBlur={() => setFocused(false)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  submit();
+                }
+              }}
+              rows={3}
+              placeholder={idea || focused ? "" : `${typed}▍`}
+              className="composer-scroll w-full bg-transparent px-5 pt-4 pb-2 text-[15px] placeholder:text-[#5b6472] focus:outline-none focus-visible:outline-none resize-none"
+            />
+          </div>
           <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
             <div>
               <input
@@ -124,6 +162,63 @@ export default function Home() {
             </button>
           </div>
         </div>
+
+        <section aria-label="Recent projects" className="w-full max-w-[680px] mt-6 flex-1 min-h-0 flex flex-col">
+          <div className="relative shrink-0">
+            <svg
+              aria-hidden
+              width="15"
+              height="15"
+              viewBox="0 0 16 16"
+              fill="none"
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#5b6472]"
+            >
+              <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" />
+              <line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search Your Projects"
+              aria-label="Search projects"
+              className="w-full pl-10 pr-4 py-2 rounded-full bg-white/5 border border-white/10 text-[13px] placeholder:text-[#5b6472] focus:outline-none focus:border-white/25"
+            />
+          </div>
+          {visible.length === 0 ? (
+            <p className="mt-3 text-[14px] text-[#5b6472]">
+              {projects.length === 0
+                ? "No projects yet. Describe an idea above to start one."
+                : `No projects match "${query.trim()}".`}
+            </p>
+          ) : (
+            <div className="mt-3 flex-1 min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#17181d]">
+              <ul className="list-scroll h-full divide-y divide-white/10 overflow-y-auto">
+                {visible.map((p) => (
+                  <li key={p.id} className="flex items-center gap-3 px-5 py-3">
+                    <div className="flex-1 min-w-0">
+                      <span className="block text-[14px] font-semibold text-[#f5f6f8] truncate">
+                        {p.name}
+                      </span>
+                      <span className="mt-0.5 block text-[13px] text-[#9aa0ae] truncate">
+                        {p.idea}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-[#5b6472]">
+                        Opened {timeAgo(p.lastOpenedAt, now)}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => openProject(p.id, p.idea)}
+                      aria-label={`Open ${p.name}`}
+                      className="shrink-0 px-4 py-1.5 rounded-full bg-white/10 text-[13px] font-medium text-[#c9cdd6] hover:bg-meta hover:text-white"
+                    >
+                      Open
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </section>
       </main>
     </div>
   );

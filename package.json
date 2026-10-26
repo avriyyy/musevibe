@@ -18,6 +18,7 @@
     "zustand": "^5.0.16"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.3.3",
     "@tailwindcss/turbopack": "^4",
     "@types/jszip": "^3.4.0",
     "@types/node": "^20",
