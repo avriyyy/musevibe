@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useVibe, seedId } from "@/lib/store";
+import ScrollArea from "@/components/ScrollArea";
 
 const PHRASES = [
   "A habit tracker that never guilt-trips",
@@ -110,7 +111,7 @@ export default function Home() {
         </h1>
 
         <div className="w-full max-w-[680px] mt-8 rounded-2xl border border-white/10 bg-[#17181d] shadow-2xl transition-colors focus-within:border-white/25">
-          <div className="overflow-hidden rounded-t-2xl pt-2 pb-1">
+          <div className="scroll-inset rounded-t-2xl">
             <textarea
               id="idea"
               aria-label="Describe your project idea"
@@ -126,7 +127,7 @@ export default function Home() {
               }}
               rows={3}
               placeholder={idea || focused ? "" : `${typed}▍`}
-              className="composer-scroll w-full bg-transparent px-5 pt-4 pb-2 text-[15px] placeholder:text-[#5b6472] focus:outline-none focus-visible:outline-none resize-none"
+              className="scroll-surface w-full bg-transparent px-5 pt-4 pb-2 text-[15px] placeholder:text-[#5b6472] focus:outline-none focus-visible:outline-none resize-none"
             />
           </div>
           <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
@@ -191,32 +192,34 @@ export default function Home() {
                 : `No projects match "${query.trim()}".`}
             </p>
           ) : (
-            <div className="mt-3 flex-1 min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#17181d] p-2">
-              <ul className="list-scroll h-full divide-y divide-white/10 overflow-y-auto rounded-xl">
-                {visible.map((p) => (
-                  <li key={p.id} className="flex items-center gap-3 px-5 py-3">
-                    <div className="flex-1 min-w-0">
-                      <span className="block text-[14px] font-semibold text-[#f5f6f8] truncate">
-                        {p.name}
-                      </span>
-                      <span className="mt-0.5 block text-[13px] text-[#9aa0ae] truncate">
-                        {p.idea}
-                      </span>
-                      <span className="mt-0.5 block text-[11px] text-[#5b6472]">
-                        Opened {timeAgo(p.lastOpenedAt, now)}
-                      </span>
-                    </div>
-                    <button
-                      onClick={() => openProject(p.id, p.idea)}
-                      aria-label={`Open ${p.name}`}
-                      className="shrink-0 px-4 py-1.5 rounded-full bg-white/10 text-[13px] font-medium text-[#c9cdd6] hover:bg-meta hover:text-white"
-                    >
-                      Open
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <ScrollArea
+              as="ul"
+              className="mt-3 flex-1 min-h-0 rounded-2xl border border-white/10 bg-[#17181d]"
+              viewportClassName="divide-y divide-white/10 rounded-xl"
+            >
+              {visible.map((p) => (
+                <li key={p.id} className="flex items-center gap-3 px-5 py-3">
+                  <div className="flex-1 min-w-0">
+                    <span className="block text-[14px] font-semibold text-[#f5f6f8] truncate">
+                      {p.name}
+                    </span>
+                    <span className="mt-0.5 block text-[13px] text-[#9aa0ae] truncate">
+                      {p.idea}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-[#5b6472]">
+                      Opened {timeAgo(p.lastOpenedAt, now)}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => openProject(p.id, p.idea)}
+                    aria-label={`Open ${p.name}`}
+                    className="shrink-0 px-4 py-1.5 rounded-full bg-white/10 text-[13px] font-medium text-[#c9cdd6] hover:bg-meta hover:text-white"
+                  >
+                    Open
+                  </button>
+                </li>
+              ))}
+            </ScrollArea>
           )}
         </section>
       </main>

@@ -27,44 +27,34 @@ body {
   background: rgba(0, 100, 224, 0.2);
 }
 
-/* Shared thin scrollbar for dark surfaces. Chromium and Safari use the
-   pseudo-elements below; the transparent border plus background-clip keeps
-   the thumb inset from the track edges, so it never touches a container
-   border or a rounded corner. Firefox gets the standard properties instead,
-   because setting them disables the custom pseudo-element styling. */
-@supports (-moz-appearance: none) {
-  .composer-scroll,
-  .list-scroll {
-    scrollbar-width: thin;
-    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
-  }
+/* Reusable scroll area. `scroll-inset` keeps the scrollbar away from the
+   frame border so it never touches a rounded corner; `scroll-surface` styles
+   the scrollbar on the element that actually scrolls. */
+.scroll-inset {
+  padding: 0.5rem;
+  overflow: hidden;
 }
 
-.composer-scroll,
-.list-scroll {
+.scroll-surface {
   scrollbar-gutter: stable;
 }
 
-.composer-scroll::-webkit-scrollbar,
-.list-scroll::-webkit-scrollbar {
+.scroll-surface::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
-.composer-scroll::-webkit-scrollbar-track,
-.list-scroll::-webkit-scrollbar-track {
+.scroll-surface::-webkit-scrollbar-track {
   background: transparent;
 }
 
-.composer-scroll::-webkit-scrollbar-button,
-.list-scroll::-webkit-scrollbar-button {
+.scroll-surface::-webkit-scrollbar-button {
   display: none;
   width: 0;
   height: 0;
 }
 
-.composer-scroll::-webkit-scrollbar-thumb,
-.list-scroll::-webkit-scrollbar-thumb {
+.scroll-surface::-webkit-scrollbar-thumb {
   background-color: rgba(255, 255, 255, 0.2);
   border: 3px solid transparent;
   background-clip: content-box;
@@ -72,7 +62,15 @@ body {
   min-height: 32px;
 }
 
-.composer-scroll::-webkit-scrollbar-thumb:hover,
-.list-scroll::-webkit-scrollbar-thumb:hover {
+.scroll-surface::-webkit-scrollbar-thumb:hover {
   background-color: rgba(255, 255, 255, 0.3);
+}
+
+/* Firefox gets the standard properties instead, because setting them
+   disables the custom pseudo-element styling. */
+@supports (-moz-appearance: none) {
+  .scroll-surface {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
+  }
 }
