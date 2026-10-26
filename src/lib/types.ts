@@ -1,3 +1,5 @@
+import type { Platform, Timeline } from "./project-options";
+
 export type TaskStatus = "todo" | "doing" | "done";
 
 export interface Project {
@@ -6,6 +8,8 @@ export interface Project {
   idea: string;
   createdAt: string;
   lastOpenedAt?: string;
+  platform?: Platform;
+  timeline?: Timeline;
 }
 
 export interface Prd {
