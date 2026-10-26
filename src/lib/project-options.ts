@@ -5,7 +5,7 @@ export const PLATFORMS: { value: Platform; label: string; description: string }[
   {
     value: "web",
     label: "Web app",
-    description: "Runs in the browser. The fastest path to a shareable demo.",
+    description: "Runs in the browser. No install for the people who use it.",
   },
   {
     value: "mobile",
