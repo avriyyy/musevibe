@@ -1,16 +1,21 @@
-import React from "react";
 import type { Metadata } from "next";
-import WorkspaceShell from "@/components/workspace/workspace-shell";
+import { SiteFooter, SiteHeader } from "@/components/site-header";
+import WorkspaceFlow from "@/components/workspace-flow";
 
 export const metadata: Metadata = {
-  title: "Workspace Shell — MuseVibe",
-  description: "Interactive graph and execution shell for the MuseVibe 5-stage development pipeline.",
+  title: "Workspace PRD — MuseVibe",
+  description:
+    "Workspace PRD generator: ide, pertanyaan klarifikasi, draft, review per bagian, versi, dan Final.",
 };
 
 export default function WorkspacePage() {
   return (
-    <main className="min-h-screen bg-slate-50 flex flex-col">
-      <WorkspaceShell isFullScreen={true} />
-    </main>
+    <div className="flex min-h-screen flex-col bg-zinc-50">
+      <SiteHeader aktif="workspace" />
+      <main className="flex-1">
+        <WorkspaceFlow />
+      </main>
+      <SiteFooter />
+    </div>
   );
 }
