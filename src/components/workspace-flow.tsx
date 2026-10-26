@@ -146,7 +146,7 @@ export default function WorkspaceFlow() {
       state.versions,
       sections,
       "generate",
-      `Draft dari ide + ${terjawab} jawaban (${state.dilewatiSemua ? "sisanya dilewati" : "tanpa dilewati"}).`,
+      `Draft dari ide + ${terjawab} jawaban (${state.dilewatiSemua ? "sisanya dilewati" : terjawab < 5 ? `${5 - terjawab} pertanyaan belum dijawab (ditulis sebagai asumsi)` : "semua pertanyaan dijawab"}).`,
     );
     setState((s) => ({
       ...s,

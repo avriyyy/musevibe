@@ -11,27 +11,27 @@ export const CLARIFICATION_QUESTIONS: ClarificationQuestion[] = [
   {
     id: "target-user",
     label: "Siapa target pengguna utama produk ini?",
-    hint: "Contoh: karyawan muda yang kesulitan menabung.",
+    hint: "Contoh: tim kecil yang kesulitan mengatur tugas.",
   },
   {
     id: "fitur-inti",
     label: "Sebutkan 3 fitur inti yang wajib ada di versi pertama.",
-    hint: "Contoh: catat pemasukan, catat pengeluaran, laporan bulanan.",
+    hint: "Contoh: buat tugas, papan Kanban, pengingat deadline.",
   },
   {
     id: "batasan",
     label: "Apa batasan penting atau hal yang TIDAK dikerjakan?",
-    hint: "Contoh: tanpa integrasi bank, hanya Android, dikerjakan 1 bulan.",
+    hint: "Contoh: tanpa integrasi pihak ketiga, satu platform dulu, dikerjakan 1 bulan.",
   },
   {
     id: "teknologi",
     label: "Preferensi teknologi atau platform?",
-    hint: "Contoh: aplikasi web, mobile Android, atau keduanya.",
+    hint: "Contoh: aplikasi web, aplikasi mobile, atau keduanya.",
   },
   {
     id: "keberhasilan",
     label: "Bagaimana Anda tahu produk ini berhasil?",
-    hint: "Contoh: 100 pengguna mencatat tiap minggu selama sebulan.",
+    hint: "Contoh: 100 pengguna memakai fitur inti tiap minggu selama sebulan.",
   },
 ];
 
@@ -98,17 +98,17 @@ export function generateDraft(
   const target = jawabanAtauAsumsi(
     answers,
     "target-user",
-    "pengguna umum usia produktif yang butuh pencatatan sederhana (belum divalidasi).",
+    "pengguna umum yang mengalami masalah yang dijelaskan di ide (belum divalidasi).",
   );
   const fitur = jawabanAtauAsumsi(
     answers,
     "fitur-inti",
-    "pencatatan transaksi, ringkasan saldo, dan pengingat budget dasar.",
+    "fitur inti sesuai ide di atas; daftar fitur spesifik belum diisi — lengkapi lewat jawaban klarifikasi atau edit bagian ini.",
   );
   const batas = jawabanAtauAsumsi(
     answers,
     "batasan",
-    "tanpa integrasi bank/e-wallet, single-platform dulu, data tersimpan lokal.",
+    "tanpa integrasi pihak ketiga di versi pertama, satu platform dulu.",
   );
   const teknologi = jawabanAtauAsumsi(
     answers,
@@ -118,7 +118,7 @@ export function generateDraft(
   const hasil = jawabanAtauAsumsi(
     answers,
     "keberhasilan",
-    "pengguna mencatat transaksi minimal 3x seminggu selama sebulan.",
+    "pengguna memakai fitur inti secara rutin selama sebulan pertama (angka pasti belum ditentukan).",
   );
 
   return [
@@ -156,8 +156,8 @@ export function generateDraft(
       id: "halaman-api",
       title: SECTION_TITLES["halaman-api"],
       body: [
-        "Halaman (garis besar): Beranda/ringkasan, Tambah transaksi, Riwayat, Budget & pengingat, Pengaturan.",
-        "API (garis besar): daftar transaksi, tambah transaksi, ubah/hapus transaksi, ringkasan periode, atur budget.",
+        "Halaman (garis besar): Beranda/ringkasan, Halaman utama fitur inti, Daftar data, Detail data, Pengaturan.",
+        "API (garis besar): daftar data, tambah data, ubah/hapus data, ringkasan.",
         "> Asumsi: struktur halaman/API di atas adalah kerangka awal dan bisa berubah saat review.",
       ].join("\n"),
     },
