@@ -1,0 +1,39 @@
+@import "tailwindcss";
+
+@theme {
+  --color-meta: #0064e0;
+  --color-meta-hover: #0143b5;
+  --color-meta-pressed: #004bb9;
+  --color-ink: #1c2b33;
+  --color-muted: #5d6c7b;
+  --color-line: #dee3e9;
+  --color-wash: #f0f2f5;
+  --font-code: var(--font-code), ui-monospace, monospace;
+}
+
+body {
+  background: var(--color-wash);
+  color: var(--color-ink);
+}
+
+@layer base {
+  :focus-visible:not(textarea) {
+    outline: 2px solid var(--color-meta);
+    outline-offset: 2px;
+  }
+}
+
+::selection {
+  background: rgba(0, 100, 224, 0.2);
+}
+
+.composer-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.composer-scroll::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
