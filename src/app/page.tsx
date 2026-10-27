@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useVibe } from "@/lib/store";
+import { initials } from "@/lib/logo";
 import { platformLabel, timelineLabel } from "@/lib/project-options";
 import ScrollArea from "@/components/ScrollArea";
 
@@ -289,6 +290,22 @@ export default function Home() {
             >
               {visible.map((p) => (
                 <li key={p.id} className="flex items-center gap-3 px-5 py-3">
+                  {p.logoUrl ? (
+                    <img
+                      src={p.logoUrl}
+                      alt=""
+                      width={40}
+                      height={40}
+                      className="h-10 w-10 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      aria-hidden
+                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-[14px] font-semibold text-[#c9cdd6]"
+                    >
+                      {initials(p.name)}
+                    </div>
+                  )}
                   <div className="flex-1 min-w-0">
                     <span className="block text-[14px] font-semibold text-[#f5f6f8] truncate">
                       {p.name}

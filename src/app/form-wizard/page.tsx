@@ -59,12 +59,20 @@ import {
   type WizardAnswers,
   type WizardQuestion,
 } from "@/lib/wizard";
+import {
+  buildLogoPrompt,
+  fileToLogoDataUrl,
+  initials,
+  type LogoOrigin,
+  type LogoStatus,
+} from "@/lib/logo";
 import { useVibe } from "@/lib/store";
 
 const STEPS = [
   { label: "Project" },
   { label: "Questions" },
   { label: "Scope", isOptional: true },
+  { label: "Logo", isOptional: true },
   { label: "Review" },
 ];
 
@@ -134,6 +142,14 @@ function Wizard() {
   );
   const [questionSource, setQuestionSource] = useState<QuestionSource>(null);
   const [answers, setAnswers] = useState<WizardAnswers>({});
+
+  const [logoUrl, setLogoUrl] = useState<string | null>(null);
+  const [logoOrigin, setLogoOrigin] = useState<LogoOrigin>(null);
+  const [logoPrompt, setLogoPrompt] = useState("");
+  const [logoStatus, setLogoStatus] = useState<LogoStatus>("idle");
+  const [logoError, setLogoError] = useState("");
+  const logoFileRef = useRef<HTMLInputElement>(null);
+  const logoRequestRef = useRef(0);
 
   const generateQuestions = useCallback(async (ideaText: string) => {
     const trimmed = ideaText.trim();
@@ -205,6 +221,63 @@ function Wizard() {
     setAnswers((current) => ({ ...current, [id]: value }));
   };
 
+  const generateLogo = async () => {
+    const description = logoPrompt.trim();
+    if (!description || logoStatus === "loading") return;
+
+    const requestId = logoRequestRef.current + 1;
+    logoRequestRef.current = requestId;
+    setLogoStatus("loading");
+    setLogoError("");
+
+    try {
+      const response = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "logo",
+          prompt: buildLogoPrompt(description, name.trim() || "Untitled project", idea),
+        }),
+      });
+      if (!response.ok) throw new Error(`Logo request failed: ${response.status}`);
+
+      const data = (await response.json()) as { image?: unknown; source?: unknown };
+      if (requestId !== logoRequestRef.current) return;
+
+      if (typeof data.image === "string" && data.image) {
+        setLogoUrl(data.image);
+        setLogoOrigin("ai");
+        setLogoStatus("ready");
+        return;
+      }
+      setLogoStatus("idle");
+      setLogoError(
+        "The image model is unavailable right now, so no logo was drawn. Your initials stay as the mark, or upload an image instead.",
+      );
+    } catch {
+      if (requestId !== logoRequestRef.current) return;
+      setLogoStatus("idle");
+      setLogoError(
+        "The image model is unavailable right now, so no logo was drawn. Your initials stay as the mark, or upload an image instead.",
+      );
+    }
+  };
+
+  const uploadLogo = async (file: File | undefined) => {
+    if (!file) return;
+    setLogoError("");
+    try {
+      const dataUrl = await fileToLogoDataUrl(file);
+      setLogoUrl(dataUrl);
+      setLogoOrigin("upload");
+      setLogoStatus("ready");
+    } catch (error) {
+      setLogoError(
+        error instanceof Error ? error.message : "That file could not be read as an image.",
+      );
+    }
+  };
+
   const projectErrors: Record<string, string> = {};
   if (!name.trim()) {
     projectErrors.name = "Name the project before you continue.";
@@ -220,7 +293,7 @@ function Wizard() {
     }
   }
 
-  const errorsByStep: Record<string, string>[] = [projectErrors, questionErrors, {}, {}];
+  const errorsByStep: Record<string, string>[] = [projectErrors, questionErrors, {}, {}, {}];
   const shownErrors = (index: number) =>
     attempted.has(index) ? errorsByStep[index] : {};
 
@@ -287,6 +360,7 @@ function Wizard() {
       platform,
       timeline,
       answers: answersList,
+      ...(logoUrl ? { logoUrl } : {}),
     });
     setDraftIdea("");
     router.push("/");
@@ -320,6 +394,11 @@ function Wizard() {
     }
 
     if (step === 2) {
+      setStep(3);
+      return;
+    }
+
+    if (step === 3) {
       setStep(REVIEW_STEP);
       return;
     }
@@ -627,6 +706,109 @@ function Wizard() {
             </VStack>
           )}
 
+          {step === 3 && (
+            <VStack gap={5}>
+              <VStack gap={1}>
+                <Heading level={2}>Give it a mark</Heading>
+                <Text type="supporting" color="secondary">
+                  Describe the logo you want and let the image model draw it,
+                  or upload your own. Skip to keep your initials as the mark.
+                </Text>
+              </VStack>
+
+              <HStack gap={4} vAlign="center">
+                {logoUrl ? (
+                  <img
+                    src={logoUrl}
+                    alt={`Logo for ${name.trim() || "the new project"}`}
+                    width={72}
+                    height={72}
+                    className="h-[72px] w-[72px] shrink-0 rounded-2xl object-cover"
+                  />
+                ) : (
+                  <div
+                    aria-hidden
+                    className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-2xl bg-white/10 text-[24px] font-semibold text-[#c9cdd6]">
+                    {initials(name.trim() || "?")}
+                  </div>
+                )}
+                <VStack gap={1}>
+                  <Text type="label">
+                    {logoUrl
+                      ? logoOrigin === "ai"
+                        ? "Drawn from your description"
+                        : "Uploaded by you"
+                      : "Initials for now"}
+                  </Text>
+                  <Text type="supporting" color="secondary">
+                    {logoUrl
+                      ? "This is the mark stored on the project."
+                      : "Generate or upload to replace it. Skipping is fine."}
+                  </Text>
+                </VStack>
+              </HStack>
+
+              <FormLayout defaultOptionality="optional">
+                <TextArea
+                  label="Describe the logo"
+                  rows={3}
+                  value={logoPrompt}
+                  onChange={setLogoPrompt}
+                  placeholder="A calm circle with a small sprout, deep green on transparent"
+                  description="One or two sentences: motif, colors, mood."
+                />
+              </FormLayout>
+
+              <HStack gap={3} vAlign="center">
+                <Button
+                  label={logoStatus === "loading" ? "Drawing…" : "Generate logo"}
+                  variant="primary"
+                  className="min-h-11 md:min-h-0"
+                  isDisabled={!logoPrompt.trim() || logoStatus === "loading"}
+                  onClick={() => void generateLogo()}
+                />
+                <Button
+                  label="Upload"
+                  variant="secondary"
+                  className="min-h-11 md:min-h-0"
+                  onClick={() => logoFileRef.current?.click()}
+                />
+                <input
+                  ref={logoFileRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
+                  className="hidden"
+                  aria-label="Upload your own logo"
+                  onChange={(event) => {
+                    void uploadLogo(event.target.files?.[0]);
+                    event.target.value = "";
+                  }}
+                />
+              </HStack>
+
+              {logoStatus === "loading" && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="flex items-center gap-3">
+                  <Spinner size="md" />
+                  <Text type="supporting" color="secondary">
+                    Drawing your logo…
+                  </Text>
+                </div>
+              )}
+
+              {logoError && (
+                <Banner
+                  status="error"
+                  title="Logo unavailable"
+                  description={logoError}
+                  collapsible={false}
+                />
+              )}
+            </VStack>
+          )}
+
           {step === REVIEW_STEP && (
             <VStack gap={5}>
               <VStack gap={1}>
@@ -685,6 +867,22 @@ function Wizard() {
                 </MetadataListItem>
                 <MetadataListItem label="Timeline">
                   {timelineLabel(timeline)}
+                </MetadataListItem>
+                <MetadataListItem label="Logo">
+                  {logoUrl ? (
+                    <HStack gap={2} vAlign="center">
+                      <img
+                        src={logoUrl}
+                        alt=""
+                        width={28}
+                        height={28}
+                        className="h-7 w-7 rounded-full object-cover"
+                      />
+                      <span>{logoOrigin === "ai" ? "Drawn by the image model" : "Uploaded"}</span>
+                    </HStack>
+                  ) : (
+                    "Initials"
+                  )}
                 </MetadataListItem>
               </MetadataList>
 

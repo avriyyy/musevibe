@@ -16,6 +16,8 @@ export interface Project {
   platform?: Platform;
   timeline?: Timeline;
   answers?: ProjectAnswer[];
+  /** Image URL or data URL for the project logo. Absent means initials. */
+  logoUrl?: string;
 }
 
 export interface Prd {

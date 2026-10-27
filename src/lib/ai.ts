@@ -4,10 +4,16 @@ import { FALLBACK_QUESTIONS } from "./wizard";
 // Abstraction AI agar bisa swap provider Meta (Muse Spark).
 // Kalau AI_API_URL / AI_API_KEY kosong -> mock lokal, demo tetap jalan.
 
-export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions";
+export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo";
 
 export interface AiGenerateResult {
   text: string;
+  source: "ai" | "local";
+}
+
+export interface AiLogoResult {
+  /** Image URL or data URL, or null when the provider is unavailable. */
+  image: string | null;
   source: "ai" | "local";
 }
 
@@ -41,6 +47,48 @@ export async function aiGenerate(
 
 function local(kind: AiGenerateKind, prompt: string): AiGenerateResult {
   return { text: mockGenerate(kind, prompt), source: "local" };
+}
+
+/**
+ * Ask the image model for a logo. The local path returns no image on purpose:
+ * a mock cannot draw the user's mark, so the wizard falls back to an initials
+ * badge instead of inventing a logo.
+ */
+export async function aiGenerateLogo(prompt: string): Promise<AiLogoResult> {
+  const url = process.env.AI_API_URL;
+  const key = process.env.AI_API_KEY;
+  const model = process.env.AI_IMAGE_MODEL || process.env.AI_MODEL || "muse-spark-1.3";
+
+  if (!url || !key) return { image: null, source: "local" };
+
+  try {
+    const res = await fetch(`${url}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, kind: "logo", prompt }),
+      signal: AbortSignal.timeout(60000),
+    });
+    if (!res.ok) return { image: null, source: "local" };
+
+    const data = (await res.json()) as {
+      imageUrl?: unknown;
+      image?: unknown;
+      text?: unknown;
+    };
+    const raw =
+      typeof data?.imageUrl === "string"
+        ? data.imageUrl
+        : typeof data?.image === "string"
+          ? data.image
+          : typeof data?.text === "string" &&
+              /^data:image\/|^https?:\/\//.test(data.text.trim())
+            ? data.text.trim()
+            : null;
+    if (!raw) return { image: null, source: "local" };
+    return { image: raw, source: "ai" };
+  } catch {
+    return { image: null, source: "local" };
+  }
 }
 
 function mockGenerate(kind: AiGenerateKind, prompt: string): string {
