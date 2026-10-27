@@ -26,7 +26,7 @@ export async function aiGenerate(
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model, kind, prompt }),
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) return local(kind, prompt);
 

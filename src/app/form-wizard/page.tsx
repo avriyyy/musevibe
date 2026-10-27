@@ -326,7 +326,7 @@ function Wizard() {
 
     if (questionsPending) {
       setStep(1);
-      void generateQuestions(idea);
+      if (questionStatus !== "loading") void generateQuestions(idea);
       return;
     }
 
@@ -475,7 +475,7 @@ function Wizard() {
         </LayoutHeader>
       }
       content={
-        <LayoutContent>
+        <LayoutContent key={step}>
           {step === 0 && (
             <VStack gap={5}>
               <VStack gap={1}>
@@ -733,7 +733,10 @@ function Wizard() {
                   }
                   variant="primary"
                   className="min-h-11 md:min-h-0"
-                  isDisabled={step === 1 && questionStatus === "loading"}
+                  isDisabled={
+                    step === 1 &&
+                    (questionStatus === "loading" || questionStatus === "idle")
+                  }
                   onClick={goNext}
                 />
               </HStack>
