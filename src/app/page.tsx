@@ -255,34 +255,25 @@ export default function Home() {
         </div>
 
         <section aria-label="Recent projects" className="w-full max-w-[680px] mt-6 flex-1 min-h-0 flex flex-col">
-          <div className="flex shrink-0 items-center gap-2">
-            <div className="relative flex-1 min-w-0">
-              <svg
-                aria-hidden
-                width="15"
-                height="15"
-                viewBox="0 0 16 16"
-                fill="none"
-                className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#5b6472]"
-              >
-                <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" />
-                <line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search Your Projects"
-                aria-label="Search projects"
-                className="w-full min-h-11 md:min-h-0 pl-10 pr-4 py-2 rounded-full bg-white/5 border border-white/10 text-[13px] placeholder:text-[#5b6472] focus:outline-none focus:border-white/25"
-              />
-            </div>
-            <Link
-              href="/form-wizard"
-              onClick={() => setDraftIdea("")}
-              className="inline-flex shrink-0 items-center rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[13px] font-medium text-[#c9cdd6] min-h-11 md:min-h-0 hover:bg-white/10 hover:text-white"
+          <div className="relative shrink-0">
+            <svg
+              aria-hidden
+              width="15"
+              height="15"
+              viewBox="0 0 16 16"
+              fill="none"
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#5b6472]"
             >
-              New project
-            </Link>
+              <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" />
+              <line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search Your Projects"
+              aria-label="Search projects"
+              className="w-full min-h-11 md:min-h-0 pl-10 pr-4 py-2 rounded-full bg-white/5 border border-white/10 text-[13px] placeholder:text-[#5b6472] focus:outline-none focus:border-white/25"
+            />
           </div>
           {visible.length === 0 ? (
             <p className="mt-3 text-[14px] text-[#5b6472]">
