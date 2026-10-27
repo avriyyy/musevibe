@@ -3,10 +3,12 @@ import type { CodeFile, Project, Screen, Task } from "./types";
 
 interface VibeState {
   projects: Project[];
+  draftIdea: string;
   tasksByProject: Record<string, Task[]>;
   screensByProject: Record<string, Screen[]>;
   filesByProject: Record<string, CodeFile[]>;
   prdByProject: Record<string, string>;
+  setDraftIdea: (idea: string) => void;
   addProject: (p: Project) => void;
   touchProject: (id: string) => void;
   setPrd: (projectId: string, md: string) => void;
@@ -46,6 +48,7 @@ export const seedProjects: Project[] = [
 
 export const useVibe = create<VibeState>((set) => ({
   projects: seedProjects,
+  draftIdea: "",
   tasksByProject: {
     "demo-indie": [
       { id: seedId(), title: "Set up landing + auth", status: "done" },
@@ -67,6 +70,7 @@ export const useVibe = create<VibeState>((set) => ({
   },
   prdByProject: { "demo-indie": "# PRD Demo\n\nProblem: indie devs keep switching tools." },
 
+  setDraftIdea: (idea) => set({ draftIdea: idea }),
   addProject: (p) =>
     set((s) => ({
       projects: [{ ...p, lastOpenedAt: new Date().toISOString() }, ...s.projects],

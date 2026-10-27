@@ -2,6 +2,11 @@ import type { Platform, Timeline } from "./project-options";
 
 export type TaskStatus = "todo" | "doing" | "done";
 
+export interface ProjectAnswer {
+  question: string;
+  answer: string;
+}
+
 export interface Project {
   id: string;
   name: string;
@@ -10,6 +15,7 @@ export interface Project {
   lastOpenedAt?: string;
   platform?: Platform;
   timeline?: Timeline;
+  answers?: ProjectAnswer[];
 }
 
 export interface Prd {

@@ -1,27 +1,53 @@
 import type { Prd } from "./types";
+import { FALLBACK_QUESTIONS } from "./wizard";
 
 // Abstraction AI agar bisa swap provider Meta (Muse Spark).
 // Kalau AI_API_URL / AI_API_KEY kosong -> mock lokal, demo tetap jalan.
 
-export async function aiGenerate(kind: "prd" | "tasks" | "brief" | "code", prompt: string) {
+export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions";
+
+export interface AiGenerateResult {
+  text: string;
+  source: "ai" | "local";
+}
+
+export async function aiGenerate(
+  kind: AiGenerateKind,
+  prompt: string,
+): Promise<AiGenerateResult> {
   const url = process.env.AI_API_URL;
   const key = process.env.AI_API_KEY;
   const model = process.env.AI_MODEL || "muse-spark-1.3";
 
-  if (!url || !key) return mockGenerate(kind, prompt);
+  if (!url || !key) return local(kind, prompt);
 
-  const res = await fetch(`${url}/generate`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, kind, prompt }),
-  });
-  if (!res.ok) return mockGenerate(kind, prompt);
-  const data = await res.json();
-  return data.text as string;
+  try {
+    const res = await fetch(`${url}/generate`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, kind, prompt }),
+      signal: AbortSignal.timeout(15000),
+    });
+    if (!res.ok) return local(kind, prompt);
+
+    const data = (await res.json()) as { text?: unknown };
+    const text = typeof data?.text === "string" ? data.text.trim() : "";
+    if (!text) return local(kind, prompt);
+    return { text, source: "ai" };
+  } catch {
+    return local(kind, prompt);
+  }
 }
 
-function mockGenerate(kind: string, prompt: string): string {
+function local(kind: AiGenerateKind, prompt: string): AiGenerateResult {
+  return { text: mockGenerate(kind, prompt), source: "local" };
+}
+
+function mockGenerate(kind: AiGenerateKind, prompt: string): string {
   const idea = prompt.slice(0, 200);
+  if (kind === "questions") {
+    return JSON.stringify({ questions: FALLBACK_QUESTIONS });
+  }
   if (kind === "prd") {
     return `# PRD draft (local)\n\nIdea: ${idea}\n\n## Problem\nIndie devs need one place for planning, design, and coding without switching tools.\n\n## Users\nSolo indie hackers, hackathon students.\n\n## Features\n- Auto Kanban from PRD\n- 3-screen wireframe\n- Code starter + preview\n\n## Out of scope\n- Realtime collaboration\n- One-click deploy (manual for now)`;
   }

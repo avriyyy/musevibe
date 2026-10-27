@@ -1,7 +1,8 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { useVibe, seedId } from "@/lib/store";
+import { useRouter } from "next/navigation";
+import { useVibe } from "@/lib/store";
 import { platformLabel, timelineLabel } from "@/lib/project-options";
 import ScrollArea from "@/components/ScrollArea";
 
@@ -24,7 +25,8 @@ function timeAgo(iso: string | undefined, now: number | null) {
 }
 
 export default function Home() {
-  const { projects, addProject, touchProject } = useVibe();
+  const router = useRouter();
+  const { projects, setDraftIdea, touchProject } = useVibe();
   const [idea, setIdea] = useState("");
   const [focused, setFocused] = useState(false);
   const [typed, setTyped] = useState("");
@@ -93,11 +95,10 @@ export default function Home() {
   const submit = () => {
     const text = idea.trim();
     if (!text) return;
-    const id = seedId();
-    const name = text.split(/\s+/).slice(0, 5).join(" ").slice(0, 40) || "Untitled project";
-    addProject({ id, name, idea: text, createdAt: new Date().toISOString() });
+    setDraftIdea(text);
     setIdea("");
     if (fileRef.current) fileRef.current.value = "";
+    router.push("/form-wizard");
   };
 
   const attach = async (f: File | undefined) => {
@@ -277,6 +278,7 @@ export default function Home() {
             </div>
             <Link
               href="/form-wizard"
+              onClick={() => setDraftIdea("")}
               className="inline-flex shrink-0 items-center rounded-full border border-white/10 bg-white/5 px-4 py-2 text-[13px] font-medium text-[#c9cdd6] min-h-11 md:min-h-0 hover:bg-white/10 hover:text-white"
             >
               New project
