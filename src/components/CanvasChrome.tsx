@@ -1,12 +1,15 @@
 "use client";
 
 /**
- * Tool rail and zoom controls floating over the custom design canvas.
- * Same eight tools as before, now driving canvas state instead of a
- * library editor. Dark pills on the workspace background.
+ * Canvas chrome for the custom design canvas: a two-button navigation rail
+ * (select + pan) centered at the top, and a top-right cluster with the
+ * overview map next to compact zoom controls. Dark pills on the workspace
+ * background.
  */
 
 import type { ReactElement, ReactNode } from "react";
+import Minimap from "./Minimap";
+import type { CanvasShape, Transform } from "@/lib/canvas";
 
 interface ToolDef {
   id: string;
@@ -50,50 +53,6 @@ const TOOLS: ToolDef[] = [
       </>,
     ),
   },
-  {
-    id: "rectangle",
-    label: "Rectangle",
-    icon: strokeIcon(<rect x="4" y="6" width="16" height="12" rx="1.5" />),
-  },
-  {
-    id: "ellipse",
-    label: "Ellipse",
-    icon: strokeIcon(<circle cx="12" cy="12" r="8" />),
-  },
-  {
-    id: "arrow",
-    label: "Arrow",
-    icon: strokeIcon(
-      <>
-        <line x1="5" y1="19" x2="19" y2="5" />
-        <path d="M9 5h10v10" />
-      </>,
-    ),
-  },
-  {
-    id: "text",
-    label: "Text",
-    icon: strokeIcon(
-      <>
-        <line x1="5" y1="6" x2="19" y2="6" />
-        <line x1="12" y1="6" x2="12" y2="20" />
-      </>,
-    ),
-  },
-  {
-    id: "draw",
-    label: "Draw",
-    icon: strokeIcon(
-      <path d="M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5 4 20z" />,
-    ),
-  },
-  {
-    id: "eraser",
-    label: "Eraser",
-    icon: strokeIcon(
-      <path d="M7 20h11M6.5 15.5l8-8a1.8 1.8 0 0 1 2.5 0l1.5 1.5a1.8 1.8 0 0 1 0 2.5l-6.5 6.5H9l-2.5-2.5z" />,
-    ),
-  },
 ];
 
 export default function CanvasChrome({
@@ -102,21 +61,29 @@ export default function CanvasChrome({
   onZoomIn,
   onZoomOut,
   onFit,
+  shapes,
+  transform,
+  viewport,
+  onNavigate,
 }: {
   tool: string;
   onTool: (id: string) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onFit: () => void;
+  shapes: readonly CanvasShape[];
+  transform: Transform;
+  viewport: { w: number; h: number };
+  onNavigate: (worldX: number, worldY: number) => void;
 }) {
   return (
     <>
-      {/* Tool rail, left. */}
-      <div className="absolute left-3 top-1/2 z-10 -translate-y-1/2">
+      {/* Navigation rail, top center. */}
+      <div className="absolute left-1/2 top-3 z-10 -translate-x-1/2">
         <div
           role="toolbar"
           aria-label="Canvas tools"
-          className="flex flex-col items-center gap-0.5 rounded-2xl border border-white/10 bg-[#17181d]/95 p-1.5 shadow-xl"
+          className="flex items-center gap-0.5 rounded-2xl border border-white/10 bg-[#17181d]/95 p-1.5 shadow-xl"
         >
           {TOOLS.map((entry) => {
             const selected = tool === entry.id;
@@ -141,9 +108,15 @@ export default function CanvasChrome({
         </div>
       </div>
 
-      {/* Zoom controls, bottom left. */}
-      <div className="absolute bottom-4 left-3 z-10">
-        <div className="flex flex-col items-center rounded-2xl border border-white/10 bg-[#17181d]/95 p-1 shadow-xl">
+      {/* Overview map + zoom, top right. */}
+      <div className="absolute right-3 top-3 z-10 flex items-start gap-2">
+        <Minimap
+          shapes={shapes}
+          transform={transform}
+          viewport={viewport}
+          onNavigate={onNavigate}
+        />
+        <div className="flex items-center rounded-2xl border border-white/10 bg-[#17181d]/95 p-1 shadow-xl">
           <button
             type="button"
             title="Zoom in"

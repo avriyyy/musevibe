@@ -23,6 +23,7 @@ import {
   shapeAt,
   type BBox,
   type CanvasShape,
+  type Transform,
 } from "@/lib/canvas";
 
 export const FRAME_W = 960;
@@ -34,12 +35,6 @@ interface DesignCanvasProps {
   /** Current prototype.html content; the frame iframe follows it directly. */
   html: string;
   onShapes: (shapesJson: string) => void;
-}
-
-interface Transform {
-  x: number;
-  y: number;
-  k: number;
 }
 
 type Gesture =
@@ -76,6 +71,7 @@ export default function DesignCanvas({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [panning, setPanning] = useState(false);
+  const [viewport, setViewport] = useState({ w: 0, h: 0 });
 
   const shapesRef = useRef(shapes);
   const transformRef = useRef(transform);
@@ -155,6 +151,38 @@ export default function DesignCanvas({
     fitToScreen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Track the visible size so the overview map draws the viewport box.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const sync = () => {
+      const rect = el.getBoundingClientRect();
+      setViewport((prev) =>
+        prev.w === rect.width && prev.h === rect.height
+          ? prev
+          : { w: rect.width, h: rect.height },
+      );
+    };
+    sync();
+    const observer = new ResizeObserver(sync);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+
+  const navigateTo = useCallback(
+    (worldX: number, worldY: number) => {
+      const el = containerRef.current;
+      const rect = el?.getBoundingClientRect();
+      if (!rect) return;
+      setTransform((prev) => ({
+        ...prev,
+        x: rect.width / 2 - worldX * prev.k,
+        y: rect.height / 2 - worldY * prev.k,
+      }));
+    },
+    [],
+  );
 
   const zoomBy = useCallback((factor: number, cx?: number, cy?: number) => {
     const el = containerRef.current;
@@ -770,6 +798,10 @@ export default function DesignCanvas({
         onZoomIn={() => zoomBy(1.25)}
         onZoomOut={() => zoomBy(1 / 1.25)}
         onFit={fitToScreen}
+        shapes={shapes}
+        transform={transform}
+        viewport={viewport}
+        onNavigate={navigateTo}
       />
     </div>
   );

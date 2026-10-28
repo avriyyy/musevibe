@@ -42,6 +42,13 @@ export const SHAPE_STROKE = "#e8ebf0";
 export const SHAPE_WIDTH = 2;
 export const TEXT_COLOR = "#f5f6f8";
 
+/** Pan + zoom mapping scene coordinates to the screen. */
+export interface Transform {
+  x: number;
+  y: number;
+  k: number;
+}
+
 export function createId(): string {
   if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
     return `shape-${crypto.randomUUID()}`;
