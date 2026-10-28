@@ -37,3 +37,13 @@ create table if not exists files (
   content text not null default '',
   language text not null default 'tsx'
 );
+
+-- The demo keeps every project in localStorage, so these tables have no public
+-- reader or writer yet. RLS with no policies locks them to the service role:
+-- the anon key can no longer read or modify rows. When server sync ships, add
+-- auth.uid() owner policies here rather than disabling RLS again.
+alter table projects enable row level security;
+alter table prds enable row level security;
+alter table tasks enable row level security;
+alter table screens enable row level security;
+alter table files enable row level security;
