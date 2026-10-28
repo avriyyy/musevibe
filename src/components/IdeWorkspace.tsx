@@ -31,8 +31,8 @@ import {
   CheckCircleIcon,
   InboxIcon,
 } from "@heroicons/react/24/outline";
-import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import DocumentsView from "@/components/DocumentsView";
+import { parseCanvasShapes, type CanvasShape } from "@/lib/canvas";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
 import { formatModelLabel } from "@/lib/models";
@@ -169,29 +169,6 @@ async function requestAi(
     text: typeof data.text === "string" ? data.text : "",
     source: data.source === "ai" ? "ai" : "local",
   };
-}
-
-function parseElements(raw: string): readonly ExcalidrawElement[] | null {
-  if (!raw) return null;
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    const list = Array.isArray(parsed)
-      ? parsed
-      : (parsed as { elements?: unknown })?.elements;
-    if (!Array.isArray(list)) return null;
-    const valid = list.filter(
-      (entry): entry is ExcalidrawElement =>
-        !!entry &&
-        typeof entry === "object" &&
-        typeof (entry as { id?: unknown }).id === "string" &&
-        typeof (entry as { type?: unknown }).type === "string",
-    );
-    // Anything else unusable restarts as a fresh canvas.
-    if (valid.length === 0) return null;
-    return valid;
-  } catch {
-    return null;
-  }
 }
 
 export default function IdeWorkspace({ projectId }: { projectId: string }) {
@@ -469,20 +446,20 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     }
   }, [projectId, protoBusy]);
 
-  const handleElements = useCallback(
-    (screenId: string, elementsJson: string) => {
+  const handleShapes = useCallback(
+    (screenId: string, shapesJson: string) => {
       const state = useVibe.getState();
       const current = state.screensByProject[projectId] ?? EMPTY_SCREENS;
       const existing =
         current.find((screen) => screen.id === screenId)?.canvasJson ?? "";
-      // Skip echo saves: the snapshot that seeded the canvas must not be
+      // Skip echo saves: the shapes that seeded the canvas must not be
       // written straight back, or every mount would dirty the store.
-      if (elementsJson === existing) return;
+      if (shapesJson === existing) return;
       state.setScreens(
         projectId,
         current.map((screen) =>
           screen.id === screenId
-            ? { ...screen, canvasJson: elementsJson }
+            ? { ...screen, canvasJson: shapesJson }
             : screen,
         ),
       );
@@ -536,8 +513,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   }, [selectedTaskId]);
   // Referentially stable across renders: a fresh object identity on every
   // render would look like new seeds to the canvas and remount it.
-  const designElements = useMemo(
-    () => parseElements(prototypeScreen?.canvasJson ?? ""),
+  const designShapes = useMemo(
+    () => parseCanvasShapes(prototypeScreen?.canvasJson ?? ""),
     [prototypeScreen?.canvasJson],
   );
 
@@ -776,10 +753,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 {prototypeFile && prototypeScreen ? (
                   <DesignCanvas
                     key={prototypeScreen.id}
-                    initialElements={designElements}
+                    initialShapes={designShapes}
                     html={prototypeFile.content}
-                    onElements={(elementsJson) =>
-                      handleElements(prototypeScreen.id, elementsJson)
+                    onShapes={(shapesJson) =>
+                      handleShapes(prototypeScreen.id, shapesJson)
                     }
                   />
                 ) : (
