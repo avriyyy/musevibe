@@ -2,8 +2,8 @@
 
 /**
  * One plan document: an editable markdown surface with a preview, like a
- * small code editor. AI-generated kinds get a Generate button when empty
- * (and a Regenerate action once filled); custom notes are freeform.
+ * small code editor. AI-kind documents get a Generate button while empty;
+ * custom notes are freeform.
  */
 
 import { useEffect, useState } from "react";
@@ -130,16 +130,6 @@ export default function DocView({
               className="flex h-8 items-center rounded-full bg-white px-3 text-[12px] font-medium text-[#0b0c10] hover:bg-white/90 disabled:opacity-50"
             >
               {generating ? "Writing…" : `Generate with ${modelLabel}`}
-            </button>
-          )}
-          {canGenerate && doc.markdown.trim() && (
-            <button
-              type="button"
-              onClick={onGenerate}
-              disabled={generating}
-              className="flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-[12px] text-[#c9cdd6] hover:bg-white/10 hover:text-white disabled:opacity-50"
-            >
-              {generating ? "Writing…" : "Regenerate"}
             </button>
           )}
           <button

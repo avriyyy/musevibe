@@ -760,42 +760,12 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           {view.kind === "brief" && (
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto w-full max-w-[860px] px-5 pb-20 pt-7">
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#5b6472]">
-                      Plan
-                    </p>
-                    <h2 className="mt-1 text-[22px] font-semibold tracking-tight">
-                      Product brief
-                    </h2>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => void runPlan(true)}
-                    disabled={running}
-                    className="flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-[12px] text-[#c9cdd6] hover:bg-white/10 hover:text-white disabled:opacity-50"
-                  >
-                    {phase === "brief" ? (
-                      <Spinner />
-                    ) : (
-                      <svg
-                        aria-hidden
-                        width="12"
-                        height="12"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="1.8"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M20 11a8 8 0 1 0-2.3 5.7" />
-                        <path d="M20 4v7h-7" />
-                      </svg>
-                    )}
-                    {phase === "brief" ? "Writing" : "Regenerate"}
-                  </button>
-                </div>
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[#5b6472]">
+                  Plan
+                </p>
+                <h2 className="mt-1 text-[22px] font-semibold tracking-tight">
+                  Product brief
+                </h2>
 
                 {briefLocal && (
                   <p className="mt-2 text-[11px] text-[#9aa0ae]">
@@ -989,31 +959,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
 
           {view.kind === "design" && (
             <div className="relative min-h-0 flex-1">
-              {prototypeFile && prototypeScreen && (
-                <button
-                  type="button"
-                  onClick={() => void generatePrototype()}
-                  disabled={protoBusy}
-                  title="Generate the page again from the idea and brief"
-                  className="absolute right-3 top-3 z-10 flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-[#17181d]/95 px-3 text-[12px] text-[#c9cdd6] shadow-xl hover:bg-white/10 hover:text-white disabled:opacity-50"
-                >
-                  <svg
-                    aria-hidden
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="1.8"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M20 11a8 8 0 1 0-2.3 5.7" />
-                    <path d="M20 4v7h-7" />
-                  </svg>
-                  {protoBusy ? "Generating…" : "Regenerate"}
-                </button>
-              )}
               <div className="h-full min-h-0">
                 {prototypeFile && prototypeScreen ? (
                   <DesignCanvas
@@ -1102,25 +1047,6 @@ function Bar({ width }: { width: string }) {
       className="h-3 animate-pulse rounded bg-white/10"
       style={{ width }}
     />
-  );
-}
-
-function Spinner() {
-  return (
-    <svg
-      aria-hidden
-      width="12"
-      height="12"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      className="animate-spin"
-    >
-      <circle cx="12" cy="12" r="9" opacity="0.25" />
-      <path d="M21 12a9 9 0 0 0-9-9" />
-    </svg>
   );
 }
 
