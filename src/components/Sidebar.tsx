@@ -11,7 +11,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
-import { platformLabel, timelineLabel } from "@/lib/project-options";
+import { platformLabel } from "@/lib/project-options";
 import { frameworkLabel } from "@/lib/stack-options";
 
 /** Open a project the same way everywhere: drafts resume, ready ones open. */
@@ -244,8 +244,8 @@ export default function Sidebar({
                               </span>
                             )}
                             <span className="truncate">
-                              {p.platform && p.timeline
-                                ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)}`
+                              {p.platform
+                                ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""}`
                                 : p.status === "draft"
                                   ? "Continue setup"
                                   : ""}

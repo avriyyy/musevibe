@@ -11,7 +11,7 @@ import { useRouter } from "next/navigation";
 import Sidebar, { useOpenProject } from "@/components/Sidebar";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
-import { platformLabel, timelineLabel } from "@/lib/project-options";
+import { platformLabel } from "@/lib/project-options";
 import { frameworkLabel } from "@/lib/stack-options";
 
 export default function ProjectsPage() {
@@ -153,8 +153,8 @@ export default function ProjectsPage() {
                         </span>
                       </span>
                       <span className="hidden shrink-0 text-[11px] text-[#5b6472] sm:block">
-                        {p.platform && p.timeline
-                          ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)}`
+                        {p.platform
+                          ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""}`
                           : p.status === "draft"
                             ? "Continue setup"
                             : ""}

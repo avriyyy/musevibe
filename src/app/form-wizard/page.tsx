@@ -43,7 +43,6 @@ import { useMediaQuery } from "@astryxdesign/core/hooks";
 import {
   PLATFORMS,
   platformLabel,
-  timelineLabel,
   type Platform,
   type Timeline,
 } from "@/lib/project-options";
@@ -1115,9 +1114,6 @@ function Wizard() {
                 </MetadataListItem>
                 <MetadataListItem label="Framework">
                   {frameworkLabel(platform, framework)}
-                </MetadataListItem>
-                <MetadataListItem label="Timeline">
-                  {timelineLabel(timeline)}
                 </MetadataListItem>
                 <MetadataListItem label="Logo">
                   {logoUrl ? (

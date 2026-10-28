@@ -13,7 +13,7 @@ import Markdown from "@/components/Markdown";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
 import { formatModelLabel } from "@/lib/models";
-import { platformLabel, timelineLabel } from "@/lib/project-options";
+import { platformLabel } from "@/lib/project-options";
 import { frameworkLabel } from "@/lib/stack-options";
 import {
   buildPrdPrompt,
@@ -243,7 +243,6 @@ function ProjectView() {
         {project.platform && project.framework && (
           <Chip>{frameworkLabel(project.platform, project.framework)}</Chip>
         )}
-        {project.timeline && <Chip>{timelineLabel(project.timeline)}</Chip>}
         {project.model && (
           <Chip>{formatModelLabel(project.model)}</Chip>
         )}
