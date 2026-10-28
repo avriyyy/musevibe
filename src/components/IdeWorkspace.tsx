@@ -389,23 +389,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     [projectId],
   );
 
-  const saveDocTitle = useCallback(
-    (docId: string, title: string) => {
-      useVibe
-        .getState()
-        .updateDoc(projectId, docId, { title, updatedAt: new Date().toISOString() });
-    },
-    [projectId],
-  );
-
-  const deleteDoc = useCallback(
-    (docId: string) => {
-      useVibe.getState().removeDoc(projectId, docId);
-      setSelectedDocKey((current) => (current === docId ? "brief" : current));
-    },
-    [projectId],
-  );
-
   const addDoc = useCallback(() => {
     const state = useVibe.getState();
     const existing = state.docsByProject[projectId] ?? EMPTY_DOCS;
@@ -756,11 +739,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               modelLabel={
                 project.model ? formatModelLabel(project.model) : "Muse"
               }
-              onTitle={(title) => activeDoc && saveDocTitle(activeDoc.id, title)}
               onMarkdown={(markdown) =>
                 activeDoc && saveDocMarkdown(activeDoc.id, markdown)
               }
-              onDelete={() => activeDoc && deleteDoc(activeDoc.id)}
               onGenerate={() => activeDoc && void generateDoc(activeDoc.id)}
             />
           )}

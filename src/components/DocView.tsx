@@ -12,7 +12,6 @@ import {
   SegmentedControlItem,
 } from "@astryxdesign/core/SegmentedControl";
 import Markdown from "@/components/Markdown";
-import { docFullName } from "@/lib/docs";
 import type { ProjectDoc } from "@/lib/types";
 
 interface DocViewProps {
@@ -20,9 +19,7 @@ interface DocViewProps {
   canGenerate: boolean;
   generating: boolean;
   modelLabel: string;
-  onTitle: (title: string) => void;
   onMarkdown: (markdown: string) => void;
-  onDelete: () => void;
   onGenerate: () => void;
 }
 
@@ -31,9 +28,7 @@ export default function DocView({
   canGenerate,
   generating,
   modelLabel,
-  onTitle,
   onMarkdown,
-  onDelete,
   onGenerate,
 }: DocViewProps) {
   const [mode, setMode] = useState<"edit" | "preview">(
@@ -70,22 +65,7 @@ export default function DocView({
 
   return (
     <div className="mx-auto w-full max-w-[860px] px-5 pb-20 pt-7">
-      <p className="text-[11px] uppercase tracking-[0.14em] text-[#5b6472]">
-        Documents
-      </p>
-      <input
-        value={doc.title}
-        onChange={(event) => onTitle(event.target.value)}
-        aria-label="Document title"
-        placeholder="Untitled document"
-        className="mt-1 w-full bg-transparent text-[22px] font-semibold tracking-tight text-[#f5f6f8] placeholder:text-[#5b6472] focus:outline-none"
-      />
-      <p className="mt-1 text-[12px] text-[#9aa0ae]">
-        {docFullName(doc.kind)}
-        {doc.kind !== "note" && ` · generated from the idea and brief`}
-      </p>
-
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="flex justify-center">
         <SegmentedControl
           label="Document mode"
           value={mode}
@@ -97,27 +77,6 @@ export default function DocView({
           <SegmentedControlItem label="Edit" value="edit" />
           <SegmentedControlItem label="Preview" value="preview" />
         </SegmentedControl>
-        <div className="flex items-center gap-2">
-          {canGenerate && !doc.markdown.trim() && (
-            <button
-              type="button"
-              onClick={onGenerate}
-              disabled={generating}
-              className="flex h-8 items-center rounded-full bg-white px-3 text-[12px] font-medium text-[#0b0c10] hover:bg-white/90 disabled:opacity-50"
-            >
-              {generating ? "Writing…" : `Generate with ${modelLabel}`}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={onDelete}
-            aria-label={`Delete ${doc.title || "document"}`}
-            title="Delete document"
-            className="flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-[12px] text-[#c9cdd6] hover:border-[#f0a6a6]/40 hover:text-[#f0a6a6]"
-          >
-            Delete
-          </button>
-        </div>
       </div>
 
       <div className="mt-4 rounded-2xl border border-white/10 bg-[#17181d] p-5 sm:p-6">

@@ -11,7 +11,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Markdown, { extractHeadings } from "@/components/Markdown";
 import DocView from "@/components/DocView";
-import { docFilename, docLabel } from "@/lib/docs";
+import { docFullName, docLabel } from "@/lib/docs";
 import type { ProjectDoc } from "@/lib/types";
 
 export const BRIEF_KEY = "brief";
@@ -28,9 +28,7 @@ interface DocumentsViewProps {
   canGenerate: boolean;
   generating: boolean;
   modelLabel: string;
-  onTitle: (title: string) => void;
   onMarkdown: (markdown: string) => void;
-  onDelete: () => void;
   onGenerate: () => void;
 }
 
@@ -46,9 +44,7 @@ export default function DocumentsView({
   canGenerate,
   generating,
   modelLabel,
-  onTitle,
   onMarkdown,
-  onDelete,
   onGenerate,
 }: DocumentsViewProps) {
   const centerRef = useRef<HTMLDivElement>(null);
@@ -150,7 +146,7 @@ export default function DocumentsView({
           {docs.map((entry) => (
             <DocChip
               key={entry.id}
-              label={`${docLabel(entry.kind)} — ${entry.title || "Untitled"}`}
+              label={entry.title || docLabel(entry.kind)}
               selected={selectedKey === entry.id}
               onClick={() => onSelect(entry.id)}
             />
@@ -171,8 +167,8 @@ export default function DocumentsView({
           {docs.map((entry) =>
             listButton(
               entry.id,
-              `${docLabel(entry.kind)} — ${entry.title || "Untitled"}`,
-              docFilename(entry.kind, entry.title),
+              entry.title || docLabel(entry.kind),
+              docFullName(entry.kind),
             ),
           )}
           <button
@@ -229,9 +225,7 @@ export default function DocumentsView({
               canGenerate={canGenerate}
               generating={generating}
               modelLabel={modelLabel}
-              onTitle={onTitle}
               onMarkdown={onMarkdown}
-              onDelete={onDelete}
               onGenerate={onGenerate}
             />
           )}
