@@ -123,6 +123,10 @@ export default function Home() {
   };
 
   const openProject = (id: string, ideaText: string) => {
+    if (window.innerWidth < 768) {
+      setNavOpen(false);
+      setNavPinned(false);
+    }
     const project = projects.find((p) => p.id === id);
     if (project?.status === "draft") {
       router.push(`/form-wizard?id=${id}`);
@@ -143,13 +147,16 @@ export default function Home() {
   };
 
   useEffect(() => {
-    if (!navOpen || navPinned) return;
+    if (!navOpen) return;
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setNavOpen(false);
+      if (event.key === "Escape") {
+        setNavOpen(false);
+        setNavPinned(false);
+      }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [navOpen, navPinned]);
+  }, [navOpen]);
 
   const visible = [...projects]
     .sort((a, b) => (b.lastOpenedAt || "").localeCompare(a.lastOpenedAt || ""))
@@ -161,16 +168,21 @@ export default function Home() {
 
   return (
     <div className="h-screen flex bg-[#0b0c10] text-[#f5f6f8] overflow-hidden">
-      <div
-        aria-hidden
-        onMouseEnter={() => setNavOpen(true)}
-        className="fixed inset-y-0 left-0 z-30 hidden w-3 md:block"
-      />
-      {navOpen && !navPinned && (
+      {!navOpen && (
+        <div
+          aria-hidden
+          onMouseEnter={() => setNavOpen(true)}
+          className="fixed inset-y-0 left-0 z-30 hidden w-3 md:block"
+        />
+      )}
+      {navOpen && (
         <button
           type="button"
-          aria-label="Close sidebar"
-          onClick={() => setNavOpen(false)}
+          aria-label="Dismiss sidebar"
+          onClick={() => {
+            setNavOpen(false);
+            setNavPinned(false);
+          }}
           className="fixed inset-0 z-30 bg-black/50 md:hidden"
         />
       )}
@@ -180,11 +192,40 @@ export default function Home() {
         onMouseLeave={() => {
           if (!navPinned) setNavOpen(false);
         }}
-        className={`fixed inset-y-0 left-0 z-40 w-72 shrink-0 overflow-hidden border-r border-white/10 bg-[#0b0c10] transition-transform duration-200 ${
-          navOpen ? "translate-x-0" : "-translate-x-full"
+        className={`fixed inset-y-0 left-0 z-40 w-72 shrink-0 overflow-hidden border-r bg-[#0b0c10] transition-[transform,width] duration-200 ease-out md:static md:translate-x-0 ${
+          navOpen
+            ? "translate-x-0 border-white/10 md:w-72"
+            : "-translate-x-full border-white/10 md:w-0 md:border-0"
         }`}
       >
         <div className="flex h-full w-72 flex-col gap-3 px-4 py-4">
+          <div className="flex items-center justify-between md:hidden">
+            <span className="text-[13px] font-semibold tracking-tight text-[#f5f6f8]">
+              Projects
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setNavOpen(false);
+                setNavPinned(false);
+              }}
+              aria-label="Close sidebar"
+              className="flex h-8 w-8 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[#c9cdd6] hover:bg-white/10 hover:text-white"
+            >
+              <svg
+                aria-hidden
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              >
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </div>
           <div className="relative shrink-0">
             <svg
               aria-hidden
@@ -218,85 +259,131 @@ export default function Home() {
               viewportClassName="divide-y divide-white/10 rounded-xl"
             >
               {visible.map((p) => (
-                <li key={p.id} className="flex items-center gap-2 px-3 py-3">
-                  {p.logoUrl ? (
-                    <img
-                      src={p.logoUrl}
-                      alt=""
-                      width={36}
-                      height={36}
-                      className="h-9 w-9 shrink-0 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div
-                      aria-hidden
-                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-[13px] font-semibold text-[#c9cdd6]"
-                    >
-                      {initials(p.name)}
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <span className="block text-[13px] font-semibold text-[#f5f6f8] truncate">
-                      {p.name}
-                    </span>
-                    <span className="mt-0.5 block text-[12px] text-[#9aa0ae] truncate">
-                      {p.idea}
-                    </span>
-                    <span className="mt-0.5 block text-[10px] text-[#5b6472] truncate">
-                      {p.status === "draft" ? "Draft · continue setup" : ""}
-                      {p.platform && p.timeline
-                        ? `${p.status === "draft" ? " · " : ""}${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)}`
-                        : ""}
-                    </span>
-                  </div>
+                <li key={p.id}>
                   <button
+                    type="button"
                     onClick={() => openProject(p.id, p.idea)}
                     aria-label={p.status === "draft" ? `Continue setting up ${p.name}` : `Open ${p.name}`}
-                    className="shrink-0 px-3 py-1 rounded-full bg-white/10 text-[12px] font-medium text-[#c9cdd6] hover:bg-meta hover:text-white"
+                    className="group flex w-full items-center gap-2.5 px-3 py-3 text-left hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
                   >
-                    {p.status === "draft" ? "Continue" : "Open"}
+                    {p.logoUrl ? (
+                      <img
+                        src={p.logoUrl}
+                        alt=""
+                        width={36}
+                        height={36}
+                        className="h-9 w-9 shrink-0 rounded-full object-cover"
+                      />
+                    ) : (
+                      <span
+                        aria-hidden
+                        className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-[13px] font-semibold text-[#c9cdd6]"
+                      >
+                        {initials(p.name)}
+                      </span>
+                    )}
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[13px] font-semibold text-[#f5f6f8]">
+                        {p.name}
+                      </span>
+                      <span className="mt-0.5 block truncate text-[12px] text-[#9aa0ae]">
+                        {p.idea}
+                      </span>
+                      <span className="mt-1 flex items-center gap-1.5 text-[10px] text-[#5b6472]">
+                        {p.status === "draft" && (
+                          <span className="rounded-full bg-white/10 px-1.5 py-0.5 font-medium text-[#c9cdd6]">
+                            Draft
+                          </span>
+                        )}
+                        <span className="truncate">
+                          {p.platform && p.timeline
+                            ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)}`
+                            : p.status === "draft"
+                              ? "Continue setup"
+                              : ""}
+                        </span>
+                      </span>
+                    </span>
+                    <svg
+                      aria-hidden
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.8"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="shrink-0 text-[#5b6472] opacity-0 transition-opacity group-hover:opacity-100 group-focus-visible:opacity-100"
+                    >
+                      <path d="M9 6l6 6-6 6" />
+                    </svg>
                   </button>
                 </li>
               ))}
             </ScrollArea>
           )}
-          <div ref={profileRef} className="relative mt-auto shrink-0">
+          <div ref={profileRef} className="relative mt-auto shrink-0 border-t border-white/10 pt-3">
             <button
               type="button"
               onClick={() => setProfileOpen((open) => !open)}
               aria-label="Open profile menu"
               aria-expanded={profileOpen}
               aria-controls="profile-menu"
-              className="w-9 h-9 rounded-full border border-white/15 bg-white/5 text-[#c9cdd6] flex items-center justify-center hover:bg-white/10 hover:text-white"
+              className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-white/5"
             >
+              <span
+                aria-hidden
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[#c9cdd6]"
+              >
+                <svg
+                  width="16"
+                  height="16"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                >
+                  <circle cx="12" cy="8.5" r="3.5" />
+                  <path d="M5.5 19.5c0-3.2 2.9-5.2 6.5-5.2s6.5 2 6.5 5.2" />
+                </svg>
+              </span>
+              <span className="min-w-0 flex-1">
+                <span className="block truncate text-[13px] font-semibold text-[#f5f6f8]">
+                  Local workspace
+                </span>
+                <span className="mt-0.5 block truncate text-[11px] text-[#9aa0ae]">
+                  {projects.length} {projects.length === 1 ? "project" : "projects"}
+                </span>
+              </span>
               <svg
                 aria-hidden
-                width="16"
-                height="16"
+                width="14"
+                height="14"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
                 strokeWidth="1.8"
                 strokeLinecap="round"
+                strokeLinejoin="round"
+                className="shrink-0 text-[#5b6472]"
               >
-                <circle cx="12" cy="8.5" r="3.5" />
-                <path d="M5.5 19.5c0-3.2 2.9-5.2 6.5-5.2s6.5 2 6.5 5.2" />
+                <path d="M6 15l6-6 6 6" />
               </svg>
             </button>
 
             {profileOpen && (
               <div
                 id="profile-menu"
-                className="absolute bottom-full right-0 z-50 mb-2 w-60 rounded-2xl border border-white/10 bg-[#17181d] p-1.5 shadow-2xl"
+                className="absolute bottom-full left-0 right-0 z-50 mb-2 rounded-2xl border border-white/10 bg-[#17181d] p-1.5 shadow-2xl"
               >
                 <div className="px-3 py-2.5">
                   <p className="text-[13px] font-semibold text-[#f5f6f8]">
-                    Local session
+                    Local workspace
                   </p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-[#9aa0ae]">
-                    {projects.length}{" "}
-                    {projects.length === 1 ? "project" : "projects"}. Resets when
-                    you reload.
+                    Projects live in this tab only and reset when you reload.
                   </p>
                 </div>
                 <div aria-hidden className="my-1 h-px bg-white/10" />
@@ -330,14 +417,15 @@ export default function Home() {
       </aside>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="px-5 py-3 shrink-0 flex items-center gap-4">
+        <header className="flex h-14 shrink-0 items-center gap-3 px-4">
           <button
             type="button"
             onClick={toggleNav}
             aria-label={navOpen ? "Close sidebar" : "Open sidebar"}
             aria-expanded={navOpen}
             aria-controls="sidebar"
-            className="w-9 h-9 rounded-full border border-white/15 bg-white/5 text-[#c9cdd6] flex items-center justify-center hover:bg-white/10 hover:text-white"
+            title={navOpen ? "Close sidebar" : "Open sidebar"}
+            className="flex h-9 w-9 items-center justify-center rounded-full border border-white/15 bg-white/5 text-[#c9cdd6] hover:bg-white/10 hover:text-white"
           >
             <svg
               aria-hidden
@@ -348,72 +436,74 @@ export default function Home() {
               stroke="currentColor"
               strokeWidth="1.8"
               strokeLinecap="round"
+              strokeLinejoin="round"
             >
-              <line x1="4" y1="7" x2="20" y2="7" />
-              <line x1="4" y1="12" x2="20" y2="12" />
-              <line x1="4" y1="17" x2="20" y2="17" />
+              <rect x="3.5" y="4.5" width="17" height="15" rx="2.5" />
+              <line x1="9.5" y1="4.5" x2="9.5" y2="19.5" />
             </svg>
           </button>
         </header>
 
-        <main className="flex-1 min-h-0 flex flex-col items-center px-5 pt-10 pb-6">
-        <h1 className="text-[28px] leading-tight font-semibold tracking-tight text-center shrink-0">
-          MuseVibe, what are we building?
-        </h1>
+        <main className="flex-1 min-h-0 overflow-y-auto">
+          <div className="mx-auto flex min-h-full w-full max-w-[680px] flex-col justify-center px-5 py-10">
+            <h1 className="text-center text-[28px] font-semibold leading-tight tracking-tight">
+              MuseVibe, what are we building?
+            </h1>
 
-        <div className="w-full max-w-[680px] mt-8 rounded-2xl border border-white/10 bg-[#17181d] shadow-2xl transition-colors focus-within:border-white/25">
-          <div className="scroll-inset rounded-t-2xl">
-            <textarea
-              id="idea"
-              aria-label="Describe your project idea"
-              value={idea}
-              onChange={(e) => setIdea(e.target.value)}
-              onFocus={() => setFocused(true)}
-              onBlur={() => setFocused(false)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
-                  submit();
-                }
-              }}
-              rows={3}
-              placeholder={idea || focused ? "" : `${typed}▍`}
-              className="scroll-surface w-full bg-transparent px-5 pt-4 pb-2 text-[15px] placeholder:text-[#5b6472] focus:outline-none focus-visible:outline-none resize-none"
-            />
-          </div>
-          <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
-            <div>
-              <input
-                ref={fileRef}
-                type="file"
-                accept=".txt,.md,.markdown"
-                className="hidden"
-                aria-hidden
-                tabIndex={-1}
-                onChange={(e) => {
-                  attach(e.target.files?.[0]);
-                  e.target.value = "";
-                }}
-              />
-              <button
-                onClick={() => fileRef.current?.click()}
-                aria-label="Attach a text or markdown file to this idea"
-                title="Attach a .txt or .md file"
-                className="w-9 h-9 rounded-full bg-white/10 text-[20px] leading-none text-[#c9cdd6] hover:bg-white/15 hover:text-white"
-              >
-                +
-              </button>
+            <div className="mt-8 w-full rounded-2xl border border-white/10 bg-[#17181d] shadow-2xl transition-colors focus-within:border-white/25">
+              <div className="scroll-inset rounded-t-2xl">
+                <textarea
+                  id="idea"
+                  aria-label="Describe your project idea"
+                  value={idea}
+                  onChange={(e) => setIdea(e.target.value)}
+                  onFocus={() => setFocused(true)}
+                  onBlur={() => setFocused(false)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      submit();
+                    }
+                  }}
+                  rows={3}
+                  placeholder={idea || focused ? "" : `${typed}▍`}
+                  className="scroll-surface w-full bg-transparent px-5 pt-4 pb-2 text-[15px] placeholder:text-[#5b6472] focus:outline-none focus-visible:outline-none resize-none"
+                />
+              </div>
+              <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-1">
+                <div>
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept=".txt,.md,.markdown"
+                    className="hidden"
+                    aria-hidden
+                    tabIndex={-1}
+                    onChange={(e) => {
+                      attach(e.target.files?.[0]);
+                      e.target.value = "";
+                    }}
+                  />
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    aria-label="Attach a text or markdown file to this idea"
+                    title="Attach a .txt or .md file"
+                    className="w-9 h-9 rounded-full bg-white/10 text-[20px] leading-none text-[#c9cdd6] hover:bg-white/15 hover:text-white"
+                  >
+                    +
+                  </button>
+                </div>
+                <button
+                  onClick={submit}
+                  disabled={!idea.trim() || naming}
+                  aria-label={naming ? "Naming your project" : "Create project from this idea"}
+                  className="w-9 h-9 rounded-full bg-meta text-white text-[18px] leading-none hover:bg-meta-hover active:bg-meta-pressed disabled:opacity-40"
+                >
+                  {naming ? "…" : "↑"}
+                </button>
+              </div>
             </div>
-            <button
-              onClick={submit}
-              disabled={!idea.trim() || naming}
-              aria-label={naming ? "Naming your project" : "Create project from this idea"}
-              className="w-9 h-9 rounded-full bg-meta text-white text-[18px] leading-none hover:bg-meta-hover active:bg-meta-pressed disabled:opacity-40"
-            >
-              {naming ? "…" : "↑"}
-            </button>
           </div>
-        </div>
         </main>
       </div>
     </div>
