@@ -34,7 +34,9 @@ export function formatModelLabel(id: string): string {
   const variantLabel = variant
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(" ");
-  return `Muse ${familyLabel} ${version ?? ""}${variantLabel ? ` ${variantLabel}` : ""}`.trim();
+  // Wonder is the creative model and goes by its family name alone.
+  const versionLabel = family === "wonder" ? "" : (version ?? "");
+  return `Muse ${familyLabel} ${versionLabel}${variantLabel ? ` ${variantLabel}` : ""}`.trim();
 }
 
 export function modelHint(id: string): string {
