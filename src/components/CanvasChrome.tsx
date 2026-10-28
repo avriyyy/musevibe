@@ -2,9 +2,8 @@
 
 /**
  * Shared whiteboard chrome drawn over a hideUi tldraw canvas: a floating
- * tool rail on the left, zoom controls at the bottom left, and a status pill
- * pinned to the top center. Both the plan and the design canvas use it so the
- * two views read as one workspace with two canvases.
+ * tool rail on the left and zoom controls at the bottom left. Both the plan
+ * and the design canvas use it so the two views read as one workspace.
  */
 
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
@@ -113,13 +112,7 @@ function activateTool(editor: Editor, id: string) {
   editor.setCurrentTool(id);
 }
 
-export default function CanvasChrome({
-  editor,
-  status,
-}: {
-  editor: Editor | null;
-  status: string;
-}) {
+export default function CanvasChrome({ editor }: { editor: Editor | null }) {
   const [active, setActive] = useState("select");
 
   useEffect(() => {
@@ -147,13 +140,6 @@ export default function CanvasChrome({
 
   return (
     <>
-      {/* Status pill, top center. */}
-      <div className="pointer-events-none absolute inset-x-0 top-3 z-10 flex justify-center px-4">
-        <p className="max-w-full truncate rounded-full border border-white/10 bg-[#17181d]/95 px-4 py-1.5 text-[12px] text-[#c9cdd6] shadow-xl">
-          {status}
-        </p>
-      </div>
-
       {/* Tool rail, left. */}
       <div className="absolute left-3 top-1/2 z-10 -translate-y-1/2">
         <div

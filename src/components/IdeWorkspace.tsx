@@ -740,14 +740,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 <PlanCanvas
                   key={planScreen.id}
                   initialSnapshot={planSnapshot}
+                  ready={hydrated}
                   boards={planBoards}
-                  status={
-                    running
-                      ? phase === "brief"
-                        ? "Writing the product brief…"
-                        : "Splitting the brief into tasks…"
-                      : `Plan overview · ${docs.length} ${docs.length === 1 ? "document" : "documents"} · select a board to open it`
-                  }
                   onOpenBoard={openBoard}
                   onSnapshot={(snapshot) =>
                     handleSnapshot(planScreen.id, snapshot)
@@ -1016,8 +1010,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                   <DesignCanvas
                     key={prototypeScreen.id}
                     initialSnapshot={designSnapshot}
+                    ready={hydrated}
                     html={prototypeFile.content}
-                    status="Prototype preview · generated from your idea"
                     onSnapshot={(snapshot) =>
                       handleSnapshot(prototypeScreen.id, snapshot)
                     }

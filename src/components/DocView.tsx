@@ -6,7 +6,7 @@
  * (and a Regenerate action once filled); custom notes are freeform.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   SegmentedControl,
   SegmentedControlItem,
@@ -42,40 +42,33 @@ export default function DocView({
     doc.markdown.trim() ? "preview" : "edit",
   );
   const [draft, setDraft] = useState(doc.markdown);
-  const savedRef = useRef(doc.markdown);
+  const [prevDocId, setPrevDocId] = useState(doc.id);
+  const [savedMarkdown, setSavedMarkdown] = useState(doc.markdown);
 
-  // Switching documents resets the editor. Typing stays local; the parent
-  // only hears about it on a debounce so every keystroke is not a write.
-  useEffect(() => {
-    // Intentional one-time sync: the editor resets when its document changes.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+  // Keep the editor in lockstep without effects: when the open document
+  // changes, reset to it; when outside content arrives (AI generation),
+  // adopt it only if it matches neither what was saved nor what is being
+  // typed. This is React's documented adjust-during-render pattern.
+  if (prevDocId !== doc.id) {
+    setPrevDocId(doc.id);
+    setSavedMarkdown(doc.markdown);
     setDraft(doc.markdown);
-    savedRef.current = doc.markdown;
     setMode(doc.markdown.trim() ? "preview" : "edit");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc.id]);
+  } else if (doc.markdown !== savedMarkdown && doc.markdown !== draft) {
+    setSavedMarkdown(doc.markdown);
+    setDraft(doc.markdown);
+    if (doc.markdown.trim()) setMode("preview");
+  }
 
   useEffect(() => {
-    if (draft === savedRef.current) return;
+    if (draft === savedMarkdown) return;
     const timer = setTimeout(() => {
-      savedRef.current = draft;
+      setSavedMarkdown(draft);
       onMarkdown(draft);
     }, 700);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [draft]);
-
-  // Adopt outside changes (AI generation) without disturbing typing: only a
-  // change nobody typed flips back to preview.
-  useEffect(() => {
-    if (doc.markdown === savedRef.current || doc.markdown === draft) return;
-    savedRef.current = doc.markdown;
-    // Intentional sync: adopt generated content the user did not type.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDraft(doc.markdown);
-    if (doc.markdown.trim()) setMode("preview");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc.markdown]);
+  }, [draft, savedMarkdown]);
 
   return (
     <div className="mx-auto w-full max-w-[860px] px-5 pb-20 pt-7">

@@ -9,6 +9,10 @@ import { docLabel } from "./docs";
 
 export interface BoardSpec {
   id: string;
+  /** Figma-style frame label shown above the board. */
+  title: string;
+  /** Page slug shown next to the title, e.g. "/". Empty for documents. */
+  slug: string;
   html: string;
   w: number;
   h: number;
@@ -287,6 +291,8 @@ export function buildPlanBoards(input: PlanBoardInput): BoardSpec[] {
     : "<p>Empty — open the brief to generate it.</p>";
   boards.push({
     id: "shape:board-brief",
+    title: "Product brief",
+    slug: "",
     html: shell("PRODUCT BRIEF · PRD", input.projectName || "Untitled project", briefBody),
     w: 520,
     h: 680,
@@ -295,6 +301,8 @@ export function buildPlanBoards(input: PlanBoardInput): BoardSpec[] {
   });
   boards.push({
     id: "shape:board-tasks",
+    title: "Task board",
+    slug: "",
     html: shell(
       "TASK BOARD",
       `${input.tasks.length} ${input.tasks.length === 1 ? "task" : "tasks"}`,
@@ -313,6 +321,8 @@ export function buildPlanBoards(input: PlanBoardInput): BoardSpec[] {
     const label = docLabel(entry.kind);
     boards.push({
       id: `shape:board-doc-${entry.id}`,
+      title: entry.title || label,
+      slug: "",
       html: shell(
         `${label} · ${entry.title || "Untitled"}`.toUpperCase(),
         entry.title || label,
@@ -331,6 +341,8 @@ export function buildPlanBoards(input: PlanBoardInput): BoardSpec[] {
 export function newDocumentBoard(x: number, y: number): BoardSpec {
   return {
     id: "shape:board-new-doc",
+    title: "New document",
+    slug: "",
     html: `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" /><style>${CARD_CSS}body{background:transparent}.board{border:2px dashed #bbb;border-radius:16px;background:rgba(255,255,255,.7);text-align:center;padding-top:120px}.plus{font-size:44px;color:#888;line-height:1}.hint{font-size:12px;color:#8a8a8a;margin-top:12px}</style></head><body><div class="board"><div class="plus">+</div><div class="hint">Select to add a supporting document</div></div></body></html>`,
     w: 480,
     h: 600,

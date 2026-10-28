@@ -1,9 +1,9 @@
 "use client";
 
 /**
- * A tldraw shape that renders a live HTML preview inside the canvas. The HTML
- * comes from the project's prototype.html file; the shape only carries a copy
- * so the drawing (position, size) persists with the snapshot.
+ * Shared shape for whiteboard artboards: an HTML document rendered live,
+ * with a Figma-style frame label (title plus page slug) floating above it.
+ * The label lives outside the selectable frame box, like Figma frame names.
  */
 
 import {
@@ -15,7 +15,13 @@ import {
 
 declare module "@tldraw/tlschema" {
   export interface TLGlobalShapePropsMap {
-    "html-prototype": { html: string; w: number; h: number };
+    "html-prototype": {
+      html: string;
+      w: number;
+      h: number;
+      title: string;
+      slug: string;
+    };
   }
 }
 
@@ -28,18 +34,65 @@ export class HtmlPrototypeShapeUtil extends BaseBoxShapeUtil<HtmlPrototypeShape>
     html: T.string,
     w: T.number,
     h: T.number,
+    title: T.string,
+    slug: T.string,
   };
 
   override getDefaultProps(): HtmlPrototypeShape["props"] {
-    return { html: "", w: 960, h: 640 };
+    return { html: "", w: 960, h: 640, title: "", slug: "" };
+  }
+
+  override getIndicatorPath(shape: HtmlPrototypeShape) {
+    const path = new Path2D();
+    path.rect(0, 0, shape.props.w, shape.props.h);
+    return path;
   }
 
   override component(shape: HtmlPrototypeShape) {
+    const { html, title, slug } = shape.props;
     return (
       <HTMLContainer>
+        {(title || slug) && (
+          <div
+            style={{
+              position: "absolute",
+              top: -30,
+              left: 0,
+              display: "flex",
+              alignItems: "baseline",
+              gap: 8,
+              pointerEvents: "none",
+              whiteSpace: "nowrap",
+            }}
+          >
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: 600,
+                color: "#e8eaed",
+                fontFamily:
+                  "system-ui, -apple-system, sans-serif",
+              }}
+            >
+              {title}
+            </span>
+            {slug ? (
+              <span
+                style={{
+                  fontSize: 12,
+                  color: "#9aa0ae",
+                  fontFamily:
+                    "ui-monospace, monospace",
+                }}
+              >
+                {slug}
+              </span>
+            ) : null}
+          </div>
+        )}
         <iframe
-          title="App prototype preview"
-          srcDoc={shape.props.html}
+          title={title || "Preview"}
+          srcDoc={html}
           sandbox="allow-scripts"
           style={{
             width: "100%",
@@ -54,10 +107,7 @@ export class HtmlPrototypeShapeUtil extends BaseBoxShapeUtil<HtmlPrototypeShape>
       </HTMLContainer>
     );
   }
-
-  override getIndicatorPath(shape: HtmlPrototypeShape) {
-    const path = new Path2D();
-    path.rect(0, 0, shape.props.w, shape.props.h);
-    return path;
-  }
 }
+
+/** Stable identity across renders: a fresh array would recreate the store. */
+export const HTML_SHAPE_UTILS = [HtmlPrototypeShapeUtil];

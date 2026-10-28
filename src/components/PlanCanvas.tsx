@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * The plan overview canvas: one artboard per plan document (brief, tasks,
- * generated docs), laid out left to right. Selecting a board opens it in
- * the editor; the canvas itself stays a visual map, so its snapshot only
- * carries geometry plus the rendered excerpts.
+ * The plan canvas: one artboard per plan document, laid out in rows, with a
+ * trailing board that creates a supporting note. Selecting a board opens it
+ * in the editor. The canvas is uncontrolled after mount: the snapshot prop
+ * only seeds the first paint, so later store writes never remount it.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -15,16 +15,17 @@ import {
   type TLShapeId,
 } from "@tldraw/tldraw";
 import "@tldraw/tldraw/tldraw.css";
-import { HtmlPrototypeShapeUtil } from "./HtmlShape";
+import { HTML_SHAPE_UTILS } from "./HtmlShape";
 import CanvasChrome from "./CanvasChrome";
 import type { BoardSpec } from "@/lib/boardHtml";
 
 const BOARD_PREFIX = "shape:board-";
 
 interface PlanCanvasProps {
+  /** Snapshot used only to seed the first paint, never re-fed afterwards. */
   initialSnapshot: TLEditorSnapshot | null;
+  ready: boolean;
   boards: BoardSpec[];
-  status: string;
   onOpenBoard: (key: string) => void;
   onSnapshot: (snapshot: TLEditorSnapshot) => void;
 }
@@ -32,24 +33,34 @@ interface PlanCanvasProps {
 function syncBoards(editor: Editor, boards: BoardSpec[]) {
   try {
     for (const board of boards) {
-      const existing = editor.getShape(board.id as TLShapeId);
+      const shapeId = board.id as TLShapeId;
+      const existing = editor.getShape(shapeId);
+      const props = {
+        html: board.html,
+        w: board.w,
+        h: board.h,
+        title: board.title,
+        slug: board.slug,
+      };
       if (!existing) {
         editor.createShape({
-          id: board.id as TLShapeId,
+          id: shapeId,
           type: "html-prototype",
           x: board.x,
           y: board.y,
-          props: { html: board.html, w: board.w, h: board.h },
+          props,
         });
-      } else if (
-        existing.type === "html-prototype" &&
-        (existing.props as { html?: unknown }).html !== board.html
-      ) {
-        editor.updateShape({
-          id: existing.id,
-          type: "html-prototype",
-          props: { html: board.html, w: board.w, h: board.h },
-        });
+      } else if (existing.type === "html-prototype") {
+        const current = (existing.props as Record<string, unknown>) ?? {};
+        if (
+          current.html !== props.html ||
+          current.w !== props.w ||
+          current.h !== props.h ||
+          (current as Record<string, unknown>).title !== props.title ||
+          (current as Record<string, unknown>).slug !== props.slug
+        ) {
+          editor.updateShape({ id: existing.id, type: "html-prototype", props });
+        }
       }
     }
     // Drop boards whose document was deleted.
@@ -70,8 +81,8 @@ function syncBoards(editor: Editor, boards: BoardSpec[]) {
 
 export default function PlanCanvas({
   initialSnapshot,
+  ready,
   boards,
-  status,
   onOpenBoard,
   onSnapshot,
 }: PlanCanvasProps) {
@@ -79,9 +90,12 @@ export default function PlanCanvas({
   const callbackRef = useRef(onSnapshot);
   const boardsRef = useRef(boards);
   const openRef = useRef(onOpenBoard);
+  const snapshotRef = useRef<TLEditorSnapshot | null>(initialSnapshot);
   const unlistenRef = useRef<(() => void) | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const openedRef = useRef<string | null>(null);
+  const settledRef = useRef<string | null>(null);
+  const paintedRef = useRef(false);
+  const touchedRef = useRef(false);
 
   useEffect(() => {
     callbackRef.current = onSnapshot;
@@ -92,17 +106,52 @@ export default function PlanCanvas({
   useEffect(() => {
     openRef.current = onOpenBoard;
   }, [onOpenBoard]);
-
-  // Keep the boards in sync when their content changes.
   useEffect(() => {
-    const instance = editor;
-    if (instance && boards.length > 0) syncBoards(instance, boards);
-  }, [editor, boards]);
+    // Keep the latest snapshot for the one-time seeding below.
+    if (initialSnapshot) snapshotRef.current = initialSnapshot;
+  }, [initialSnapshot]);
+
+  // First paint only: load the saved snapshot when the store has one and
+  // the user has not drawn anything yet, otherwise lay out fresh boards and
+  // fit them in view. Later store updates never touch the live canvas, so a
+  // save echo can never remount it.
+  useEffect(() => {
+    if (!editor || !ready || paintedRef.current) return;
+    paintedRef.current = true;
+    const snap = snapshotRef.current;
+    if (snap && !touchedRef.current) {
+      try {
+        editor.loadSnapshot(snap);
+      } catch {
+        // A snapshot that will not load is replaced by fresh boards below.
+        syncBoards(editor, boardsRef.current);
+        try {
+          editor.zoomToFit();
+        } catch {
+          // Default camera is fine.
+        }
+        return;
+      }
+      const selected = editor.getSelectedShapeIds()[0];
+      settledRef.current = typeof selected === "string" ? selected : null;
+    }
+    syncBoards(editor, boardsRef.current);
+    if (!snap) {
+      try {
+        editor.zoomToFit();
+      } catch {
+        // Default camera is fine.
+      }
+    }
+  }, [editor, ready]);
 
   useEffect(
     () => () => {
       unlistenRef.current?.();
       if (timerRef.current) clearTimeout(timerRef.current);
+      paintedRef.current = false;
+      settledRef.current = null;
+      touchedRef.current = false;
     },
     [],
   );
@@ -110,8 +159,7 @@ export default function PlanCanvas({
   return (
     <div className="relative h-full w-full">
       <Tldraw
-        snapshot={initialSnapshot ?? undefined}
-        shapeUtils={[HtmlPrototypeShapeUtil]}
+        shapeUtils={HTML_SHAPE_UTILS}
         hideUi
         onMount={(instance: Editor) => {
           setEditor(instance);
@@ -120,25 +168,14 @@ export default function PlanCanvas({
           } catch {
             // A canvas that stays light is still usable.
           }
-          if (boardsRef.current.length > 0) {
-            syncBoards(instance, boardsRef.current);
-            if (!initialSnapshot) {
-              try {
-                instance.zoomToFit();
-              } catch {
-                // Default camera is fine.
-              }
-            }
-          }
           unlistenRef.current = instance.store.listen(() => {
+            touchedRef.current = true;
             const [selected] = instance.getSelectedShapeIds();
-            if (
-              typeof selected === "string" &&
-              selected.startsWith(BOARD_PREFIX) &&
-              selected !== openedRef.current
-            ) {
-              openedRef.current = selected;
-              openRef.current(selected.slice(BOARD_PREFIX.length));
+            if (typeof selected === "string" && selected.startsWith(BOARD_PREFIX)) {
+              if (selected !== settledRef.current) {
+                settledRef.current = selected;
+                openRef.current(selected.slice(BOARD_PREFIX.length));
+              }
               return;
             }
             if (timerRef.current) clearTimeout(timerRef.current);
@@ -152,7 +189,7 @@ export default function PlanCanvas({
           });
         }}
       />
-      <CanvasChrome editor={editor} status={status} />
+      <CanvasChrome editor={editor} />
     </div>
   );
 }
