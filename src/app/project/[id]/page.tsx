@@ -213,7 +213,7 @@ function ProjectView() {
     return (
       <Shell project={project}>
         <div className="py-24 text-center">
-          <h1 className="text-[24px] font-semibold">Setup is not finished</h1>
+          <h2 className="text-[24px] font-semibold">Setup is not finished</h2>
           <p className="mx-auto mt-2 max-w-sm text-[13px] text-[#9aa0ae]">
             Pick up the wizard where you left it. The brief is generated once the
             last step is saved.
@@ -445,9 +445,15 @@ function Shell({
           ) : null}
 
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[15px] font-semibold leading-tight">
-              {project?.name ?? "MuseVibe"}
-            </p>
+            {project ? (
+              <h1 className="truncate text-[15px] font-semibold leading-tight">
+                {project.name}
+              </h1>
+            ) : (
+              <p className="truncate text-[15px] font-semibold leading-tight">
+                MuseVibe
+              </p>
+            )}
             {project && (
               <p className="mt-0.5 truncate text-[12px] text-[#9aa0ae]">
                 {project.idea}
