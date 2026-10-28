@@ -24,6 +24,8 @@ export interface Project {
   timeline?: Timeline;
   /** Framework value from the stack picker, e.g. "nextjs". */
   framework?: string;
+  /** Chat model chosen in the composer, reused by the wizard generators. */
+  model?: string;
   answers?: ProjectAnswer[];
   /** Image URL or data URL for the project logo. Absent means initials. */
   logoUrl?: string;

@@ -159,6 +159,7 @@ function Wizard() {
 
   const idea = project?.idea ?? "";
   const name = project?.name ?? "";
+  const projectModel = project?.model;
 
   const questionRefs = useRef<Record<string, HTMLElement | null>>({});
   const submitted = useRef(false);
@@ -240,12 +241,16 @@ function Wizard() {
     let nextSource: QuestionSource = "local";
 
     try {
+      const current = useVibe
+        .getState()
+        .projects.find((item) => item.id === projectIdRef.current);
       const response = await fetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind: "questions",
           prompt: buildQuestionPrompt(trimmed),
+          ...(current?.model ? { model: current.model } : {}),
         }),
       });
       if (!response.ok) throw new Error(`Question request failed: ${response.status}`);
@@ -337,7 +342,11 @@ function Wizard() {
       const response = await fetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind: "stack", prompt: buildStackPrompt(idea, summary) }),
+        body: JSON.stringify({
+          kind: "stack",
+          prompt: buildStackPrompt(idea, summary),
+          ...(projectModel ? { model: projectModel } : {}),
+        }),
       });
       if (!response.ok) throw new Error(`Stack request failed: ${response.status}`);
 
@@ -364,7 +373,7 @@ function Wizard() {
       setPlatform(next.platform);
       setFramework(next.framework);
     }
-  }, [idea, answers, questions, stackFor]);
+  }, [idea, answers, questions, stackFor, projectModel]);
 
   const generateLogo = async () => {
     const description = logoPrompt.trim();

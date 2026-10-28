@@ -17,13 +17,19 @@ export interface AiLogoResult {
   source: "ai" | "local";
 }
 
+/** Text models the picker can send. Anything else falls back to the env default. */
+const TEXT_MODEL = /^muse-(spark|wonder)-[a-z0-9.]+$/;
+
 export async function aiGenerate(
   kind: AiGenerateKind,
   prompt: string,
+  requestedModel?: string,
 ): Promise<AiGenerateResult> {
   const url = process.env.AI_API_URL;
   const key = process.env.AI_API_KEY;
-  const model = process.env.AI_MODEL || "muse-spark-1.3";
+  const envModel = process.env.AI_MODEL || "muse-spark-1.3";
+  const model =
+    requestedModel && TEXT_MODEL.test(requestedModel) ? requestedModel : envModel;
 
   if (!url || !key) return local(kind, prompt);
 

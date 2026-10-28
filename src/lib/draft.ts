@@ -7,7 +7,10 @@
 import { useVibe } from "./store";
 import { buildNamePrompt, deriveProjectName, parseProjectName } from "./wizard";
 
-export async function createDraftProject(ideaText: string): Promise<string> {
+export async function createDraftProject(
+  ideaText: string,
+  model?: string,
+): Promise<string> {
   const trimmed = ideaText.trim();
 
   let name = "";
@@ -15,7 +18,11 @@ export async function createDraftProject(ideaText: string): Promise<string> {
     const response = await fetch("/api/ai/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind: "name", prompt: buildNamePrompt(trimmed) }),
+      body: JSON.stringify({
+        kind: "name",
+        prompt: buildNamePrompt(trimmed),
+        model,
+      }),
     });
     if (response.ok) {
       const data = (await response.json()) as { text?: unknown };
@@ -34,6 +41,7 @@ export async function createDraftProject(ideaText: string): Promise<string> {
     createdAt: new Date().toISOString(),
     status: "draft",
     wizardStep: 0,
+    model,
   });
   return id;
 }
