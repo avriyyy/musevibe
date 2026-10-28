@@ -227,7 +227,7 @@ export default function CanvasChrome({ editor }: { editor: Editor | null }) {
               strokeLinecap="round"
               strokeLinejoin="round"
             >
-              <path d="M4 14h6v6M20 10h-6V4M14 10l7 7M10 10L3 3" />
+              <path d="M4 9V4h5M20 15v5h-5M4 4l6 6M20 20l-6-6" />
             </svg>
           </button>
         </div>

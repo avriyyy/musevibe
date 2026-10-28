@@ -248,12 +248,18 @@ export function tasksBoardHtml(tasks: Task[]): string {
   const columns: { status: TaskStatus; label: string }[] = [
     { status: "todo", label: "To do" },
     { status: "doing", label: "In progress" },
+    { status: "review", label: "In review" },
+    { status: "blocked", label: "Blocked" },
     { status: "done", label: "Done" },
+    { status: "cancelled", label: "Cancelled" },
   ];
   const colors: Record<TaskStatus, string> = {
     todo: "#8a8a8a",
     doing: "#2563eb",
+    review: "#d97706",
+    blocked: "#dc2626",
     done: "#16a34a",
+    cancelled: "#9ca3af",
   };
   const lists = columns
     .map((column) => {

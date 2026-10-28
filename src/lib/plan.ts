@@ -133,7 +133,33 @@ function unwrapJson(raw: unknown): unknown {
 }
 
 function normalizeStatus(value: unknown): TaskStatus {
-  if (value === "doing" || value === "done" || value === "todo") return value;
+  if (typeof value !== "string") return "todo";
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "todo" || normalized === "to-do" || normalized === "backlog") return "todo";
+  if (
+    normalized === "doing" ||
+    normalized === "in-progress" ||
+    normalized === "in_progress" ||
+    normalized === "inprogress"
+  )
+    return "doing";
+  if (
+    normalized === "review" ||
+    normalized === "in-review" ||
+    normalized === "in_review" ||
+    normalized === "testing"
+  )
+    return "review";
+  if (normalized === "blocked" || normalized === "stuck" || normalized === "waiting") return "blocked";
+  if (normalized === "done" || normalized === "complete" || normalized === "completed") return "done";
+  if (
+    normalized === "cancelled" ||
+    normalized === "canceled" ||
+    normalized === "dropped" ||
+    normalized === "failed" ||
+    normalized === "wontfix"
+  )
+    return "cancelled";
   return "todo";
 }
 

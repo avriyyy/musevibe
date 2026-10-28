@@ -1,7 +1,7 @@
 import type { Platform, Timeline } from "./project-options";
 import type { WizardAnswerValue, WizardQuestion } from "./wizard";
 
-export type TaskStatus = "todo" | "doing" | "done";
+export type TaskStatus = "todo" | "doing" | "review" | "blocked" | "done" | "cancelled";
 
 export interface ProjectAnswer {
   qid: string;

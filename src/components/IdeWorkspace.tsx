@@ -90,7 +90,7 @@ const EMPTY_DOCS: ProjectDoc[] = [];
 const COLUMNS: {
   status: TaskStatus;
   label: string;
-  variant: "neutral" | "accent" | "success";
+  variant: "neutral" | "accent" | "warning" | "error" | "success";
   emptyTitle: string;
   emptyDescription: string;
   emptyIcon: typeof InboxIcon;
@@ -112,12 +112,36 @@ const COLUMNS: {
     emptyIcon: InboxIcon,
   },
   {
+    status: "review",
+    label: "In review",
+    variant: "warning",
+    emptyTitle: "Nothing in review",
+    emptyDescription: "Tasks waiting for a check land here.",
+    emptyIcon: InboxIcon,
+  },
+  {
+    status: "blocked",
+    label: "Blocked",
+    variant: "error",
+    emptyTitle: "Nothing blocked",
+    emptyDescription: "Tasks waiting on something land here.",
+    emptyIcon: InboxIcon,
+  },
+  {
     status: "done",
     label: "Done",
     variant: "success",
     emptyTitle: "Nothing done yet",
     emptyDescription: "Finished tasks collect here.",
     emptyIcon: CheckCircleIcon,
+  },
+  {
+    status: "cancelled",
+    label: "Cancelled",
+    variant: "neutral",
+    emptyTitle: "Nothing cancelled",
+    emptyDescription: "Dropped tasks land here.",
+    emptyIcon: InboxIcon,
   },
 ];
 
@@ -694,7 +718,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           aria-label="Workspace views"
           className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 md:flex"
         >
-          {(["plan", "tasks", "design"] as const).map((tab) => {
+          {(["plan", "design", "tasks"] as const).map((tab) => {
             const selected = activeTab === tab;
             return (
               <button
@@ -726,15 +750,15 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             value={activeTab}
             onChange={(next) => {
               if (next === "plan") setView({ kind: "plan" });
-              else if (next === "tasks") setView({ kind: "tasks" });
               else if (next === "design") setView({ kind: "design" });
+              else if (next === "tasks") setView({ kind: "tasks" });
             }}
             size="sm"
             layout="fill"
           >
             <SegmentedControlItem label="Plan" value="plan" />
-            <SegmentedControlItem label="Tasks" value="tasks" />
             <SegmentedControlItem label="Design" value="design" />
+            <SegmentedControlItem label="Tasks" value="tasks" />
           </SegmentedControl>
         </div>
       )}
@@ -848,30 +872,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
 
           {view.kind === "tasks" && (
             <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-[860px] px-5 pb-20 pt-7">
-                <div className="flex flex-wrap items-end justify-between gap-3">
-                  <div>
-                    <p className="text-[11px] uppercase tracking-[0.14em] text-[#5b6472]">
-                      Build
-                    </p>
-                    <h2 className="mt-1 text-[22px] font-semibold tracking-tight">
-                      Task board
-                    </h2>
-                  </div>
-                  <p className="text-[12px] text-[#9aa0ae]">
-                    {phase === "tasks"
-                      ? "Splitting the brief into tasks"
-                      : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`}
-                  </p>
-                </div>
-
+              <div className="mx-auto w-full max-w-[1100px] px-5 pb-20 pt-7">
                 {tasksLocal && (
-                  <p className="mt-2 text-[11px] text-[#9aa0ae]">
+                  <p className="mb-3 text-[11px] text-[#9aa0ae]">
                     Tasks were drafted locally, without the model.
                   </p>
                 )}
 
-                <div className="mt-4 grid items-start gap-3 md:grid-cols-3">
+                <div className="flex items-start gap-3 overflow-x-auto pb-2">
                   {COLUMNS.map((column) => (
                     <TaskColumn
                       key={column.status}
@@ -1013,7 +1021,7 @@ function TaskColumn({
 }) {
   const meta = COLUMNS.find((column) => column.status === status) ?? COLUMNS[0];
   return (
-    <Card variant="muted" padding={0}>
+    <Card variant="muted" padding={0} className="min-w-[260px] flex-1">
       <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2.5">
         <StatusDot variant={meta.variant} label={`${meta.label} status`} />
         <span className="text-[13px] font-semibold text-[#f5f6f8]">
@@ -1043,107 +1051,63 @@ function TaskColumn({
           />
         )}
 
-        {tasks.map((task) => {
-          const index = COLUMNS.findIndex((column) => column.status === task.status);
-          const previous = index > 0 ? COLUMNS[index - 1] : null;
-          const next = index < COLUMNS.length - 1 ? COLUMNS[index + 1] : null;
+        {tasks.map((task) => (
+          <Card key={task.id} className="group">
+            <p
+              className={`text-[13px] font-medium leading-snug ${
+                task.status === "done" || task.status === "cancelled"
+                  ? "text-[#9aa0ae] line-through"
+                  : "text-[#f5f6f8]"
+              }`}
+            >
+              {task.title}
+            </p>
+            {task.notes && (
+              <Text type="supporting" color="secondary" maxLines={3}>
+                {task.notes}
+              </Text>
+            )}
 
-          return (
-            <Card key={task.id} className="group">
-              <p
-                className={`text-[13px] font-medium leading-snug ${
-                  task.status === "done"
-                    ? "text-[#9aa0ae] line-through"
-                    : "text-[#f5f6f8]"
-                }`}
+            <div className="mt-2.5 flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+              <select
+                aria-label={`Move ${task.title} to another status`}
+                value={task.status}
+                onChange={(event) =>
+                  onMove(task, event.target.value as TaskStatus)
+                }
+                className="h-6 min-w-0 flex-1 rounded-md bg-white/5 px-1 text-[11px] text-[#9aa0ae] hover:bg-white/10 hover:text-white focus:outline-none"
               >
-                {task.title}
-              </p>
-              {task.notes && (
-                <Text type="supporting" color="secondary" maxLines={3}>
-                  {task.notes}
-                </Text>
-              )}
-
-              <div className="mt-2.5 flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
-                {previous && (
-                  <MoveButton
-                    label={`Move ${task.title} to ${previous.label}`}
-                    direction="left"
-                    onClick={() => onMove(task, previous.status)}
-                  />
-                )}
-                {next && (
-                  <MoveButton
-                    label={`Move ${task.title} to ${next.label}`}
-                    direction="right"
-                    onClick={() => onMove(task, next.status)}
-                  />
-                )}
-                <button
-                  type="button"
-                  onClick={() => onRemove(task)}
-                  aria-label={`Delete ${task.title}`}
-                  title="Delete task"
-                  className="ml-auto flex h-6 w-6 items-center justify-center rounded-md text-[#5b6472] hover:bg-white/10 hover:text-[#f0a6a6]"
+                {COLUMNS.map((column) => (
+                  <option key={column.status} value={column.status}>
+                    {column.label}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={() => onRemove(task)}
+                aria-label={`Delete ${task.title}`}
+                title="Delete task"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#5b6472] hover:bg-white/10 hover:text-[#f0a6a6]"
+              >
+                <svg
+                  aria-hidden
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
                 >
-                  <svg
-                    aria-hidden
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  >
-                    <path d="M6 6l12 12M18 6L6 18" />
-                  </svg>
-                </button>
-              </div>
-            </Card>
-          );
-        })}
+                  <path d="M6 6l12 12M18 6L6 18" />
+                </svg>
+              </button>
+            </div>
+          </Card>
+        ))}
       </div>
     </Card>
-  );
-}
-
-function MoveButton({
-  label,
-  direction,
-  onClick,
-}: {
-  label: string;
-  direction: "left" | "right";
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-label={label}
-      title={direction === "left" ? "Move back" : "Move forward"}
-      className="flex h-6 w-6 items-center justify-center rounded-md bg-white/5 text-[#9aa0ae] hover:bg-white/10 hover:text-white"
-    >
-      <svg
-        aria-hidden
-        width="12"
-        height="12"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      >
-        {direction === "left" ? (
-          <path d="M15 6l-6 6 6 6" />
-        ) : (
-          <path d="M9 6l6 6-6 6" />
-        )}
-      </svg>
-    </button>
   );
 }
 
