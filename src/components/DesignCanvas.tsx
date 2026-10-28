@@ -77,6 +77,15 @@ export default function DesignCanvas({
   const transformRef = useRef(transform);
   const callbackRef = useRef(onShapes);
   const gestureRef = useRef<Gesture>(null);
+  const pointersRef = useRef(new Map<number, { x: number; y: number }>());
+  const pinchRef = useRef<{
+    dist: number;
+    midX: number;
+    midY: number;
+    k: number;
+    x: number;
+    y: number;
+  } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRef = useRef(draft);
   const seedRef = useRef(
@@ -196,32 +205,29 @@ export default function DesignCanvas({
     });
   }, []);
 
-  const onWheel = useCallback(
-    (event: React.WheelEvent) => {
-      event.preventDefault();
-      const rect = containerRef.current?.getBoundingClientRect();
-      zoomBy(
-        event.deltaY < 0 ? 1.12 : 1 / 1.12,
-        event.clientX - (rect?.left ?? 0),
-        event.clientY - (rect?.top ?? 0),
-      );
-    },
-    [zoomBy],
-  );
-
-  // Non-passive wheel listener: React attaches wheel as passive, which
-  // would ignore preventDefault and scroll nothing useful here anyway.
+  // Wheel: plain scroll pans the canvas (two-finger swipe on a
+  // touchpad), while pinch-to-zoom arrives as ctrl+wheel and zooms to
+  // the cursor. React attaches wheel as passive, so this needs a
+  // non-passive listener to preventDefault.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const handler = (event: WheelEvent) => {
       event.preventDefault();
       const rect = el.getBoundingClientRect();
-      zoomBy(
-        event.deltaY < 0 ? 1.12 : 1 / 1.12,
-        event.clientX - rect.left,
-        event.clientY - rect.top,
-      );
+      if (event.ctrlKey || event.metaKey) {
+        const unit = event.deltaMode === 1 ? 16 : 1;
+        zoomBy(
+          Math.exp(-event.deltaY * unit * 0.004),
+          event.clientX - rect.left,
+          event.clientY - rect.top,
+        );
+        return;
+      }
+      const unit = event.deltaMode === 1 ? 16 : 1;
+      const dx = event.deltaX * unit;
+      const dy = event.deltaY * unit;
+      setTransform((prev) => ({ ...prev, x: prev.x - dx, y: prev.y - dy }));
     };
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
@@ -257,6 +263,29 @@ export default function DesignCanvas({
   const onPointerDown = useCallback(
     (event: React.PointerEvent) => {
       if (editingId) return;
+      // Second touch finger starts a pinch: it takes over whatever the
+      // first finger was doing (a tap becomes a zoom, not a click).
+      if (event.pointerType !== "mouse") {
+        pointersRef.current.set(event.pointerId, {
+          x: event.clientX,
+          y: event.clientY,
+        });
+        if (pointersRef.current.size === 2) {
+          const [a, b] = [...pointersRef.current.values()];
+          const t = transformRef.current;
+          pinchRef.current = {
+            dist: Math.max(1, Math.hypot(a.x - b.x, a.y - b.y)),
+            midX: (a.x + b.x) / 2,
+            midY: (a.y + b.y) / 2,
+            k: t.k,
+            x: t.x,
+            y: t.y,
+          };
+          gestureRef.current = null;
+          return;
+        }
+        if (pointersRef.current.size > 2) return;
+      }
       if (event.button === 1) {
         gestureRef.current = {
           kind: "pan",
@@ -269,7 +298,9 @@ export default function DesignCanvas({
         (event.target as Element).setPointerCapture?.(event.pointerId);
         return;
       }
-      if (event.button !== 0) return;
+      // Touch contacts may report a non-zero button; only the mouse
+      // is gated on it.
+      if (event.button !== 0 && event.pointerType === "mouse") return;
       const pt = toScene(event.clientX, event.clientY);
 
       if (tool === "hand") {
@@ -382,6 +413,32 @@ export default function DesignCanvas({
 
   const onPointerMove = useCallback(
     (event: React.PointerEvent) => {
+      // Pinch: keep the world point under the gesture-start midpoint
+      // under the current midpoint, scaled by the finger spread.
+      if (event.pointerType !== "mouse" && pinchRef.current) {
+        if (pointersRef.current.has(event.pointerId)) {
+          pointersRef.current.set(event.pointerId, {
+            x: event.clientX,
+            y: event.clientY,
+          });
+        }
+        if (pointersRef.current.size >= 2) {
+          const pinch = pinchRef.current;
+          const [a, b] = [...pointersRef.current.values()].slice(0, 2);
+          const dist = Math.max(1, Math.hypot(a.x - b.x, a.y - b.y));
+          const el = containerRef.current;
+          const rect = el?.getBoundingClientRect();
+          const k = Math.min(3, Math.max(0.1, pinch.k * (dist / pinch.dist)));
+          const sx0 = pinch.midX - (rect?.left ?? 0);
+          const sy0 = pinch.midY - (rect?.top ?? 0);
+          const wx = (sx0 - pinch.x) / pinch.k;
+          const wy = (sy0 - pinch.y) / pinch.k;
+          const mx = (a.x + b.x) / 2 - (rect?.left ?? 0);
+          const my = (a.y + b.y) / 2 - (rect?.top ?? 0);
+          setTransform({ k, x: mx - wx * k, y: my - wy * k });
+        }
+        return;
+      }
       const gesture = gestureRef.current;
       if (!gesture) return;
       const pt = toScene(event.clientX, event.clientY);
@@ -498,7 +555,20 @@ export default function DesignCanvas({
     [eraseAt, toScene],
   );
 
-  const endGesture = useCallback(() => {
+  const endGesture = useCallback((event?: React.PointerEvent) => {
+    const pointer = event as React.PointerEvent | undefined;
+    if (pointer && pointer.pointerType !== "mouse") {
+      pointersRef.current.delete(pointer.pointerId);
+      if (pointersRef.current.size > 0) {
+        // Fingers still down: a tap turned into a gesture, so nothing
+        // commits. A fresh press starts the next one.
+        pinchRef.current = null;
+        gestureRef.current = null;
+        setPanning(false);
+        return;
+      }
+      pinchRef.current = null;
+    }
     const gesture = gestureRef.current;
     gestureRef.current = null;
     setPanning(false);
@@ -590,7 +660,6 @@ export default function DesignCanvas({
       onPointerMove={onPointerMove}
       onPointerUp={endGesture}
       onPointerCancel={endGesture}
-      onWheel={onWheel}
       role="application"
       aria-label="Design canvas"
       className="relative h-full w-full touch-none overflow-hidden bg-[#0b0c10] select-none"

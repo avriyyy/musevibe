@@ -116,7 +116,7 @@ export default function CanvasChrome({
           viewport={viewport}
           onNavigate={onNavigate}
         />
-        <div className="flex items-center rounded-2xl border border-white/10 bg-[#17181d]/95 p-1 shadow-xl">
+        <div className="flex flex-col items-center rounded-2xl border border-white/10 bg-[#17181d]/95 p-1 shadow-xl">
           <button
             type="button"
             title="Zoom in"
