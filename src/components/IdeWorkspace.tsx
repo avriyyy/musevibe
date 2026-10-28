@@ -275,12 +275,18 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     (screenId: string, snapshot: TLEditorSnapshot) => {
       const state = useVibe.getState();
       const current = state.screensByProject[projectId] ?? EMPTY_SCREENS;
+      const existing =
+        current.find((screen) => screen.id === screenId)?.canvasJson ?? "";
       let serialized = "";
       try {
         serialized = JSON.stringify(snapshot);
       } catch {
         return;
       }
+      // Skip echo saves: loading a snapshot back into the editor fires the
+      // same listener, and writing it again would remount the canvas in a
+      // loop every few seconds.
+      if (serialized === existing) return;
       state.setScreens(
         projectId,
         current.map((screen) =>
@@ -301,6 +307,12 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         screens[0] ??
         null)
       : null;
+  // Referentially stable across renders: a fresh object identity on every
+  // render would look like a new snapshot to the canvas and remount it.
+  const activeSnapshot = useMemo(
+    () => parseSnapshot(activeScreen?.canvasJson ?? ""),
+    [activeScreen?.canvasJson],
+  );
 
   const tree: TreeListItemData[] = useMemo(() => {
     const sectionIcon = <Icon icon={FolderIcon} size="xsm" />;
@@ -781,7 +793,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               {activeScreen ? (
                 <DesignCanvas
                   key={activeScreen.id}
-                  initialSnapshot={parseSnapshot(activeScreen.canvasJson)}
+                  initialSnapshot={activeSnapshot}
                   onSnapshot={(snapshot) =>
                     handleSnapshot(activeScreen.id, snapshot)
                   }

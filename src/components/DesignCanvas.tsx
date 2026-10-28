@@ -39,6 +39,13 @@ export default function DesignCanvas({
       <Tldraw
         snapshot={initialSnapshot ?? undefined}
         onMount={(editor: Editor) => {
+          // Match the MuseVibe dark workspace. User prefs live in the
+          // editor, so this only needs to run once per canvas mount.
+          try {
+            editor.user.updateUserPreferences({ colorScheme: "dark" });
+          } catch {
+            // A canvas that stays light is still usable.
+          }
           unlistenRef.current = editor.store.listen(() => {
             if (timerRef.current) clearTimeout(timerRef.current);
             timerRef.current = setTimeout(() => {
