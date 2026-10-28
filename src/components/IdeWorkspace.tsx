@@ -871,30 +871,31 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           )}
 
           {view.kind === "tasks" && (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-[1100px] px-5 pb-20 pt-7">
-                {tasksLocal && (
-                  <p className="mb-3 text-[11px] text-[#9aa0ae]">
-                    Tasks were drafted locally, without the model.
-                  </p>
-                )}
+            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-4">
+              {tasksLocal && (
+                <p className="mb-3 shrink-0 text-[11px] text-[#9aa0ae]">
+                  Tasks were drafted locally, without the model.
+                </p>
+              )}
 
-                <div className="flex items-start gap-3 overflow-x-auto pb-2">
-                  {COLUMNS.map((column) => (
-                    <TaskColumn
-                      key={column.status}
-                      status={column.status}
-                      tasks={tasks.filter((task) => task.status === column.status)}
-                      loading={phase === "tasks" && tasks.length === 0}
-                      onMove={(task, next) =>
-                        useVibe.getState().moveTask(projectId, task.id, next)
+              <div className="flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto pb-1">
+                {COLUMNS.map((column) => (
+                  <TaskColumn
+                    key={column.status}
+                    status={column.status}
+                    tasks={tasks.filter((task) => task.status === column.status)}
+                    loading={phase === "tasks" && tasks.length === 0}
+                    onMoveById={(id, next) => {
+                      const task = tasks.find((entry) => entry.id === id);
+                      if (task && task.status !== next) {
+                        useVibe.getState().moveTask(projectId, id, next);
                       }
-                      onRemove={(task) =>
-                        useVibe.getState().removeTask(projectId, task.id)
-                      }
-                    />
-                  ))}
-                </div>
+                    }}
+                    onRemove={(task) =>
+                      useVibe.getState().removeTask(projectId, task.id)
+                    }
+                  />
+                ))}
               </div>
             </div>
           )}
@@ -1010,19 +1011,25 @@ function TaskColumn({
   status,
   tasks,
   loading,
-  onMove,
+  onMoveById,
   onRemove,
 }: {
   status: TaskStatus;
   tasks: Task[];
   loading: boolean;
-  onMove: (task: Task, next: TaskStatus) => void;
+  onMoveById: (id: string, next: TaskStatus) => void;
   onRemove: (task: Task) => void;
 }) {
   const meta = COLUMNS.find((column) => column.status === status) ?? COLUMNS[0];
+  const [draggingId, setDraggingId] = useState<string | null>(null);
+  const [isOver, setIsOver] = useState(false);
   return (
-    <Card variant="muted" padding={0} className="min-w-[260px] flex-1">
-      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2.5">
+    <Card
+      variant="muted"
+      padding={0}
+      className={`flex min-h-0 min-w-[220px] flex-1 flex-col ${isOver ? "border-white/40" : ""}`}
+    >
+      <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2.5">
         <StatusDot variant={meta.variant} label={`${meta.label} status`} />
         <span className="text-[13px] font-semibold text-[#f5f6f8]">
           {meta.label}
@@ -1032,7 +1039,25 @@ function TaskColumn({
         </span>
       </div>
 
-      <div className="flex flex-col gap-2 p-2">
+      <div
+        className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto p-2"
+        onDragOver={(event) => {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = "move";
+          setIsOver(true);
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+            setIsOver(false);
+          }
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          setIsOver(false);
+          const id = event.dataTransfer.getData("text/plain");
+          if (id) onMoveById(id, status);
+        }}
+      >
         {loading && (
           <Card>
             <Bar width="82%" />
@@ -1052,59 +1077,71 @@ function TaskColumn({
         )}
 
         {tasks.map((task) => (
-          <Card key={task.id} className="group">
-            <p
-              className={`text-[13px] font-medium leading-snug ${
-                task.status === "done" || task.status === "cancelled"
-                  ? "text-[#9aa0ae] line-through"
-                  : "text-[#f5f6f8]"
-              }`}
-            >
-              {task.title}
-            </p>
-            {task.notes && (
-              <Text type="supporting" color="secondary" maxLines={3}>
-                {task.notes}
-              </Text>
-            )}
+          <div
+            key={task.id}
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.setData("text/plain", task.id);
+              event.dataTransfer.effectAllowed = "move";
+              setDraggingId(task.id);
+            }}
+            onDragEnd={() => setDraggingId(null)}
+            className={`group cursor-grab active:cursor-grabbing ${draggingId === task.id ? "opacity-50" : ""}`}
+          >
+            <Card>
+              <p
+                className={`text-[13px] font-medium leading-snug ${
+                  task.status === "done" || task.status === "cancelled"
+                    ? "text-[#9aa0ae] line-through"
+                    : "text-[#f5f6f8]"
+                }`}
+              >
+                {task.title}
+              </p>
+              {task.notes && (
+                <Text type="supporting" color="secondary" maxLines={3}>
+                  {task.notes}
+                </Text>
+              )}
 
-            <div className="mt-2.5 flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
-              <select
-                aria-label={`Move ${task.title} to another status`}
-                value={task.status}
-                onChange={(event) =>
-                  onMove(task, event.target.value as TaskStatus)
-                }
-                className="h-6 min-w-0 flex-1 rounded-md bg-white/5 px-1 text-[11px] text-[#9aa0ae] hover:bg-white/10 hover:text-white focus:outline-none"
-              >
-                {COLUMNS.map((column) => (
-                  <option key={column.status} value={column.status}>
-                    {column.label}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => onRemove(task)}
-                aria-label={`Delete ${task.title}`}
-                title="Delete task"
-                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#5b6472] hover:bg-white/10 hover:text-[#f0a6a6]"
-              >
-                <svg
-                  aria-hidden
-                  width="12"
-                  height="12"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
+              <div className="mt-2.5 flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
+                <select
+                  aria-label={`Move ${task.title} to another status`}
+                  value={task.status}
+                  onChange={(event) =>
+                    onMoveById(task.id, event.target.value as TaskStatus)
+                  }
+                  className="h-6 min-w-0 flex-1 rounded-md bg-white/5 px-1 text-[11px] text-[#9aa0ae] hover:bg-white/10 hover:text-white focus:outline-none"
                 >
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-            </div>
-          </Card>
+                  {COLUMNS.map((column) => (
+                    <option key={column.status} value={column.status}>
+                      {column.label}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => onRemove(task)}
+                  aria-label={`Delete ${task.title}`}
+                  title="Delete task"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#5b6472] hover:bg-white/10 hover:text-[#f0a6a6]"
+                >
+                  <svg
+                    aria-hidden
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                  >
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              </div>
+            </Card>
+          </div>
         ))}
       </div>
     </Card>
