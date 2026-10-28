@@ -37,6 +37,7 @@ import {
 import type { TLEditorSnapshot } from "@tldraw/tldraw";
 import Markdown from "@/components/Markdown";
 import DocView from "@/components/DocView";
+import { buildPlanBoards } from "@/lib/boardHtml";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
 import { formatModelLabel } from "@/lib/models";
@@ -75,6 +76,20 @@ const DesignCanvas = dynamic(() => import("@/components/DesignCanvas"), {
   ),
 });
 
+const PlanCanvas = dynamic(() => import("@/components/PlanCanvas"), {
+  ssr: false,
+  loading: () => (
+    <div
+      role="status"
+      aria-live="polite"
+      className="grid h-full place-items-center bg-[#0b0c10]"
+    >
+      <span className="size-5 animate-pulse rounded-full bg-white/30" />
+      <span className="sr-only">Opening the plan canvas</span>
+    </div>
+  ),
+});
+
 const EMPTY_TASKS: Task[] = [];
 const EMPTY_FILES: CodeFile[] = [];
 const EMPTY_SCREENS: Screen[] = [];
@@ -88,6 +103,7 @@ const COLUMNS: { status: TaskStatus; label: string; empty: string }[] = [
 type Phase = "brief" | "tasks" | null;
 
 type View =
+  | { kind: "plan" }
   | { kind: "brief" }
   | { kind: "tasks" }
   | { kind: "code"; fileId: string | null }
@@ -162,7 +178,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     (state) => state.docsByProject[projectId] ?? EMPTY_DOCS,
   );
 
-  const [view, setView] = useState<View>({ kind: "brief" });
+  const [view, setView] = useState<View>({ kind: "plan" });
   const [phase, setPhase] = useState<Phase>(null);
   const [docBusy, setDocBusy] = useState<string | null>(null);
   const [protoBusy, setProtoBusy] = useState(false);
@@ -308,30 +324,43 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     ]);
   }, [project, projectId]);
 
-  // The Design pane keeps exactly one canvas, named Prototype. An older
-  // multi-canvas project adopts its first canvas; the rest stay orphaned in
-  // storage but out of the way.
+  // Plan and Design each keep exactly one canvas. An older multi-canvas
+  // project adopts its first canvas as the Prototype; the rest stay
+  // orphaned in storage but out of the way.
   useEffect(() => {
     if (!project || project.status === "draft") return;
     const state = useVibe.getState();
     const list = state.screensByProject[projectId] ?? EMPTY_SCREENS;
-    if (list.some((screen) => screen.name === "Prototype")) return;
-    if (list.length > 0) {
-      const [first] = list;
-      state.setScreens(projectId, [{ ...first, name: "Prototype" }]);
-      return;
+    const makeId = (prefix: string) =>
+      typeof crypto !== "undefined" && "randomUUID" in crypto
+        ? `${prefix}-${crypto.randomUUID()}`
+        : `${prefix}-${Date.now()}`;
+    const next = [...list];
+    if (!next.some((screen) => screen.name === "Prototype")) {
+      const first = next.find((screen) => screen.name !== "Plan");
+      if (first) {
+        const at = next.indexOf(first);
+        next[at] = { ...first, name: "Prototype" };
+      } else {
+        next.push({
+          id: makeId("screen"),
+          name: "Prototype",
+          canvasJson: "",
+          components: [],
+        });
+      }
     }
-    state.setScreens(projectId, [
-      {
-        id:
-          typeof crypto !== "undefined" && "randomUUID" in crypto
-            ? crypto.randomUUID()
-            : `screen-${Date.now()}`,
-        name: "Prototype",
+    if (!next.some((screen) => screen.name === "Plan")) {
+      next.push({
+        id: makeId("screen"),
+        name: "Plan",
         canvasJson: "",
         components: [],
-      },
-    ]);
+      });
+    }
+    if (next.length !== list.length || next.some((screen, at) => screen !== list[at])) {
+      state.setScreens(projectId, next);
+    }
   }, [project, projectId]);
 
   /** Write a doc and keep the Product brief in sync when it is the PRD. */
@@ -488,10 +517,12 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     view.kind === "code"
       ? (files.find((file) => file.id === view.fileId) ?? files[0] ?? null)
       : null;
-  const activeScreen =
+  const prototypeScreen =
     screens.find((screen) => screen.name === "Prototype") ??
     screens[0] ??
     null;
+  const planScreen =
+    screens.find((screen) => screen.name === "Plan") ?? null;
   const activeDoc =
     view.kind === "doc"
       ? (docs.find((entry) => entry.id === view.docId) ?? null)
@@ -500,10 +531,47 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     files.find((file) => file.path === "prototype.html") ?? null;
   // Referentially stable across renders: a fresh object identity on every
   // render would look like a new snapshot to the canvas and remount it.
-  const activeSnapshot = useMemo(
-    () => parseSnapshot(activeScreen?.canvasJson ?? ""),
-    [activeScreen?.canvasJson],
+  const designSnapshot = useMemo(
+    () => parseSnapshot(prototypeScreen?.canvasJson ?? ""),
+    [prototypeScreen?.canvasJson],
   );
+  const planSnapshot = useMemo(
+    () => parseSnapshot(planScreen?.canvasJson ?? ""),
+    [planScreen?.canvasJson],
+  );
+  const planBoards = useMemo(
+    () =>
+      buildPlanBoards({
+        brief: prd,
+        tasks,
+        docs: docs.map((entry) => ({
+          id: entry.id,
+          kind: entry.kind,
+          title: entry.title,
+          markdown: entry.markdown,
+        })),
+        projectName: project?.name ?? "",
+      }),
+    [prd, tasks, docs, project?.name],
+  );
+
+  const openBoard = useCallback((key: string) => {
+    if (key === "brief") {
+      setView({ kind: "brief" });
+      return;
+    }
+    if (key === "tasks") {
+      setView({ kind: "tasks" });
+      return;
+    }
+    if (key.startsWith("doc-")) {
+      const docId = key.slice("doc-".length);
+      const state = useVibe.getState();
+      if ((state.docsByProject[projectId] ?? []).some((entry) => entry.id === docId)) {
+        setView({ kind: "doc", docId });
+      }
+    }
+  }, [projectId]);
 
   const tree: TreeListItemData[] = useMemo(() => {
     const sectionIcon = <Icon icon={FolderIcon} size="xsm" />;
@@ -516,6 +584,13 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         startContent: sectionIcon,
         isExpanded: true,
         children: [
+          {
+            id: "plan-overview",
+            label: "Overview",
+            startContent: docIcon,
+            isSelected: view.kind === "plan",
+            onClick: () => setView({ kind: "plan" }),
+          },
           {
             id: "plan-brief",
             label: "Product brief",
@@ -588,7 +663,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         children: [
           {
             id: "design-prototype",
-            label: "prototype.html",
+            label: "Prototype",
             startContent: fileIcon,
             isSelected: view.kind === "design",
             onClick: () => setView({ kind: "design" }),
@@ -711,7 +786,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             label="Workspace view"
             value={view.kind === "doc" ? "docs" : view.kind}
             onChange={(next) => {
-              if (next === "brief") setView({ kind: "brief" });
+              if (next === "plan") setView({ kind: "plan" });
+              else if (next === "brief") setView({ kind: "brief" });
               else if (next === "tasks") setView({ kind: "tasks" });
               else if (next === "code")
                 setView({ kind: "code", fileId: files[0]?.id ?? null });
@@ -721,6 +797,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             size="sm"
             layout="fill"
           >
+            <SegmentedControlItem label="Plan" value="plan" />
             <SegmentedControlItem label="Brief" value="brief" />
             <SegmentedControlItem label="Tasks" value="tasks" />
             <SegmentedControlItem label="Code" value="code" />
@@ -784,6 +861,35 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         )}
 
         <main className="flex min-w-0 flex-1 flex-col bg-[#0b0c10]">
+          {view.kind === "plan" && (
+            <div className="min-h-0 flex-1">
+              {planScreen ? (
+                <PlanCanvas
+                  key={planScreen.id}
+                  initialSnapshot={planSnapshot}
+                  boards={planBoards}
+                  status={
+                    running
+                      ? phase === "brief"
+                        ? "Writing the product brief…"
+                        : "Splitting the brief into tasks…"
+                      : `Plan overview · ${docs.length} ${docs.length === 1 ? "document" : "documents"} · select a board to open it`
+                  }
+                  onOpenBoard={openBoard}
+                  onSnapshot={(snapshot) =>
+                    handleSnapshot(planScreen.id, snapshot)
+                  }
+                />
+              ) : (
+                <div className="grid h-full place-items-center">
+                  <p className="text-[13px] text-[#9aa0ae]">
+                    Preparing the plan board…
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
           {view.kind === "brief" && (
             <div className="min-h-0 flex-1 overflow-y-auto">
               <div className="mx-auto w-full max-w-[860px] px-5 pb-20 pt-7">
@@ -1091,13 +1197,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 </button>
               </div>
               <div className="min-h-0 flex-1">
-                {prototypeFile && activeScreen ? (
+                {prototypeFile && prototypeScreen ? (
                   <DesignCanvas
-                    key={activeScreen.id}
-                    initialSnapshot={activeSnapshot}
+                    key={prototypeScreen.id}
+                    initialSnapshot={designSnapshot}
                     html={prototypeFile.content}
+                    status="Prototype preview · generated from your idea"
                     onSnapshot={(snapshot) =>
-                      handleSnapshot(activeScreen.id, snapshot)
+                      handleSnapshot(prototypeScreen.id, snapshot)
                     }
                   />
                 ) : (

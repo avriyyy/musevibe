@@ -3,10 +3,12 @@
 /**
  * tldraw canvas for one design screen. Loaded with ssr:false by the caller
  * because tldraw touches the window at import time. Snapshots are debounced
- * back to the caller, which persists them in the project store.
+ * back to the caller, which persists them in the project store. The stock
+ * tldraw UI is hidden in favor of the shared canvas chrome so the plan and
+ * design canvases read as one workspace.
  */
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Tldraw,
   type Editor,
@@ -15,6 +17,7 @@ import {
 } from "@tldraw/tldraw";
 import "@tldraw/tldraw/tldraw.css";
 import { HtmlPrototypeShapeUtil } from "./HtmlShape";
+import CanvasChrome from "./CanvasChrome";
 
 const PROTOTYPE_SHAPE_ID = "shape:html-prototype" as TLShapeId;
 
@@ -22,6 +25,7 @@ interface DesignCanvasProps {
   initialSnapshot: TLEditorSnapshot | null;
   /** Current prototype.html content; the canvas keeps one shape in sync. */
   html: string;
+  status: string;
   onSnapshot: (snapshot: TLEditorSnapshot) => void;
 }
 
@@ -39,11 +43,10 @@ function syncPrototypeShape(editor: Editor, html: string) {
       });
       return;
     }
-    const current =
-      existing.type === "html-prototype"
-        ? (existing.props as { html?: unknown }).html
-        : null;
-    if (typeof current === "string" && current !== html) {
+    if (
+      existing.type === "html-prototype" &&
+      (existing.props as { html?: unknown }).html !== html
+    ) {
       editor.updateShape({
         id: existing.id,
         type: "html-prototype",
@@ -58,8 +61,10 @@ function syncPrototypeShape(editor: Editor, html: string) {
 export default function DesignCanvas({
   initialSnapshot,
   html,
+  status,
   onSnapshot,
 }: DesignCanvasProps) {
+  const [editor, setEditor] = useState<Editor | null>(null);
   const callbackRef = useRef(onSnapshot);
   const htmlRef = useRef(html);
   const editorRef = useRef<Editor | null>(null);
@@ -75,8 +80,8 @@ export default function DesignCanvas({
   }, [html]);
 
   useEffect(() => {
-    const editor = editorRef.current;
-    if (editor && html) syncPrototypeShape(editor, html);
+    const instance = editorRef.current;
+    if (instance && html) syncPrototypeShape(instance, html);
   }, [html]);
 
   useEffect(
@@ -88,26 +93,28 @@ export default function DesignCanvas({
   );
 
   return (
-    <div className="h-full w-full">
+    <div className="relative h-full w-full">
       <Tldraw
         snapshot={initialSnapshot ?? undefined}
         shapeUtils={[HtmlPrototypeShapeUtil]}
-        onMount={(editor: Editor) => {
-          editorRef.current = editor;
+        hideUi
+        onMount={(instance: Editor) => {
+          setEditor(instance);
+          editorRef.current = instance;
           // Match the MuseVibe dark workspace. User prefs live in the
           // editor, so this only needs to run once per canvas mount.
           try {
-            editor.user.updateUserPreferences({ colorScheme: "dark" });
+            instance.user.updateUserPreferences({ colorScheme: "dark" });
           } catch {
             // A canvas that stays light is still usable.
           }
           const pending = htmlRef.current;
-          if (pending) syncPrototypeShape(editor, pending);
-          unlistenRef.current = editor.store.listen(() => {
+          if (pending) syncPrototypeShape(instance, pending);
+          unlistenRef.current = instance.store.listen(() => {
             if (timerRef.current) clearTimeout(timerRef.current);
             timerRef.current = setTimeout(() => {
               try {
-                callbackRef.current(editor.getSnapshot());
+                callbackRef.current(instance.getSnapshot());
               } catch {
                 // A snapshot that will not serialize is not worth keeping.
               }
@@ -115,6 +122,7 @@ export default function DesignCanvas({
           });
         }}
       />
+      <CanvasChrome editor={editor} status={status} />
     </div>
   );
 }
