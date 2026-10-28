@@ -37,11 +37,6 @@ function strokeIcon(path: ReactNode): ReactElement {
 
 const TOOLS: ToolDef[] = [
   {
-    id: "select",
-    label: "Select",
-    icon: strokeIcon(<path d="M6 3l13 9-7 1.5L8.5 21 6 3z" />),
-  },
-  {
     id: "hand",
     label: "Pan",
     icon: strokeIcon(
@@ -52,6 +47,11 @@ const TOOLS: ToolDef[] = [
         <path d="M8 11l-1.2-1.4a1.5 1.5 0 0 0-2.3 1.9l3.4 4.7A6 6 0 0 0 12.7 19H15a5 5 0 0 0 5-5v-3a1.5 1.5 0 0 0-3 0" />
       </>,
     ),
+  },
+  {
+    id: "select",
+    label: "Select",
+    icon: strokeIcon(<path d="M6 3l13 9-7 1.5L8.5 21 6 3z" />),
   },
 ];
 

@@ -25,6 +25,11 @@ import {
   type CanvasShape,
   type Transform,
 } from "@/lib/canvas";
+import {
+  injectInspector,
+  nodeLabel,
+  type InspectedNode,
+} from "@/lib/prototypeInspect";
 
 export const FRAME_W = 960;
 export const FRAME_H = 640;
@@ -66,12 +71,14 @@ export default function DesignCanvas({
     initialShapes ? [...initialShapes] : [],
   );
   const [transform, setTransform] = useState<Transform>({ x: 0, y: 0, k: 1 });
-  const [tool, setTool] = useState("select");
+  const [tool, setTool] = useState("hand");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [panning, setPanning] = useState(false);
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
+  const [inspected, setInspected] = useState<InspectedNode | null>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const shapesRef = useRef(shapes);
   const transformRef = useRef(transform);
@@ -98,6 +105,52 @@ export default function DesignCanvas({
     callbackRef.current = onShapes;
     draftRef.current = draft;
   });
+
+  // Prototype inspector: Select mode picks components inside the frame.
+  const inspectedHtml = useMemo(() => injectInspector(html), [html]);
+
+  useEffect(() => {
+    const onMessage = (event: MessageEvent) => {
+      const data = (event.data ?? {}) as {
+        type?: unknown;
+      } & Partial<InspectedNode>;
+      if (data.type === "musevibe-select" && typeof data.tag === "string") {
+        setInspected({
+          tag: data.tag,
+          text: typeof data.text === "string" ? data.text : "",
+          id: typeof data.id === "string" ? data.id : null,
+          classes: Array.isArray(data.classes)
+            ? data.classes.filter((c): c is string => typeof c === "string")
+            : [],
+        });
+      } else if (data.type === "musevibe-deselect") {
+        setInspected(null);
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, []);
+
+  // Leaving Select mode or swapping the prototype clears the pick.
+  // Render-phase update (no effect): adjusting to new props during render
+  // never loops because the guard goes false on the immediate re-render.
+  const [prevHtml, setPrevHtml] = useState(html);
+  if (prevHtml !== html) {
+    setPrevHtml(html);
+    setInspected(null);
+  }
+
+  const clearInspected = useCallback(() => {
+    setInspected(null);
+    try {
+      iframeRef.current?.contentWindow?.postMessage(
+        { type: "musevibe-clear" },
+        "*",
+      );
+    } catch {
+      // A frame that will not clear keeps its outline; harmless.
+    }
+  }, []);
 
   // Persist edits, debounced. The seed echo is skipped so mounting never
   // dirties the store.
@@ -405,10 +458,11 @@ export default function DesignCanvas({
         };
         (event.target as Element).setPointerCapture?.(event.pointerId);
       } else {
+        clearInspected();
         setSelectedId(null);
       }
     },
-    [editingId, eraseAt, toScene, tool],
+    [editingId, eraseAt, toScene, tool, clearInspected],
   );
 
   const onPointerMove = useCallback(
@@ -608,12 +662,13 @@ export default function DesignCanvas({
         setShapes((prev) => prev.filter((entry) => entry.id !== selectedId));
         setSelectedId(null);
       } else if (event.key === "Escape") {
+        clearInspected();
         setSelectedId(null);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [editingId, selectedId, commitDraft]);
+  }, [editingId, selectedId, commitDraft, clearInspected]);
 
   const cursor = useMemo(() => {
     if (panning) return "grabbing";
@@ -695,11 +750,13 @@ export default function DesignCanvas({
           </p>
           <div className="h-full w-full overflow-hidden rounded-xl border border-white/15 bg-white shadow-2xl">
             <iframe
+              ref={iframeRef}
               title="Prototype"
-              srcDoc={html}
+              srcDoc={inspectedHtml}
               sandbox="allow-scripts"
               tabIndex={-1}
-              className="pointer-events-none h-full w-full"
+              className="h-full w-full"
+              style={tool === "select" ? undefined : { pointerEvents: "none" }}
             />
           </div>
         </div>
@@ -858,10 +915,39 @@ export default function DesignCanvas({
         />
       )}
 
+      {/* Picked prototype component, bottom center. */}
+      {inspected && !editingId && (
+        <div className="absolute bottom-4 left-1/2 z-10 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-[#17181d]/95 py-1.5 pl-4 pr-1.5 shadow-xl">
+          <span className="truncate text-[12px] font-medium text-[#f5f6f8]">
+            {nodeLabel(inspected)}
+          </span>
+          <button
+            type="button"
+            onClick={clearInspected}
+            aria-label="Clear selected component"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+          >
+            <svg
+              aria-hidden
+              width="11"
+              height="11"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+            >
+              <path d="M6 6l12 12M18 6L6 18" />
+            </svg>
+          </button>
+        </div>
+      )}
+
       <CanvasChrome
         tool={tool}
         onTool={(next) => {
           if (editingId) commitDraft();
+          if (next !== "select") clearInspected();
           setTool(next);
         }}
         onZoomIn={() => zoomBy(1.25)}
