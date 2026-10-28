@@ -15,17 +15,6 @@ const PHRASES = [
   "A Discord bot for async standups",
 ];
 
-function timeAgo(iso: string | undefined, now: number | null) {
-  if (!iso || now === null) return "…";
-  const s = Math.floor((now - new Date(iso).getTime()) / 1000);
-  if (s < 60) return "just now";
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ago`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
-
 export default function Home() {
   const router = useRouter();
   const { projects, touchProject } = useVibe();
@@ -33,7 +22,6 @@ export default function Home() {
   const [focused, setFocused] = useState(false);
   const [typed, setTyped] = useState("");
   const [query, setQuery] = useState("");
-  const [now, setNow] = useState<number | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   // Default open: the initializer runs during prerender without a real
   // viewport, so a width check here would stick forever. The mount effect
@@ -51,11 +39,6 @@ export default function Home() {
   }, []);
   const fileRef = useRef<HTMLInputElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const frame = requestAnimationFrame(() => setNow(Date.now()));
-    return () => cancelAnimationFrame(frame);
-  }, []);
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -262,11 +245,10 @@ export default function Home() {
                       {p.idea}
                     </span>
                     <span className="mt-0.5 block text-[10px] text-[#5b6472] truncate">
-                      {p.status === "draft" ? "Draft · continue setup · " : ""}
+                      {p.status === "draft" ? "Draft · continue setup" : ""}
                       {p.platform && p.timeline
-                        ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)} · `
+                        ? `${p.status === "draft" ? " · " : ""}${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)}`
                         : ""}
-                      Opened {timeAgo(p.lastOpenedAt, now)}
                     </span>
                   </div>
                   <button
