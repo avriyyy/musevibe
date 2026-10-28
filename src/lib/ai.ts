@@ -54,7 +54,9 @@ async function providerText(
       body: JSON.stringify({
         model,
         messages: [{ role: "user", content: prompt }],
-        max_tokens: 4000,
+        // Reasoning models spend most of this budget before writing an answer.
+        // At 4000 the longest PRDs ran out mid-reasoning and came back empty.
+        max_tokens: 8000,
       }),
       signal: AbortSignal.timeout(90000),
     });
