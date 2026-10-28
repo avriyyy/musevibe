@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
@@ -36,6 +35,20 @@ export default function Home() {
   const [query, setQuery] = useState("");
   const [now, setNow] = useState<number | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
+  // Default open: the initializer runs during prerender without a real
+  // viewport, so a width check here would stick forever. The mount effect
+  // below corrects it on small screens.
+  const [navOpen, setNavOpen] = useState(true);
+  const [navPinned, setNavPinned] = useState(true);
+
+  useEffect(() => {
+    if (window.innerWidth >= 768) return;
+    const frame = requestAnimationFrame(() => {
+      setNavOpen(false);
+      setNavPinned(false);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const fileRef = useRef<HTMLInputElement>(null);
   const profileRef = useRef<HTMLDivElement>(null);
 
@@ -136,6 +149,25 @@ export default function Home() {
     setIdea(ideaText);
   };
 
+  const toggleNav = () => {
+    if (navPinned) {
+      setNavPinned(false);
+      setNavOpen(false);
+    } else {
+      setNavPinned(true);
+      setNavOpen(true);
+    }
+  };
+
+  useEffect(() => {
+    if (!navOpen || navPinned) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setNavOpen(false);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [navOpen, navPinned]);
+
   const visible = [...projects]
     .sort((a, b) => (b.lastOpenedAt || "").localeCompare(a.lastOpenedAt || ""))
     .filter((p) => {
@@ -145,19 +177,186 @@ export default function Home() {
     });
 
   return (
-    <div className="h-screen flex flex-col bg-[#0b0c10] text-[#f5f6f8] overflow-hidden">
-      <header className="px-5 py-3 shrink-0 flex items-center justify-between gap-4">
-        <Link href="/" className="text-[15px] font-bold tracking-tight">
-          MuseVibe
-        </Link>
+    <div className="h-screen flex bg-[#0b0c10] text-[#f5f6f8] overflow-hidden">
+      <div
+        aria-hidden
+        onMouseEnter={() => setNavOpen(true)}
+        className="fixed inset-y-0 left-0 z-30 hidden w-3 md:block"
+      />
+      {navOpen && !navPinned && (
+        <button
+          type="button"
+          aria-label="Close sidebar"
+          onClick={() => setNavOpen(false)}
+          className="fixed inset-0 z-30 bg-black/50 md:hidden"
+        />
+      )}
+      <aside
+        id="sidebar"
+        aria-label="Projects"
+        onMouseLeave={() => {
+          if (!navPinned) setNavOpen(false);
+        }}
+        className={`fixed inset-y-0 left-0 z-40 w-72 shrink-0 overflow-hidden bg-[#0b0c10] transition-[width,transform] duration-200 md:static ${
+          navOpen
+            ? "translate-x-0 border-r border-white/10 md:w-72"
+            : "-translate-x-full border-r border-white/10 md:translate-x-0 md:w-0 md:border-0"
+        }`}
+      >
+        <div className="flex h-full w-72 flex-col gap-3 px-4 py-4">
+          <div className="relative shrink-0">
+            <svg
+              aria-hidden
+              width="15"
+              height="15"
+              viewBox="0 0 16 16"
+              fill="none"
+              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#5b6472]"
+            >
+              <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" />
+              <line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search Your Projects"
+              aria-label="Search projects"
+              className="w-full min-h-11 md:min-h-0 pl-10 pr-4 py-2 rounded-full bg-white/5 border border-white/10 text-[13px] placeholder:text-[#5b6472] focus:outline-none focus:border-white/25"
+            />
+          </div>
+          {visible.length === 0 ? (
+            <p className="mt-1 text-[14px] text-[#5b6472]">
+              {projects.length === 0
+                ? "No projects yet. Describe an idea in the chat to start one."
+                : `No projects match "${query.trim()}".`}
+            </p>
+          ) : (
+            <ScrollArea
+              as="ul"
+              className="flex-1 min-h-0 rounded-2xl border border-white/10 bg-[#17181d]"
+              viewportClassName="divide-y divide-white/10 rounded-xl"
+            >
+              {visible.map((p) => (
+                <li key={p.id} className="flex items-center gap-2 px-3 py-3">
+                  {p.logoUrl ? (
+                    <img
+                      src={p.logoUrl}
+                      alt=""
+                      width={36}
+                      height={36}
+                      className="h-9 w-9 shrink-0 rounded-full object-cover"
+                    />
+                  ) : (
+                    <div
+                      aria-hidden
+                      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-[13px] font-semibold text-[#c9cdd6]"
+                    >
+                      {initials(p.name)}
+                    </div>
+                  )}
+                  <div className="flex-1 min-w-0">
+                    <span className="block text-[13px] font-semibold text-[#f5f6f8] truncate">
+                      {p.name}
+                    </span>
+                    <span className="mt-0.5 block text-[12px] text-[#9aa0ae] truncate">
+                      {p.idea}
+                    </span>
+                    <span className="mt-0.5 block text-[10px] text-[#5b6472] truncate">
+                      {p.status === "draft" ? "Draft · continue setup · " : ""}
+                      {p.platform && p.timeline
+                        ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)} · `
+                        : ""}
+                      Opened {timeAgo(p.lastOpenedAt, now)}
+                    </span>
+                  </div>
+                  <button
+                    onClick={() => openProject(p.id, p.idea)}
+                    aria-label={p.status === "draft" ? `Continue setting up ${p.name}` : `Open ${p.name}`}
+                    className="shrink-0 px-3 py-1 rounded-full bg-white/10 text-[12px] font-medium text-[#c9cdd6] hover:bg-meta hover:text-white"
+                  >
+                    {p.status === "draft" ? "Continue" : "Open"}
+                  </button>
+                </li>
+              ))}
+            </ScrollArea>
+          )}
+          <div ref={profileRef} className="relative mt-auto shrink-0">
+            <button
+              type="button"
+              onClick={() => setProfileOpen((open) => !open)}
+              aria-label="Open profile menu"
+              aria-expanded={profileOpen}
+              aria-controls="profile-menu"
+              className="w-9 h-9 rounded-full border border-white/15 bg-white/5 text-[#c9cdd6] flex items-center justify-center hover:bg-white/10 hover:text-white"
+            >
+              <svg
+                aria-hidden
+                width="16"
+                height="16"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              >
+                <circle cx="12" cy="8.5" r="3.5" />
+                <path d="M5.5 19.5c0-3.2 2.9-5.2 6.5-5.2s6.5 2 6.5 5.2" />
+              </svg>
+            </button>
 
-        <div ref={profileRef} className="relative">
+            {profileOpen && (
+              <div
+                id="profile-menu"
+                className="absolute bottom-full right-0 z-50 mb-2 w-60 rounded-2xl border border-white/10 bg-[#17181d] p-1.5 shadow-2xl"
+              >
+                <div className="px-3 py-2.5">
+                  <p className="text-[13px] font-semibold text-[#f5f6f8]">
+                    Local session
+                  </p>
+                  <p className="mt-0.5 text-[11px] leading-relaxed text-[#9aa0ae]">
+                    {projects.length}{" "}
+                    {projects.length === 1 ? "project" : "projects"}. Resets when
+                    you reload.
+                  </p>
+                </div>
+                <div aria-hidden className="my-1 h-px bg-white/10" />
+                <a
+                  href="https://github.com/avriyyy/musevibe"
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={() => setProfileOpen(false)}
+                  className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white"
+                >
+                  GitHub repository
+                  <svg
+                    aria-hidden
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M7 17 17 7" />
+                    <path d="M9 7h8v8" />
+                  </svg>
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      </aside>
+
+      <div className="flex min-w-0 flex-1 flex-col">
+        <header className="px-5 py-3 shrink-0 flex items-center gap-4">
           <button
             type="button"
-            onClick={() => setProfileOpen((open) => !open)}
-            aria-label="Open profile menu"
-            aria-expanded={profileOpen}
-            aria-controls="profile-menu"
+            onClick={toggleNav}
+            aria-label={navOpen ? "Close sidebar" : "Open sidebar"}
+            aria-expanded={navOpen}
+            aria-controls="sidebar"
             className="w-9 h-9 rounded-full border border-white/15 bg-white/5 text-[#c9cdd6] flex items-center justify-center hover:bg-white/10 hover:text-white"
           >
             <svg
@@ -170,56 +369,14 @@ export default function Home() {
               strokeWidth="1.8"
               strokeLinecap="round"
             >
-              <circle cx="12" cy="8.5" r="3.5" />
-              <path d="M5.5 19.5c0-3.2 2.9-5.2 6.5-5.2s6.5 2 6.5 5.2" />
+              <line x1="4" y1="7" x2="20" y2="7" />
+              <line x1="4" y1="12" x2="20" y2="12" />
+              <line x1="4" y1="17" x2="20" y2="17" />
             </svg>
           </button>
+        </header>
 
-          {profileOpen && (
-            <div
-              id="profile-menu"
-              className="absolute right-0 top-full z-50 mt-2 w-60 rounded-2xl border border-white/10 bg-[#17181d] p-1.5 shadow-2xl"
-            >
-              <div className="px-3 py-2.5">
-                <p className="text-[13px] font-semibold text-[#f5f6f8]">
-                  Local session
-                </p>
-                <p className="mt-0.5 text-[11px] leading-relaxed text-[#9aa0ae]">
-                  {projects.length}{" "}
-                  {projects.length === 1 ? "project" : "projects"}. Resets when
-                  you reload.
-                </p>
-              </div>
-              <div aria-hidden className="my-1 h-px bg-white/10" />
-              <a
-                href="https://github.com/avriyyy/musevibe"
-                target="_blank"
-                rel="noreferrer"
-                onClick={() => setProfileOpen(false)}
-                className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white"
-              >
-                GitHub repository
-                <svg
-                  aria-hidden
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="1.8"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <path d="M7 17 17 7" />
-                  <path d="M9 7h8v8" />
-                </svg>
-              </a>
-            </div>
-          )}
-        </div>
-      </header>
-
-      <main className="flex-1 min-h-0 flex flex-col items-center px-5 pt-10 pb-6">
+        <main className="flex-1 min-h-0 flex flex-col items-center px-5 pt-10 pb-6">
         <h1 className="text-[28px] leading-tight font-semibold tracking-tight text-center shrink-0">
           MuseVibe, what are we building?
         </h1>
@@ -277,86 +434,8 @@ export default function Home() {
             </button>
           </div>
         </div>
-
-        <section aria-label="Recent projects" className="w-full max-w-[680px] mt-6 flex-1 min-h-0 flex flex-col">
-          <div className="relative shrink-0">
-            <svg
-              aria-hidden
-              width="15"
-              height="15"
-              viewBox="0 0 16 16"
-              fill="none"
-              className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#5b6472]"
-            >
-              <circle cx="7" cy="7" r="5" stroke="currentColor" strokeWidth="1.5" />
-              <line x1="11" y1="11" x2="14.5" y2="14.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-            <input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search Your Projects"
-              aria-label="Search projects"
-              className="w-full min-h-11 md:min-h-0 pl-10 pr-4 py-2 rounded-full bg-white/5 border border-white/10 text-[13px] placeholder:text-[#5b6472] focus:outline-none focus:border-white/25"
-            />
-          </div>
-          {visible.length === 0 ? (
-            <p className="mt-3 text-[14px] text-[#5b6472]">
-              {projects.length === 0
-                ? "No projects yet. Describe an idea above to start one."
-                : `No projects match "${query.trim()}".`}
-            </p>
-          ) : (
-            <ScrollArea
-              as="ul"
-              className="mt-3 flex-1 min-h-0 rounded-2xl border border-white/10 bg-[#17181d]"
-              viewportClassName="divide-y divide-white/10 rounded-xl"
-            >
-              {visible.map((p) => (
-                <li key={p.id} className="flex items-center gap-3 px-5 py-3">
-                  {p.logoUrl ? (
-                    <img
-                      src={p.logoUrl}
-                      alt=""
-                      width={40}
-                      height={40}
-                      className="h-10 w-10 shrink-0 rounded-full object-cover"
-                    />
-                  ) : (
-                    <div
-                      aria-hidden
-                      className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-[14px] font-semibold text-[#c9cdd6]"
-                    >
-                      {initials(p.name)}
-                    </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <span className="block text-[14px] font-semibold text-[#f5f6f8] truncate">
-                      {p.name}
-                    </span>
-                    <span className="mt-0.5 block text-[13px] text-[#9aa0ae] truncate">
-                      {p.idea}
-                    </span>
-                    <span className="mt-0.5 block text-[11px] text-[#5b6472]">
-                      {p.status === "draft" ? "Draft · continue setup · " : ""}
-                      {p.platform && p.timeline
-                        ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)} · `
-                        : ""}
-                      Opened {timeAgo(p.lastOpenedAt, now)}
-                    </span>
-                  </div>
-                  <button
-                    onClick={() => openProject(p.id, p.idea)}
-                    aria-label={p.status === "draft" ? `Continue setting up ${p.name}` : `Open ${p.name}`}
-                    className="shrink-0 px-4 py-1.5 rounded-full bg-white/10 text-[13px] font-medium text-[#c9cdd6] hover:bg-meta hover:text-white"
-                  >
-                    {p.status === "draft" ? "Continue" : "Open"}
-                  </button>
-                </li>
-              ))}
-            </ScrollArea>
-          )}
-        </section>
-      </main>
+        </main>
+      </div>
     </div>
   );
 }
