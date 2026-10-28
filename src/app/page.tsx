@@ -177,6 +177,16 @@ export default function Home() {
 
   const submitInFlight = useRef(false);
   const [naming, setNaming] = useState(false);
+  const [namingStage, setNamingStage] = useState(0);
+
+  // While the model names the project the screen shows a blurred overlay, so
+  // the wait is visible from the first frame. The second stage only describes
+  // the handoff to the wizard; nothing is reported as done before it happens.
+  useEffect(() => {
+    if (!naming) return;
+    const timer = setTimeout(() => setNamingStage(1), 4000);
+    return () => clearTimeout(timer);
+  }, [naming]);
 
   const pickModel = (id: string) => {
     modelTouchedRef.current = true;
@@ -278,6 +288,7 @@ export default function Home() {
     const text = idea.trim();
     if (!text || submitInFlight.current) return;
     submitInFlight.current = true;
+    setNamingStage(0);
     setNaming(true);
 
     let id = "";
@@ -851,6 +862,48 @@ export default function Home() {
           </div>
         </main>
       </div>
+
+      {naming && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label="Creating your project"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-md">
+          <div className="w-full max-w-sm rounded-2xl border border-white/10 bg-[#17181d] p-6 text-center shadow-2xl">
+            <svg
+              aria-hidden
+              width="28"
+              height="28"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              className="mx-auto animate-spin text-[#f5f6f8]">
+              <circle cx="12" cy="12" r="9" opacity="0.25" />
+              <path d="M21 12a9 9 0 0 0-9-9" />
+            </svg>
+            <p className="mt-4 text-[15px] font-semibold text-[#f5f6f8]">
+              Creating your project
+            </p>
+            <p className="mt-1 min-h-5 text-[13px] text-[#9aa0ae]">
+              {namingStage === 0
+                ? `Naming it with ${activeModel?.label ?? "Muse"}…`
+                : "Opening the setup wizard…"}
+            </p>
+            <div
+              aria-hidden
+              className="mt-4 flex items-center justify-center gap-1.5">
+              <span
+                className={`h-1.5 rounded-full transition-all ${namingStage >= 0 ? "w-6 bg-white" : "w-1.5 bg-white/25"}`}
+              />
+              <span
+                className={`h-1.5 rounded-full transition-all ${namingStage >= 1 ? "w-6 bg-white" : "w-1.5 bg-white/25"}`}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
