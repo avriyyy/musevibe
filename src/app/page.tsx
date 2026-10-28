@@ -180,10 +180,8 @@ export default function Home() {
         onMouseLeave={() => {
           if (!navPinned) setNavOpen(false);
         }}
-        className={`fixed inset-y-0 left-0 z-40 w-72 shrink-0 overflow-hidden bg-[#0b0c10] transition-[width,transform] duration-200 md:static ${
-          navOpen
-            ? "translate-x-0 border-r border-white/10 md:w-72"
-            : "-translate-x-full border-r border-white/10 md:translate-x-0 md:w-0 md:border-0"
+        className={`fixed inset-y-0 left-0 z-40 w-72 shrink-0 overflow-hidden border-r border-white/10 bg-[#0b0c10] transition-transform duration-200 ${
+          navOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         <div className="flex h-full w-72 flex-col gap-3 px-4 py-4">
