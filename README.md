@@ -1,36 +1,57 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# MuseVibe
 
-## Getting Started
+MuseVibe takes a product idea from one chat message to a first build plan. Type
+the idea, answer a short setup wizard, and the app opens a workspace with a
+generated product brief and a task board. The brief and tasks come from the
+selected Muse model, and the whole workspace stays on the device.
 
-First, run the development server:
+## Run it
 
 ```bash
+npm install
+cp .env.example .env.local
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+The AI calls need these values in `.env.local`:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+- `AI_API_URL`: OpenAI-compatible base URL, including `/v1`.
+- `AI_API_KEY`: provider key.
+- `AI_MODEL`: default chat model, used when the composer has no saved choice.
+- `AI_IMAGE_MODEL`: optional logo model. Defaults to `muse-image-1.0`.
+- `AI_VOICE_MODEL`: optional dictation model. Defaults to `muse-voice-transcribe-1.0`.
 
-## Learn More
+Leave the AI values empty to run the local fallbacks. Naming, questions, stack,
+brief, and tasks all have local versions, so the demo still works offline. The
+logo has no local drawing path and falls back to the project initials.
 
-To learn more about Next.js, take a look at the following resources:
+## Demo path
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+1. Type an idea in the composer and send it.
+2. The app names the project and opens the setup wizard on Questions.
+3. Answer the questions. Scope and logo are optional.
+4. Finish setup to open the project workspace.
+5. The workspace writes the brief from the idea and answers, then splits the
+   brief into tasks. Tasks move between three columns and can be deleted.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+Drafts and finished projects live in `localStorage` under `musevibe-store`.
+Reloading keeps the wizard step and answers, the brief, and the board. Clear
+site data to start from the seeded demo projects again.
 
-## Deploy on Vercel
+## Checks
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npx tsc --noEmit
+npm run lint
+npm run build
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Supabase
+
+The UI is local-first and does not call Supabase yet. The schema in
+`supabase/schema.sql` is ready for a later sync layer. Before a public deploy
+with the Supabase anon key, run `supabase/lock-down.sql` in the SQL editor. It
+enables RLS on all five tables and leaves them to the service role until owner
+policies exist.
