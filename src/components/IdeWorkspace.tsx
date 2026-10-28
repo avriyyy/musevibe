@@ -717,6 +717,53 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             />
           )}
 
+          {view.kind === "tasks" && (
+            <div className="relative flex min-h-0 flex-1 overflow-hidden">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-4">
+                {tasksLocal && (
+                  <p className="mb-3 shrink-0 text-[11px] text-[#9aa0ae]">
+                    Tasks were drafted locally, without the model.
+                  </p>
+                )}
+
+                <div className="flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto pb-1">
+                  {COLUMNS.map((column) => (
+                    <TaskColumn
+                      key={column.status}
+                      status={column.status}
+                      tasks={tasks.filter((task) => task.status === column.status)}
+                      loading={phase === "tasks" && tasks.length === 0}
+                      selectedId={selectedTaskId}
+                      onOpen={(task) => setSelectedTaskId(task.id)}
+                      onMoveById={moveTaskById}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              {selectedTask && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Close task details"
+                    onClick={() => setSelectedTaskId(null)}
+                    className="absolute inset-0 z-20 bg-black/50 md:hidden"
+                  />
+                  <TaskDetailPanel
+                    task={selectedTask}
+                    onPatch={(patch) => patchTask(selectedTask.id, patch)}
+                    onMove={(next) => moveTaskById(selectedTask.id, next)}
+                    onDelete={() => {
+                      useVibe.getState().removeTask(projectId, selectedTask.id);
+                      setSelectedTaskId(null);
+                    }}
+                    onClose={() => setSelectedTaskId(null)}
+                  />
+                </>
+              )}
+            </div>
+          )}
+
           {view.kind === "design" && (
             <div className="relative min-h-0 flex-1">
               <div className="h-full min-h-0">
