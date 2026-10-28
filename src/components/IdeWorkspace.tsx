@@ -31,7 +31,7 @@ import {
   CheckCircleIcon,
   InboxIcon,
 } from "@heroicons/react/24/outline";
-import type { TLEditorSnapshot } from "@tldraw/tldraw";
+import type { ExcalidrawElement } from "@excalidraw/excalidraw/element/types";
 import DocumentsView from "@/components/DocumentsView";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
@@ -171,13 +171,24 @@ async function requestAi(
   };
 }
 
-function parseSnapshot(raw: string): TLEditorSnapshot | null {
+function parseElements(raw: string): readonly ExcalidrawElement[] | null {
   if (!raw) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
-    return parsed && typeof parsed === "object"
-      ? (parsed as TLEditorSnapshot)
-      : null;
+    const list = Array.isArray(parsed)
+      ? parsed
+      : (parsed as { elements?: unknown })?.elements;
+    if (!Array.isArray(list)) return null;
+    const valid = list.filter(
+      (entry): entry is ExcalidrawElement =>
+        !!entry &&
+        typeof entry === "object" &&
+        typeof (entry as { id?: unknown }).id === "string" &&
+        typeof (entry as { type?: unknown }).type === "string",
+    );
+    // Anything else unusable restarts as a fresh canvas.
+    if (valid.length === 0) return null;
+    return valid;
   } catch {
     return null;
   }
@@ -458,26 +469,21 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     }
   }, [projectId, protoBusy]);
 
-  const handleSnapshot = useCallback(
-    (screenId: string, snapshot: TLEditorSnapshot) => {
+  const handleElements = useCallback(
+    (screenId: string, elementsJson: string) => {
       const state = useVibe.getState();
       const current = state.screensByProject[projectId] ?? EMPTY_SCREENS;
       const existing =
         current.find((screen) => screen.id === screenId)?.canvasJson ?? "";
-      let serialized = "";
-      try {
-        serialized = JSON.stringify(snapshot);
-      } catch {
-        return;
-      }
-      // Skip echo saves: loading a snapshot back into the editor fires the
-      // same listener, and writing it again would remount the canvas in a
-      // loop every few seconds.
-      if (serialized === existing) return;
+      // Skip echo saves: the snapshot that seeded the canvas must not be
+      // written straight back, or every mount would dirty the store.
+      if (elementsJson === existing) return;
       state.setScreens(
         projectId,
         current.map((screen) =>
-          screen.id === screenId ? { ...screen, canvasJson: serialized } : screen,
+          screen.id === screenId
+            ? { ...screen, canvasJson: elementsJson }
+            : screen,
         ),
       );
     },
@@ -529,9 +535,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [selectedTaskId]);
   // Referentially stable across renders: a fresh object identity on every
-  // render would look like a new snapshot to the canvas and remount it.
-  const designSnapshot = useMemo(
-    () => parseSnapshot(prototypeScreen?.canvasJson ?? ""),
+  // render would look like new seeds to the canvas and remount it.
+  const designElements = useMemo(
+    () => parseElements(prototypeScreen?.canvasJson ?? ""),
     [prototypeScreen?.canvasJson],
   );
 
@@ -770,11 +776,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 {prototypeFile && prototypeScreen ? (
                   <DesignCanvas
                     key={prototypeScreen.id}
-                    initialSnapshot={designSnapshot}
-                    ready={hydrated}
+                    initialElements={designElements}
                     html={prototypeFile.content}
-                    onSnapshot={(snapshot) =>
-                      handleSnapshot(prototypeScreen.id, snapshot)
+                    onElements={(elementsJson) =>
+                      handleElements(prototypeScreen.id, elementsJson)
                     }
                   />
                 ) : (

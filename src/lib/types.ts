@@ -62,7 +62,7 @@ export interface Task {
 export interface Screen {
   id: string;
   name: string;
-  canvasJson: string; // tldraw snapshot JSON (stringified)
+  canvasJson: string; // Excalidraw elements JSON (stringified)
   components: string[];
 }
 

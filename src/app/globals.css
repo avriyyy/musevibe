@@ -81,3 +81,13 @@ body {
     scrollbar-color: rgba(255, 255, 255, 0.22) transparent;
   }
 }
+
+/* The Design tab drives Excalidraw through its own rail (CanvasChrome),
+   so the stock toolbar island and bottom status bar stay hidden. Class names
+   are pinned by @excalidraw/excalidraw 0.18; re-check after upgrading. */
+.musevibe-design .excalidraw .App-top-bar,
+.musevibe-design .excalidraw .App-menu_top,
+.musevibe-design .excalidraw .App-bottom-bar,
+.musevibe-design .excalidraw .layer-ui__wrapper__footer {
+  display: none;
+}

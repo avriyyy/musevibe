@@ -1,18 +1,23 @@
 "use client";
 
 /**
- * Shared whiteboard chrome drawn over a hideUi tldraw canvas: a floating
- * tool rail on the left and zoom controls at the bottom left. Both the plan
- * and the design canvas use it so the two views read as one workspace.
+ * Shared whiteboard chrome drawn over the Excalidraw canvas: a floating
+ * tool rail on the left and zoom controls at the bottom left. Excalidraw
+ * runs in zen mode so its own toolbar stays out of the way; this rail is
+ * the only tool switcher, driven through the imperative API.
  */
 
-import { useEffect, useState, type ReactElement, type ReactNode } from "react";
-import type { Editor } from "tldraw";
-import { GeoShapeGeoStyle } from "tldraw";
+import type { ReactElement, ReactNode } from "react";
+import type {
+  ExcalidrawImperativeAPI,
+  NormalizedZoomValue,
+} from "@excalidraw/excalidraw/types";
 
 interface ToolDef {
   id: string;
   label: string;
+  /** Excalidraw tool type passed to setActiveTool. */
+  tool: string;
   icon: ReactElement;
 }
 
@@ -38,11 +43,13 @@ const TOOLS: ToolDef[] = [
   {
     id: "select",
     label: "Select",
+    tool: "selection",
     icon: strokeIcon(<path d="M6 3l13 9-7 1.5L8.5 21 6 3z" />),
   },
   {
     id: "hand",
     label: "Pan",
+    tool: "hand",
     icon: strokeIcon(
       <>
         <path d="M8 11V5.5a1.5 1.5 0 0 1 3 0V10" />
@@ -55,16 +62,19 @@ const TOOLS: ToolDef[] = [
   {
     id: "rectangle",
     label: "Rectangle",
+    tool: "rectangle",
     icon: strokeIcon(<rect x="4" y="6" width="16" height="12" rx="1.5" />),
   },
   {
     id: "ellipse",
     label: "Ellipse",
+    tool: "ellipse",
     icon: strokeIcon(<circle cx="12" cy="12" r="8" />),
   },
   {
     id: "arrow",
     label: "Arrow",
+    tool: "arrow",
     icon: strokeIcon(
       <>
         <line x1="5" y1="19" x2="19" y2="5" />
@@ -75,6 +85,7 @@ const TOOLS: ToolDef[] = [
   {
     id: "text",
     label: "Text",
+    tool: "text",
     icon: strokeIcon(
       <>
         <line x1="5" y1="6" x2="19" y2="6" />
@@ -85,6 +96,7 @@ const TOOLS: ToolDef[] = [
   {
     id: "draw",
     label: "Draw",
+    tool: "freedraw",
     icon: strokeIcon(
       <path d="M4 20l1-4.5L16.5 4a2.1 2.1 0 0 1 3 3L8 18.5 4 20z" />,
     ),
@@ -92,47 +104,40 @@ const TOOLS: ToolDef[] = [
   {
     id: "eraser",
     label: "Eraser",
+    tool: "eraser",
     icon: strokeIcon(
       <path d="M7 20h11M6.5 15.5l8-8a1.8 1.8 0 0 1 2.5 0l1.5 1.5a1.8 1.8 0 0 1 0 2.5l-6.5 6.5H9l-2.5-2.5z" />,
     ),
   },
 ];
 
-function activateTool(editor: Editor, id: string) {
-  if (id === "rectangle") {
-    editor.setCurrentTool("geo");
-    editor.setStyleForNextShapes(GeoShapeGeoStyle, "rectangle");
-    return;
+function zoomBy(
+  api: ExcalidrawImperativeAPI | null,
+  factor: number,
+) {
+  if (!api) return;
+  try {
+    const current = api.getAppState().zoom.value;
+    const value = Math.min(3, Math.max(0.1, current * factor));
+    api.updateScene({
+      appState: { zoom: { value: value as NormalizedZoomValue } },
+    });
+  } catch {
+    // No canvas to zoom yet.
   }
-  if (id === "ellipse") {
-    editor.setCurrentTool("geo");
-    editor.setStyleForNextShapes(GeoShapeGeoStyle, "ellipse");
-    return;
-  }
-  editor.setCurrentTool(id);
 }
 
-export default function CanvasChrome({ editor }: { editor: Editor | null }) {
-  const [active, setActive] = useState("select");
-
-  useEffect(() => {
-    if (!editor) return;
-    const sync = () => {
-      const current = editor.getCurrentToolId();
-      setActive((previous) =>
-        current === "geo" ? previous : current,
-      );
-    };
-    sync();
-    const unlisten = editor.store.listen(sync);
-    return unlisten;
-  }, [editor]);
-
-  const pick = (id: string) => {
-    if (!editor) return;
+export default function CanvasChrome({
+  api,
+  tool,
+}: {
+  api: ExcalidrawImperativeAPI | null;
+  tool: string;
+}) {
+  const pick = (entry: ToolDef) => {
+    if (!api) return;
     try {
-      activateTool(editor, id);
-      setActive(id);
+      api.setActiveTool({ type: entry.tool as "selection" });
     } catch {
       // Unknown tool ids leave the current tool alone.
     }
@@ -147,23 +152,23 @@ export default function CanvasChrome({ editor }: { editor: Editor | null }) {
           aria-label="Canvas tools"
           className="flex flex-col items-center gap-0.5 rounded-2xl border border-white/10 bg-[#17181d]/95 p-1.5 shadow-xl"
         >
-          {TOOLS.map((tool) => {
-            const selected = active === tool.id;
+          {TOOLS.map((entry) => {
+            const selected = tool === entry.tool || tool === entry.id;
             return (
               <button
-                key={tool.id}
+                key={entry.id}
                 type="button"
-                title={tool.label}
-                aria-label={tool.label}
+                title={entry.label}
+                aria-label={entry.label}
                 aria-pressed={selected}
-                onClick={() => pick(tool.id)}
+                onClick={() => pick(entry)}
                 className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors ${
                   selected
                     ? "bg-white text-black"
                     : "text-[#c9cdd6] hover:bg-white/10 hover:text-white"
                 }`}
               >
-                {tool.icon}
+                {entry.icon}
               </button>
             );
           })}
@@ -177,13 +182,7 @@ export default function CanvasChrome({ editor }: { editor: Editor | null }) {
             type="button"
             title="Zoom in"
             aria-label="Zoom in"
-            onClick={() => {
-              try {
-                editor?.zoomIn();
-              } catch {
-                // No canvas to zoom yet.
-              }
-            }}
+            onClick={() => zoomBy(api, 1.25)}
             className="flex h-8 w-8 items-center justify-center rounded-xl text-[16px] leading-none text-[#c9cdd6] hover:bg-white/10 hover:text-white"
           >
             +
@@ -192,13 +191,7 @@ export default function CanvasChrome({ editor }: { editor: Editor | null }) {
             type="button"
             title="Zoom out"
             aria-label="Zoom out"
-            onClick={() => {
-              try {
-                editor?.zoomOut();
-              } catch {
-                // No canvas to zoom yet.
-              }
-            }}
+            onClick={() => zoomBy(api, 0.8)}
             className="flex h-8 w-8 items-center justify-center rounded-xl text-[16px] leading-none text-[#c9cdd6] hover:bg-white/10 hover:text-white"
           >
             −
@@ -209,7 +202,7 @@ export default function CanvasChrome({ editor }: { editor: Editor | null }) {
             aria-label="Fit to screen"
             onClick={() => {
               try {
-                editor?.zoomToFit();
+                api?.scrollToContent();
               } catch {
                 // No canvas to fit yet.
               }

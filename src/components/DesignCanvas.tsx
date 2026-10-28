@@ -1,172 +1,232 @@
 "use client";
 
 /**
- * tldraw canvas for one design screen. Loaded with ssr:false by the caller
- * because tldraw touches the window at import time. The canvas is
- * uncontrolled after mount: the snapshot prop only seeds the first paint,
- * so later store writes never remount it. Snapshots are debounced back to
- * the caller, which persists them in the project store. The stock tldraw UI
- * is hidden in favor of the shared canvas chrome.
+ * Design canvas on Excalidraw (MIT licensed: no license key, no watermark).
+ * The generated prototype.html lives on the canvas as an embeddable frame
+ * rendered through renderEmbeddable as a live iframe, so it pans and zooms
+ * with everything else. The canvas is uncontrolled after mount: the elements
+ * prop only seeds the first paint, so later store writes never remount it.
+ * Element edits are debounced back to the caller and persisted in the store.
  */
 
-import { useEffect, useRef, useState } from "react";
-import {
-  Tldraw,
-  type Editor,
-  type TLEditorSnapshot,
-  type TLShapeId,
-} from "@tldraw/tldraw";
-import "@tldraw/tldraw/tldraw.css";
-import { HTML_SHAPE_UTILS } from "./HtmlShape";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Excalidraw, restoreElements } from "@excalidraw/excalidraw";
+import type { ExcalidrawImperativeAPI } from "@excalidraw/excalidraw/types";
+import type {
+  ExcalidrawElement,
+  ExcalidrawEmbeddableElement,
+} from "@excalidraw/excalidraw/element/types";
+import "@excalidraw/excalidraw/index.css";
 import CanvasChrome from "./CanvasChrome";
 
-const PROTOTYPE_SHAPE_ID = "shape:html-prototype" as TLShapeId;
+const FRAME_ID = "musevibe-prototype";
+const FRAME_LINK = "https://musevibe.local/prototype";
+const FRAME_W = 960;
+const FRAME_H = 640;
 
 interface DesignCanvasProps {
-  /** Snapshot used only to seed the first paint, never re-fed afterwards. */
-  initialSnapshot: TLEditorSnapshot | null;
-  ready: boolean;
-  /** Current prototype.html content; the canvas keeps one shape in sync. */
+  /** Elements used only to seed the first paint, never re-fed afterwards. */
+  initialElements: readonly ExcalidrawElement[] | null;
+  /** Current prototype.html content; the frame re-renders when it changes. */
   html: string;
-  onSnapshot: (snapshot: TLEditorSnapshot) => void;
+  onElements: (elementsJson: string) => void;
 }
 
-function syncPrototypeShape(editor: Editor, html: string) {
+/** A fixed embeddable element that hosts the prototype iframe. */
+function frameSkeleton(x = 0, y = 0) {
+  return {
+    id: FRAME_ID,
+    type: "embeddable",
+    x,
+    y,
+    width: FRAME_W,
+    height: FRAME_H,
+    angle: 0,
+    strokeColor: "transparent",
+    backgroundColor: "transparent",
+    fillStyle: "solid",
+    strokeWidth: 1,
+    strokeStyle: "solid",
+    roundness: null,
+    roughness: 0,
+    opacity: 100,
+    seed: 20261028,
+    version: 1,
+    versionNonce: 20261028,
+    index: null,
+    isDeleted: false,
+    groupIds: [],
+    frameId: null,
+    boundElements: null,
+    updated: 1,
+    link: FRAME_LINK,
+    locked: false,
+    customData: { musevibe: "prototype-frame" },
+  };
+}
+
+/** A fresh canvas: only the prototype frame, normalized by Excalidraw. */
+function freshElements() {
   try {
-    const existing = editor.getShape(PROTOTYPE_SHAPE_ID);
-    const props = {
-      html,
-      w: 960,
-      h: 640,
-      title: "Prototype",
-      slug: "/",
-    };
-    if (!existing) {
-      const viewport = editor.getViewportPageBounds();
-      editor.createShape({
-        id: PROTOTYPE_SHAPE_ID,
-        type: "html-prototype",
-        x: Math.max(0, viewport.center.x - 480),
-        y: Math.max(0, viewport.center.y - 320),
-        props,
-      });
-      return;
-    }
-    if (existing.type === "html-prototype") {
-      const current = (existing.props as Record<string, unknown>) ?? {};
-      if (
-        current.html !== props.html ||
-        current.w !== props.w ||
-        current.h !== props.h ||
-        current.title !== props.title ||
-        current.slug !== props.slug
-      ) {
-        editor.updateShape({
-          id: existing.id,
-          type: "html-prototype",
-          props,
-        });
-      }
-    }
+    return restoreElements(
+      [frameSkeleton(0, 0)] as unknown as ExcalidrawElement[],
+      null,
+    );
   } catch {
-    // A canvas that cannot host the prototype still works as a drawing board.
+    return null;
+  }
+}
+
+/** Old tldraw snapshots and corrupt payloads restart as a fresh canvas. */
+function coerceElements(raw: readonly ExcalidrawElement[] | null) {
+  if (!Array.isArray(raw)) return null;
+  const kept = raw.filter(
+    (entry) =>
+      entry &&
+      typeof entry === "object" &&
+      typeof (entry as { id?: unknown }).id === "string" &&
+      typeof (entry as { type?: unknown }).type === "string" &&
+      (entry as { id?: string }).id !== FRAME_ID,
+  );
+  if (kept.length !== raw.length && kept.length === 0 && raw.length > 0) {
+    return null;
+  }
+  const previous = (
+    raw as readonly { id?: unknown; x?: unknown; y?: unknown }[]
+  ).find((entry) => entry?.id === FRAME_ID);
+  const px = typeof previous?.x === "number" ? previous.x : 0;
+  const py = typeof previous?.y === "number" ? previous.y : 0;
+  try {
+    return restoreElements(
+      [frameSkeleton(px, py), ...kept] as unknown as ExcalidrawElement[],
+      null,
+    );
+  } catch {
+    return null;
   }
 }
 
 export default function DesignCanvas({
-  initialSnapshot,
-  ready,
+  initialElements,
   html,
-  onSnapshot,
+  onElements,
 }: DesignCanvasProps) {
-  const [editor, setEditor] = useState<Editor | null>(null);
-  const callbackRef = useRef(onSnapshot);
+  const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null);
+  const [tool, setTool] = useState("selection");
+  const apiRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const htmlRef = useRef(html);
-  const editorRef = useRef<Editor | null>(null);
-  const snapshotRef = useRef<TLEditorSnapshot | null>(initialSnapshot);
-  const unlistenRef = useRef<(() => void) | null>(null);
+  const callbackRef = useRef(onElements);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const paintedRef = useRef(false);
-  const touchedRef = useRef(false);
 
   useEffect(() => {
-    callbackRef.current = onSnapshot;
-  }, [onSnapshot]);
+    callbackRef.current = onElements;
+  }, [onElements]);
   useEffect(() => {
     htmlRef.current = html;
   }, [html]);
-  useEffect(() => {
-    if (initialSnapshot) snapshotRef.current = initialSnapshot;
-  }, [initialSnapshot]);
 
-  // Keep the prototype shape in sync when a regeneration replaces the file.
+  // Re-render the prototype iframe when a regeneration replaces the file.
+  // Bumping the frame's version forces Excalidraw to call renderEmbeddable
+  // again; every other element is passed through untouched.
   useEffect(() => {
-    const instance = editorRef.current;
-    if (instance && html) syncPrototypeShape(instance, html);
-  }, [html]);
-
-  // First paint only: load the saved snapshot when the store has one and
-  // the user has not drawn anything yet. Later store updates never touch
-  // the live canvas, so a save echo can never remount it.
-  useEffect(() => {
-    if (!editor || !ready || paintedRef.current) return;
-    paintedRef.current = true;
-    const snap = snapshotRef.current;
-    if (snap && !touchedRef.current) {
-      try {
-        editor.loadSnapshot(snap);
-      } catch {
-        // A snapshot that will not load is simply skipped.
-      }
+    const instance = apiRef.current;
+    if (!instance || !html) return;
+    try {
+      const current = instance.getSceneElements();
+      if (!current.some((entry) => entry.id === FRAME_ID)) return;
+      instance.updateScene({
+        elements: current.map((entry) =>
+          entry.id === FRAME_ID
+            ? {
+                ...entry,
+                version: entry.version + 1,
+                versionNonce: Math.floor(Math.random() * 2 ** 31),
+                updated: Date.now(),
+              }
+            : entry,
+        ),
+      });
+    } catch {
+      // A frame that will not refresh still shows the previous render.
     }
-    const pending = htmlRef.current;
-    if (pending) syncPrototypeShape(editor, pending);
-    if (!snap) {
-      try {
-        editor.zoomToFit();
-      } catch {
-        // Default camera is fine.
-      }
-    }
-  }, [editor, ready]);
+  }, [html, api]);
 
   useEffect(
     () => () => {
-      unlistenRef.current?.();
       if (timerRef.current) clearTimeout(timerRef.current);
-      paintedRef.current = false;
-      touchedRef.current = false;
     },
     [],
   );
 
+  const initialData = useMemo(() => {
+    const restored = coerceElements(initialElements) ?? freshElements();
+    return {
+      elements: restored ?? undefined,
+      appState: { viewBackgroundColor: "#0b0c10" },
+      scrollToContent: true,
+    };
+    // Seeds the first paint only; later element updates flow through
+    // onElements instead of re-seeding the canvas.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const renderPrototype = (element: ExcalidrawEmbeddableElement) => {
+    if (element?.id !== FRAME_ID) return null;
+    return (
+      <div className="relative h-full w-full">
+        <iframe
+          title="Prototype"
+          srcDoc={htmlRef.current}
+          sandbox="allow-scripts"
+          className="h-full w-full rounded-xl border border-white/15 bg-white"
+        />
+        <p className="pointer-events-none absolute bottom-3 left-3 rounded-full bg-black/60 px-2.5 py-1 text-[11px] font-medium whitespace-nowrap text-white/90">
+          Prototype · /
+        </p>
+      </div>
+    );
+  };
+
   return (
-    <div className="relative h-full w-full">
-      <Tldraw
-        shapeUtils={HTML_SHAPE_UTILS}
-        hideUi
-        onMount={(instance: Editor) => {
-          setEditor(instance);
-          editorRef.current = instance;
-          try {
-            instance.user.updateUserPreferences({ colorScheme: "dark" });
-          } catch {
-            // A canvas that stays light is still usable.
+    <div className="musevibe-design relative h-full w-full">
+      <Excalidraw
+        excalidrawAPI={(instance) => {
+          setApi(instance);
+          apiRef.current = instance;
+        }}
+        initialData={initialData}
+        theme="dark"
+        zenModeEnabled
+        validateEmbeddable={() => true}
+        renderEmbeddable={renderPrototype}
+        UIOptions={{
+          canvasActions: {
+            changeViewBackgroundColor: false,
+            clearCanvas: false,
+            loadScene: false,
+            saveToActiveFile: false,
+            toggleTheme: false,
+            saveAsImage: false,
+          },
+        }}
+        onChange={(elements, appState) => {
+          const next = appState.activeTool?.type;
+          if (typeof next === "string") {
+            setTool((previous) => (previous === next ? previous : next));
           }
-          unlistenRef.current = instance.store.listen(() => {
-            touchedRef.current = true;
-            if (timerRef.current) clearTimeout(timerRef.current);
-            timerRef.current = setTimeout(() => {
-              try {
-                callbackRef.current(instance.getSnapshot());
-              } catch {
-                // A snapshot that will not serialize is not worth keeping.
-              }
-            }, 800);
-          });
+          if (timerRef.current) clearTimeout(timerRef.current);
+          timerRef.current = setTimeout(() => {
+            try {
+              callbackRef.current(
+                JSON.stringify({ version: 1, elements }),
+              );
+            } catch {
+              // Elements that will not serialize are not worth keeping.
+            }
+          }, 800);
         }}
       />
-      <CanvasChrome editor={editor} />
+      <CanvasChrome api={api} tool={tool} />
     </div>
   );
 }
