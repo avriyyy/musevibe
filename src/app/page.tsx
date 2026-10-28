@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
 import { platformLabel, timelineLabel } from "@/lib/project-options";
+import { frameworkLabel } from "@/lib/stack-options";
 import ScrollArea from "@/components/ScrollArea";
 
 const PHRASES = [
@@ -315,7 +316,7 @@ export default function Home() {
                     </span>
                     <span className="mt-0.5 block text-[11px] text-[#5b6472]">
                       {p.platform && p.timeline
-                        ? `${platformLabel(p.platform)} · ${timelineLabel(p.timeline)} · `
+                        ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)} · `
                         : ""}
                       Opened {timeAgo(p.lastOpenedAt, now)}
                     </span>

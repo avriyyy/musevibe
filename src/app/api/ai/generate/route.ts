@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { aiGenerate, aiGenerateLogo, type AiGenerateKind } from "@/lib/ai";
 
-const KINDS: AiGenerateKind[] = ["prd", "tasks", "brief", "code", "questions", "logo"];
+const KINDS: AiGenerateKind[] = ["prd", "tasks", "brief", "code", "questions", "logo", "stack"];
 
 export async function POST(req: Request) {
   const { kind, prompt } = await req.json();

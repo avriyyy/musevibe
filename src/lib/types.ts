@@ -15,6 +15,8 @@ export interface Project {
   lastOpenedAt?: string;
   platform?: Platform;
   timeline?: Timeline;
+  /** Framework value from the stack picker, e.g. "nextjs". */
+  framework?: string;
   answers?: ProjectAnswer[];
   /** Image URL or data URL for the project logo. Absent means initials. */
   logoUrl?: string;

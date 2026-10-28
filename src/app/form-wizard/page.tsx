@@ -66,6 +66,14 @@ import {
   type LogoOrigin,
   type LogoStatus,
 } from "@/lib/logo";
+import {
+  FRAMEWORKS,
+  buildStackPrompt,
+  frameworkLabel,
+  isFrameworkFor,
+  parseStackRecommendation,
+  type StackRecommendation,
+} from "@/lib/stack-options";
 import { useVibe } from "@/lib/store";
 
 const STEPS = [
@@ -135,6 +143,15 @@ function Wizard() {
 
   const [platform, setPlatform] = useState<Platform>("web");
   const [timeline, setTimeline] = useState<Timeline>("two-weeks");
+  const [framework, setFramework] = useState("nextjs");
+
+  type StackStatus = "idle" | "loading" | "ready";
+  type StackSource = "ai" | "local" | null;
+  const [stackRec, setStackRec] = useState<StackRecommendation | null>(null);
+  const [stackStatus, setStackStatus] = useState<StackStatus>("idle");
+  const [stackSource, setStackSource] = useState<StackSource>(null);
+  const [stackFor, setStackFor] = useState("");
+  const stackRequestRef = useRef(0);
 
   const [questions, setQuestions] = useState<WizardQuestion[]>([]);
   const [questionStatus, setQuestionStatus] = useState<QuestionStatus>(() =>
@@ -220,6 +237,50 @@ function Wizard() {
   const setAnswer = (id: string, value: WizardAnswerValue) => {
     setAnswers((current) => ({ ...current, [id]: value }));
   };
+
+  const recommendStack = useCallback(async () => {
+    const fingerprint = `${idea.trim()}${JSON.stringify(answers)}`;
+    if (!idea.trim() || fingerprint === stackFor) return;
+
+    const requestId = stackRequestRef.current + 1;
+    stackRequestRef.current = requestId;
+    setStackFor(fingerprint);
+    setStackStatus("loading");
+
+    let next: StackRecommendation = { platform: "web", framework: "nextjs", reason: "" };
+    let nextSource: StackSource = "local";
+
+    try {
+      const summary = questions
+        .map((question) => `${question.label}: ${answerToText(answers[question.id]) || "no answer"}`)
+        .join(" | ");
+      const response = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ kind: "stack", prompt: buildStackPrompt(idea, summary) }),
+      });
+      if (!response.ok) throw new Error(`Stack request failed: ${response.status}`);
+
+      const data = (await response.json()) as { text?: unknown; source?: unknown };
+      if (requestId !== stackRequestRef.current) return;
+
+      const parsed = parseStackRecommendation(data.text);
+      if (parsed) {
+        next = parsed;
+        nextSource = data.source === "ai" ? "ai" : "local";
+      }
+    } catch {
+      // The web/Next.js default is already selected above; the wizard stays usable.
+    }
+
+    if (requestId !== stackRequestRef.current) return;
+
+    setStackRec(next);
+    setStackSource(nextSource);
+    setStackStatus("ready");
+    setPlatform(next.platform);
+    setFramework(next.framework);
+  }, [idea, answers, questions, stackFor]);
 
   const generateLogo = async () => {
     const description = logoPrompt.trim();
@@ -359,6 +420,7 @@ function Wizard() {
       createdAt: new Date().toISOString(),
       platform,
       timeline,
+      framework,
       answers: answersList,
       ...(logoUrl ? { logoUrl } : {}),
     });
@@ -370,6 +432,9 @@ function Wizard() {
     if (next > 1 && questionsPending) return;
     if (next === 1 && idea.trim() && generatedFor !== idea.trim()) {
       void generateQuestions(idea);
+    }
+    if (next === 2) {
+      void recommendStack();
     }
     setStep(next);
   };
@@ -389,6 +454,7 @@ function Wizard() {
       if (questionStatus === "loading") return;
       setAttempted((previous) => new Set(previous).add(1));
       if (focusFirstError(1)) return;
+      void recommendStack();
       setStep(2);
       return;
     }
@@ -677,32 +743,101 @@ function Wizard() {
               <VStack gap={1}>
                 <Heading level={2}>Shape the first build</Heading>
                 <Text type="supporting" color="secondary">
-                  Pick where it runs and the window you want to aim for. Both
-                  have defaults, so you can skip this step.
+                  Pick where it runs, which framework to start from, and the
+                  window you want to aim for. Everything here has a default,
+                  so you can skip this step.
                 </Text>
               </VStack>
-              <FormLayout defaultOptionality="optional">
-                <RadioList
-                  label="Platform"
-                  value={platform}
-                  onChange={(value) => setPlatform(value as Platform)}>
-                  {PLATFORMS.map((option) => (
-                    <RadioListItem
-                      key={option.value}
-                      value={option.value}
-                      label={option.label}
-                      description={option.description}
-                    />
-                  ))}
-                </RadioList>
-                <Selector
-                  label="Target timeline"
-                  options={TIMELINES}
-                  value={timeline}
-                  onChange={(value) => setTimeline(value as Timeline)}
-                  description="A target, not a deadline."
+
+              {stackStatus === "loading" && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="flex items-center gap-3">
+                  <Spinner size="md" />
+                  <Text type="supporting" color="secondary">
+                    Reading your answers and picking a stack…
+                  </Text>
+                </div>
+              )}
+
+              {stackStatus === "ready" && stackSource === "local" && (
+                <Banner
+                  status="info"
+                  title="Using the default stack"
+                  description="The AI provider is unavailable right now, so this step starts from web and Next.js. You can still change everything."
+                  collapsible={false}
                 />
-              </FormLayout>
+              )}
+
+              {stackStatus !== "loading" && (
+                <FormLayout defaultOptionality="optional">
+                  <RadioList
+                    label="Platform"
+                    value={platform}
+                    onChange={(value) => {
+                      const next = value as Platform;
+                      setPlatform(next);
+                      setFramework((current) =>
+                        isFrameworkFor(next, current) ? current : FRAMEWORKS[next][0].value,
+                      );
+                    }}>
+                    {PLATFORMS.map((option) => (
+                      <RadioListItem
+                        key={option.value}
+                        value={option.value}
+                        label={option.label}
+                        description={option.description}
+                      />
+                    ))}
+                  </RadioList>
+                  <RadioList
+                    label="Framework"
+                    value={framework}
+                    onChange={setFramework}
+                    description={
+                      stackSource === "ai" && stackRec?.reason
+                        ? `AI recommends ${frameworkLabel(stackRec.platform, stackRec.framework)}: ${stackRec.reason}`
+                        : "The starting point for generated code."
+                    }>
+                    {FRAMEWORKS[platform].map((option) => {
+                      const isRecommended =
+                        stackSource === "ai" &&
+                        stackRec?.platform === platform &&
+                        stackRec.framework === option.value;
+                      return (
+                        <RadioListItem
+                          key={option.value}
+                          value={option.value}
+                          label={isRecommended ? `${option.label} · Recommended` : option.label}
+                          description={option.description}
+                        />
+                      );
+                    })}
+                  </RadioList>
+                  {stackSource === "ai" &&
+                    stackRec &&
+                    (platform !== stackRec.platform || framework !== stackRec.framework) && (
+                      <Button
+                        label="Use AI pick"
+                        variant="ghost"
+                        size="sm"
+                        className="min-h-11 md:min-h-0 self-start"
+                        onClick={() => {
+                          setPlatform(stackRec.platform);
+                          setFramework(stackRec.framework);
+                        }}
+                      />
+                    )}
+                  <Selector
+                    label="Target timeline"
+                    options={TIMELINES}
+                    value={timeline}
+                    onChange={(value) => setTimeline(value as Timeline)}
+                    description="A target, not a deadline."
+                  />
+                </FormLayout>
+              )}
             </VStack>
           )}
 
@@ -864,6 +999,9 @@ function Wizard() {
                 ))}
                 <MetadataListItem label="Platform">
                   {platformLabel(platform)}
+                </MetadataListItem>
+                <MetadataListItem label="Framework">
+                  {frameworkLabel(platform, framework)}
                 </MetadataListItem>
                 <MetadataListItem label="Timeline">
                   {timelineLabel(timeline)}
