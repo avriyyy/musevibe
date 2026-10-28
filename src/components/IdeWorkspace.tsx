@@ -26,7 +26,7 @@ import { Card } from "@astryxdesign/core/Card";
 import { EmptyState } from "@astryxdesign/core/EmptyState";
 import { Icon } from "@astryxdesign/core/Icon";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Heading, Text } from "@astryxdesign/core/Text";
+import { Text } from "@astryxdesign/core/Text";
 import {
   CheckCircleIcon,
   InboxIcon,
@@ -209,7 +209,12 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const isMobile = useMediaQuery("(max-width: 768px)");
 
   /** Which navbar tab the current view belongs to. */
-  const activeTab = view.kind === "design" ? "design" : "plan";
+  const activeTab =
+    view.kind === "design"
+      ? "design"
+      : view.kind === "tasks"
+        ? "tasks"
+        : "plan";
 
   const runPlan = useCallback(
     async (force: boolean) => {
@@ -683,16 +688,13 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           <h1 className="truncate text-[15px] font-semibold leading-tight">
             {project.name}
           </h1>
-          <p className="mt-0.5 truncate text-[12px] text-[#9aa0ae]">
-            {project.idea}
-          </p>
         </div>
 
         <nav
           aria-label="Workspace views"
           className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 md:flex"
         >
-          {(["plan", "design"] as const).map((tab) => {
+          {(["plan", "tasks", "design"] as const).map((tab) => {
             const selected = activeTab === tab;
             return (
               <button
@@ -700,6 +702,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 type="button"
                 onClick={() => {
                   if (tab === "plan") setView({ kind: "plan" });
+                  else if (tab === "tasks") setView({ kind: "tasks" });
                   else setView({ kind: "design" });
                 }}
                 aria-current={selected || undefined}
@@ -723,12 +726,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             value={activeTab}
             onChange={(next) => {
               if (next === "plan") setView({ kind: "plan" });
+              else if (next === "tasks") setView({ kind: "tasks" });
               else if (next === "design") setView({ kind: "design" });
             }}
             size="sm"
             layout="fill"
           >
             <SegmentedControlItem label="Plan" value="plan" />
+            <SegmentedControlItem label="Tasks" value="tasks" />
             <SegmentedControlItem label="Design" value="design" />
           </SegmentedControl>
         </div>

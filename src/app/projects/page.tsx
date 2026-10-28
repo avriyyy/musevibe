@@ -148,9 +148,6 @@ export default function ProjectsPage() {
                             </span>
                           )}
                         </span>
-                        <span className="mt-0.5 block truncate text-[12px] text-[#9aa0ae]">
-                          {p.idea}
-                        </span>
                       </span>
                       <span className="hidden shrink-0 text-[11px] text-[#5b6472] sm:block">
                         {p.platform

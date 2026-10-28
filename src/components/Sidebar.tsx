@@ -234,10 +234,7 @@ export default function Sidebar({
                           <span className="block truncate text-[13px] font-semibold text-[#f5f6f8]">
                             {p.name}
                           </span>
-                          <span className="mt-0.5 block truncate text-[12px] text-[#9aa0ae]">
-                            {p.idea}
-                          </span>
-                          <span className="mt-1 flex items-center gap-1.5 text-[10px] text-[#5b6472]">
+                          <span className="mt-0.5 flex items-center gap-1.5 text-[10px] text-[#5b6472]">
                             {p.status === "draft" && (
                               <span className="rounded-full bg-white/10 px-1.5 py-0.5 font-medium text-[#c9cdd6]">
                                 Draft

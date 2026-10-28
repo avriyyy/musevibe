@@ -691,9 +691,6 @@ function Wizard() {
     );
   };
 
-  const ideaPreview =
-    idea.length > 160 ? `${idea.slice(0, 157).trimEnd()}…` : idea;
-
   if (!projectId) {
     return (
       <Layout
@@ -806,12 +803,6 @@ function Wizard() {
                 </Text>
               </VStack>
 
-              {idea.trim() && (
-                <Text type="supporting" color="secondary">
-                  From your idea: “{ideaPreview}”
-                </Text>
-              )}
-
               {stackStatus === "loading" && (
                 <div
                   role="status"
@@ -905,22 +896,15 @@ function Wizard() {
                 </Text>
               </VStack>
 
-              {idea.trim() && (
-                <HStack gap={3} vAlign="start">
-                  <StackItem size="fill">
-                    <Text type="supporting" color="secondary">
-                      From your idea: “{ideaPreview}”
-                    </Text>
-                  </StackItem>
-                  {questionStatus === "ready" && (
-                    <Button
-                      label="Regenerate"
-                      variant="ghost"
-                      size="sm"
-                      className="min-h-11 md:min-h-0"
-                      onClick={() => void generateQuestions(idea)}
-                    />
-                  )}
+              {questionStatus === "ready" && (
+                <HStack hAlign="end">
+                  <Button
+                    label="Regenerate"
+                    variant="ghost"
+                    size="sm"
+                    className="min-h-11 md:min-h-0"
+                    onClick={() => void generateQuestions(idea)}
+                  />
                 </HStack>
               )}
 
@@ -1100,9 +1084,6 @@ function Wizard() {
               <MetadataList orientation="vertical">
                 <MetadataListItem label="Project name">
                   {name.trim() || "Not set"}
-                </MetadataListItem>
-                <MetadataListItem label="Idea">
-                  {idea.trim() || "Not set"}
                 </MetadataListItem>
                 {questions.map((question) => (
                   <MetadataListItem key={question.id} label={question.label}>
