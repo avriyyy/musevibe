@@ -1,5 +1,5 @@
 import type { Platform, Timeline } from "./project-options";
-import type { WizardAnswerValue } from "./wizard";
+import type { WizardAnswerValue, WizardQuestion } from "./wizard";
 
 export type TaskStatus = "todo" | "doing" | "done";
 
@@ -27,6 +27,9 @@ export interface Project {
   /** Chat model chosen in the composer, reused by the wizard generators. */
   model?: string;
   answers?: ProjectAnswer[];
+  /** Cached questionnaire so a refresh reuses it instead of calling the AI again. */
+  questions?: WizardQuestion[];
+  questionSource?: "ai" | "local";
   /** Image URL or data URL for the project logo. Absent means initials. */
   logoUrl?: string;
 }

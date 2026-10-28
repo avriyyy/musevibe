@@ -272,6 +272,14 @@ function Wizard() {
     setQuestions(nextQuestions);
     setQuestionSource(nextSource);
     setQuestionStatus("ready");
+    // Cache the questionnaire on the project so a refresh reuses it instead
+    // of calling the AI again. Answers are matched back by question id.
+    if (projectIdRef.current) {
+      useVibe.getState().updateProject(projectIdRef.current, {
+        questions: nextQuestions,
+        questionSource: nextSource,
+      });
+    }
     setAnswers((current) => {
       const restored = restoreAnswers(nextQuestions);
       const next: WizardAnswers = { ...restored };
@@ -294,8 +302,13 @@ function Wizard() {
 
   useEffect(() => {
     if (!idea.trim() || generatedFor === idea.trim()) return;
+    // The questionnaire is cached on the project; the hydration effect below
+    // picks it up, so never call the AI when a cache entry exists.
+    const cached = useVibe
+      .getState()
+      .projects.find((item) => item.id === projectIdRef.current)?.questions;
+    if (cached?.length) return;
     // One request per idea text; the generator records its target up front.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void generateQuestions(idea);
   }, [idea, generatedFor, generateQuestions]);
 
@@ -315,6 +328,18 @@ function Wizard() {
     setLogoUrl(project.logoUrl ?? null);
     setLogoOrigin(project.logoUrl ? "upload" : null);
     setLogoStatus("idle");
+    // Reuse the cached questionnaire when it exists; the generator effect
+    // above already skips the AI call in that case.
+    if (project.questions?.length) {
+      // Cached questionnaire: hydration syncs external store state into local
+      // state once, then the generator effect skips the AI call for this idea.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setQuestions(project.questions);
+      setQuestionSource(project.questionSource ?? null);
+      setGeneratedFor((project.idea ?? "").trim());
+      setQuestionStatus("ready");
+      setAnswers(restoreAnswers(project.questions));
+    }
     setStep(Math.min(project.wizardStep ?? 0, REVIEW_STEP));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id]);
