@@ -1,11 +1,10 @@
 "use client";
 
 /**
- * Project workspace as an IDE: a resizable left rail holds expandable
- * sections (Plan, Code, Design) and the main pane switches between the
- * product brief, the task board, a code viewer, and a tldraw design canvas.
- * Briefs, tasks, files, and canvas snapshots all live in the local store,
- * so a reload keeps every pane.
+ * Project workspace: Plan, Design, and Code switch from tabs in the navbar.
+ * The plan canvas visualizes the brief, the task board, and every document
+ * as boards; selecting one opens its editor. Briefs, tasks, files, docs, and
+ * canvas snapshots all live in the local store, so a reload keeps everything.
  */
 
 import {
@@ -15,40 +14,27 @@ import {
   useRef,
   useState,
   useSyncExternalStore,
-  type ReactNode,
 } from "react";
 import Link from "next/link";
 import dynamic from "next/dynamic";
-import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
-import { TreeList, type TreeListItemData } from "@astryxdesign/core/TreeList";
-import { CodeBlock } from "@astryxdesign/core/CodeBlock";
-import { Icon } from "@astryxdesign/core/Icon";
+import { useMediaQuery } from "@astryxdesign/core/hooks";
 import {
   SegmentedControl,
   SegmentedControlItem,
 } from "@astryxdesign/core/SegmentedControl";
-import { useMediaQuery } from "@astryxdesign/core/hooks";
-import {
-  CodeBracketIcon,
-  DocumentTextIcon,
-  FolderIcon,
-  PaintBrushIcon,
-} from "@heroicons/react/24/outline";
+import { CodeBlock } from "@astryxdesign/core/CodeBlock";
 import type { TLEditorSnapshot } from "@tldraw/tldraw";
 import Markdown from "@/components/Markdown";
 import DocView from "@/components/DocView";
-import { buildPlanBoards } from "@/lib/boardHtml";
+import { buildPlanBoards, newDocumentBoard } from "@/lib/boardHtml";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
 import { formatModelLabel } from "@/lib/models";
-import { platformLabel } from "@/lib/project-options";
-import { frameworkLabel } from "@/lib/stack-options";
 import { starterFiles } from "@/lib/starter";
 import {
   DOC_TYPES,
   buildDocPrompt,
   buildPrototypePrompt,
-  docLabel,
   parseDocMarkdown,
   parsePrototypeHtml,
   type DocKind,
@@ -108,7 +94,6 @@ type View =
   | { kind: "tasks" }
   | { kind: "code"; fileId: string | null }
   | { kind: "design" }
-  | { kind: "docs" }
   | { kind: "doc"; docId: string | null };
 
 function subscribeHydration(onChange: () => void) {
@@ -189,11 +174,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const startedRef = useRef(false);
   const isMobile = useMediaQuery("(max-width: 768px)");
 
-  const rail = useResizable({
-    defaultSize: 272,
-    minSize: 208,
-    maxSize: 420,
-  });
+  /** Which navbar tab the current view belongs to. */
+  const activeTab = view.kind === "design" ? "design" : view.kind === "code" ? "code" : "plan";
 
   const runPlan = useCallback(
     async (force: boolean) => {
@@ -390,7 +372,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     (docId: string) => {
       useVibe.getState().removeDoc(projectId, docId);
       if (view.kind === "doc" && view.docId === docId) {
-        setView({ kind: "brief" });
+        setView({ kind: "plan" });
       }
     },
     [projectId, view],
@@ -539,21 +521,28 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     () => parseSnapshot(planScreen?.canvasJson ?? ""),
     [planScreen?.canvasJson],
   );
-  const planBoards = useMemo(
-    () =>
-      buildPlanBoards({
-        brief: prd,
-        tasks,
-        docs: docs.map((entry) => ({
-          id: entry.id,
-          kind: entry.kind,
-          title: entry.title,
-          markdown: entry.markdown,
-        })),
-        projectName: project?.name ?? "",
-      }),
-    [prd, tasks, docs, project?.name],
-  );
+  const planBoards = useMemo(() => {
+    const boards = buildPlanBoards({
+      brief: prd,
+      tasks,
+      docs: docs.map((entry) => ({
+        id: entry.id,
+        kind: entry.kind,
+        title: entry.title,
+        markdown: entry.markdown,
+      })),
+      projectName: project?.name ?? "",
+    });
+    // The Documents row ends with a board that creates a new note. Its id
+    // intentionally skips the doc- prefix so it never collides.
+    const docBoards = boards.filter((board) =>
+      board.id.startsWith("shape:board-doc-"),
+    ).length;
+    return [
+      ...boards,
+      newDocumentBoard(80 + docBoards * 560, 800),
+    ];
+  }, [prd, tasks, docs, project?.name]);
 
   const openBoard = useCallback((key: string) => {
     if (key === "brief") {
@@ -564,6 +553,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       setView({ kind: "tasks" });
       return;
     }
+    if (key === "new-doc") {
+      addDoc();
+      return;
+    }
     if (key.startsWith("doc-")) {
       const docId = key.slice("doc-".length);
       const state = useVibe.getState();
@@ -571,107 +564,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         setView({ kind: "doc", docId });
       }
     }
-  }, [projectId]);
+  }, [projectId, addDoc]);
 
-  const tree: TreeListItemData[] = useMemo(() => {
-    const sectionIcon = <Icon icon={FolderIcon} size="xsm" />;
-    const docIcon = <Icon icon={DocumentTextIcon} size="xsm" />;
-    const fileIcon = <Icon icon={CodeBracketIcon} size="xsm" />;
-    return [
-      {
-        id: "plan",
-        label: "Plan",
-        startContent: sectionIcon,
-        isExpanded: true,
-        children: [
-          {
-            id: "plan-overview",
-            label: "Overview",
-            startContent: docIcon,
-            isSelected: view.kind === "plan",
-            onClick: () => setView({ kind: "plan" }),
-          },
-          {
-            id: "plan-brief",
-            label: "Product brief",
-            startContent: docIcon,
-            isSelected: view.kind === "brief",
-            onClick: () => setView({ kind: "brief" }),
-          },
-          {
-            id: "plan-tasks",
-            label: "Task board",
-            startContent: docIcon,
-            isSelected: view.kind === "tasks",
-            onClick: () => setView({ kind: "tasks" }),
-          },
-          {
-            id: "plan-docs",
-            label: "Documents",
-            startContent: docIcon,
-            isExpanded: true,
-            children:
-              docs.length > 0
-                ? docs.map((entry) => ({
-                    id: `doc-${entry.id}`,
-                    label: `${docLabel(entry.kind)} — ${entry.title || "Untitled"}`,
-                    startContent: docIcon,
-                    isSelected:
-                      view.kind === "doc" && view.docId === entry.id,
-                    onClick: () => setView({ kind: "doc", docId: entry.id }),
-                  }))
-                : [
-                    {
-                      id: "docs-empty",
-                      label: "No documents yet",
-                    },
-                  ],
-          },
-        ],
-      },
-      {
-        id: "code",
-        label: "Code",
-        startContent: <Icon icon={CodeBracketIcon} size="xsm" />,
-        isExpanded: true,
-        children:
-          files.length > 0
-            ? files.map((file) => ({
-                id: `file-${file.id}`,
-                label: file.path,
-                startContent: fileIcon,
-                isSelected:
-                  view.kind === "code" &&
-                  (view.fileId ?? files[0]?.id) === file.id,
-                onClick: () => setView({ kind: "code", fileId: file.id }),
-              }))
-            : [
-                {
-                  id: "code-empty",
-                  label: "Starter files",
-                  startContent: fileIcon,
-                  isSelected: view.kind === "code",
-                  onClick: () => setView({ kind: "code", fileId: null }),
-                },
-              ],
-      },
-      {
-        id: "design",
-        label: "Design",
-        startContent: <Icon icon={PaintBrushIcon} size="xsm" />,
-        isExpanded: true,
-        children: [
-          {
-            id: "design-prototype",
-            label: "Prototype",
-            startContent: fileIcon,
-            isSelected: view.kind === "design",
-            onClick: () => setView({ kind: "design" }),
-          },
-        ],
-      },
-    ];
-  }, [docs, files, view]);
 
   if (!hydrated) {
     return <OpeningProject />;
@@ -724,7 +618,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
 
   return (
     <div className="flex h-dvh flex-col bg-[#0b0c10] text-[#f5f6f8]">
-      <header className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 px-4">
+      <header className="relative flex h-14 shrink-0 items-center gap-3 border-b border-white/10 px-4">
         <Link
           href="/"
           aria-label="Back to chat"
@@ -771,38 +665,52 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           </p>
         </div>
 
-        <div className="hidden shrink-0 items-center gap-2 text-[11px] text-[#9aa0ae] md:flex">
-          {project.platform && <Chip>{platformLabel(project.platform)}</Chip>}
-          {project.platform && project.framework && (
-            <Chip>{frameworkLabel(project.platform, project.framework)}</Chip>
-          )}
-          {project.model && <Chip>{formatModelLabel(project.model)}</Chip>}
-        </div>
+        <nav
+          aria-label="Workspace views"
+          className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 md:flex"
+        >
+          {(["plan", "design", "code"] as const).map((tab) => {
+            const selected = activeTab === tab;
+            return (
+              <button
+                key={tab}
+                type="button"
+                onClick={() => {
+                  if (tab === "plan") setView({ kind: "plan" });
+                  else if (tab === "design") setView({ kind: "design" });
+                  else setView({ kind: "code", fileId: files[0]?.id ?? null });
+                }}
+                aria-current={selected || undefined}
+                className={`h-7 rounded-full px-4 text-[13px] font-medium capitalize transition-colors ${
+                  selected
+                    ? "bg-white text-black"
+                    : "text-[#9aa0ae] hover:text-white"
+                }`}
+              >
+                {tab}
+              </button>
+            );
+          })}
+        </nav>
       </header>
 
       {isMobile && (
         <div className="shrink-0 border-b border-white/10 px-4 py-2">
           <SegmentedControl
             label="Workspace view"
-            value={view.kind === "doc" ? "docs" : view.kind}
+            value={activeTab}
             onChange={(next) => {
               if (next === "plan") setView({ kind: "plan" });
-              else if (next === "brief") setView({ kind: "brief" });
-              else if (next === "tasks") setView({ kind: "tasks" });
+              else if (next === "design") setView({ kind: "design" });
               else if (next === "code")
                 setView({ kind: "code", fileId: files[0]?.id ?? null });
-              else if (next === "design") setView({ kind: "design" });
-              else if (next === "docs") setView({ kind: "docs" });
             }}
             size="sm"
             layout="fill"
           >
             <SegmentedControlItem label="Plan" value="plan" />
-            <SegmentedControlItem label="Brief" value="brief" />
-            <SegmentedControlItem label="Tasks" value="tasks" />
-            <SegmentedControlItem label="Code" value="code" />
-            <SegmentedControlItem label="Docs" value="docs" />
             <SegmentedControlItem label="Design" value="design" />
+            <SegmentedControlItem label="Code" value="code" />
           </SegmentedControl>
         </div>
       )}
@@ -825,41 +733,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       )}
 
       <div className="flex min-h-0 flex-1">
-        {!isMobile && (
-          <>
-            <div
-              className="flex min-h-0 shrink-0 flex-col border-r border-white/10 bg-[#0b0c10]"
-              style={{ width: rail.size }}
-            >
-              <p className="px-4 pb-1 pt-4 text-[10px] font-medium uppercase tracking-[0.12em] text-[#5b6472]">
-                Explorer
-              </p>
-              <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-                <TreeList items={tree} density="compact" />
-              </div>
-              <div className="shrink-0 border-t border-white/10 p-2">
-                <button
-                  type="button"
-                  onClick={addDoc}
-                  className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] text-[#9aa0ae] hover:bg-white/5 hover:text-white"
-                >
-                  <span aria-hidden className="text-[16px] leading-none">
-                    +
-                  </span>
-                  New document
-                </button>
-              </div>
-            </div>
-            <ResizeHandle
-              direction="horizontal"
-              hasDivider
-              isAlwaysVisible={false}
-              resizable={rail.props}
-              label="Resize explorer"
-            />
-          </>
-        )}
-
         <main className="flex min-w-0 flex-1 flex-col bg-[#0b0c10]">
           {view.kind === "plan" && (
             <div className="min-h-0 flex-1">
@@ -1081,70 +954,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             </div>
           )}
 
-          {view.kind === "docs" && (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-[860px] px-5 pb-20 pt-7">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[#5b6472]">
-                  Plan
-                </p>
-                <h2 className="mt-1 text-[22px] font-semibold tracking-tight">
-                  Documents
-                </h2>
-                <p className="mt-1 text-[12px] text-[#9aa0ae]">
-                  Generated from the idea and brief, then yours to edit.
-                </p>
-                <ul className="mt-4 space-y-2">
-                  {docs.map((entry) => (
-                    <li key={entry.id}>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setView({ kind: "doc", docId: entry.id })
-                        }
-                        className="group flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-[#17181d] px-4 py-3 text-left hover:border-white/25"
-                      >
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-[14px] font-semibold text-[#f5f6f8]">
-                            {docLabel(entry.kind)} — {entry.title || "Untitled"}
-                          </span>
-                          <span className="mt-0.5 block truncate text-[12px] text-[#9aa0ae]">
-                            {entry.markdown.trim()
-                              ? `${entry.markdown.trim().split(/\s+/).length} words`
-                              : "Empty — generate or write it"}
-                          </span>
-                        </span>
-                        <svg
-                          aria-hidden
-                          width="14"
-                          height="14"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="1.8"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                          className="shrink-0 text-[#5b6472] group-hover:text-white"
-                        >
-                          <path d="M9 6l6 6-6 6" />
-                        </svg>
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-                <button
-                  type="button"
-                  onClick={addDoc}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 px-4 py-3 text-[13px] text-[#9aa0ae] hover:border-white/25 hover:text-white"
-                >
-                  <span aria-hidden className="text-[16px] leading-none">
-                    +
-                  </span>
-                  New document
-                </button>
-              </div>
-            </div>
-          )}
-
           {view.kind === "doc" && (
             <div className="min-h-0 flex-1 overflow-y-auto">
               {activeDoc ? (
@@ -1161,9 +970,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                   }
                   onDelete={() => deleteDoc(activeDoc.id)}
                   onGenerate={() => void generateDoc(activeDoc.id)}
-                  onBack={
-                    isMobile ? () => setView({ kind: "docs" }) : undefined
-                  }
+                  onBack={() => setView({ kind: "plan" })}
                 />
               ) : (
                 <div className="mx-auto w-full max-w-[860px] px-5 py-24 text-center">
@@ -1171,8 +978,16 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                     Document not found
                   </p>
                   <p className="mx-auto mt-2 max-w-sm text-[13px] text-[#9aa0ae]">
-                    It may have been deleted. Pick another from the list.
+                    It may have been deleted. Back to the plan overview to
+                    pick another.
                   </p>
+                  <button
+                    type="button"
+                    onClick={() => setView({ kind: "plan" })}
+                    className="mt-6 inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90"
+                  >
+                    Plan overview
+                  </button>
                 </div>
               )}
             </div>
@@ -1274,14 +1089,6 @@ function OpeningProject() {
       <span className="size-5 animate-pulse rounded-full bg-white/30" />
       <span className="sr-only">Opening your project</span>
     </div>
-  );
-}
-
-function Chip({ children }: { children: ReactNode }) {
-  return (
-    <span className="rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[#c9cdd6]">
-      {children}
-    </span>
   );
 }
 

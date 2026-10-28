@@ -326,3 +326,15 @@ export function buildPlanBoards(input: PlanBoardInput): BoardSpec[] {
   });
   return boards;
 }
+
+/** Trailing dashed board that creates a supporting note when selected. */
+export function newDocumentBoard(x: number, y: number): BoardSpec {
+  return {
+    id: "shape:board-new-doc",
+    html: `<!DOCTYPE html><html lang="en"><head><meta charset="utf-8" /><style>${CARD_CSS}body{background:transparent}.board{border:2px dashed #bbb;border-radius:16px;background:rgba(255,255,255,.7);text-align:center;padding-top:120px}.plus{font-size:44px;color:#888;line-height:1}.hint{font-size:12px;color:#8a8a8a;margin-top:12px}</style></head><body><div class="board"><div class="plus">+</div><div class="hint">Select to add a supporting document</div></div></body></html>`,
+    w: 480,
+    h: 600,
+    x,
+    y,
+  };
+}

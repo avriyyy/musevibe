@@ -47,10 +47,10 @@ export default function DocView({
   // Switching documents resets the editor. Typing stays local; the parent
   // only hears about it on a debounce so every keystroke is not a write.
   useEffect(() => {
+    // Intentional one-time sync: the editor resets when its document changes.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(doc.markdown);
     savedRef.current = doc.markdown;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMode(doc.markdown.trim() ? "preview" : "edit");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.id]);
@@ -70,9 +70,9 @@ export default function DocView({
   useEffect(() => {
     if (doc.markdown === savedRef.current || doc.markdown === draft) return;
     savedRef.current = doc.markdown;
+    // Intentional sync: adopt generated content the user did not type.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDraft(doc.markdown);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (doc.markdown.trim()) setMode("preview");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [doc.markdown]);
@@ -101,7 +101,7 @@ export default function DocView({
           >
             <path d="M15 6l-6 6 6 6" />
           </svg>
-          All documents
+          Plan overview
         </button>
       )}
       <input
