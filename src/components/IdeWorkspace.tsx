@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Project workspace: Plan, Design, and Code switch from tabs in the navbar.
+ * Project workspace: Plan and Design switch from tabs in the navbar.
  * The plan canvas visualizes the brief, the task board, and every document
  * as boards; selecting one opens its editor. Briefs, tasks, files, docs, and
  * canvas snapshots all live in the local store, so a reload keeps everything.
@@ -22,7 +22,15 @@ import {
   SegmentedControl,
   SegmentedControlItem,
 } from "@astryxdesign/core/SegmentedControl";
-import { CodeBlock } from "@astryxdesign/core/CodeBlock";
+import { Card } from "@astryxdesign/core/Card";
+import { EmptyState } from "@astryxdesign/core/EmptyState";
+import { Icon } from "@astryxdesign/core/Icon";
+import { StatusDot } from "@astryxdesign/core/StatusDot";
+import { Heading, Text } from "@astryxdesign/core/Text";
+import {
+  CheckCircleIcon,
+  InboxIcon,
+} from "@heroicons/react/24/outline";
 import type { TLEditorSnapshot } from "@tldraw/tldraw";
 import Markdown from "@/components/Markdown";
 import DocView from "@/components/DocView";
@@ -30,7 +38,6 @@ import { buildPlanBoards, newDocumentBoard } from "@/lib/boardHtml";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
 import { formatModelLabel } from "@/lib/models";
-import { starterFiles } from "@/lib/starter";
 import {
   DOC_TYPES,
   buildDocPrompt,
@@ -80,10 +87,38 @@ const EMPTY_TASKS: Task[] = [];
 const EMPTY_FILES: CodeFile[] = [];
 const EMPTY_SCREENS: Screen[] = [];
 const EMPTY_DOCS: ProjectDoc[] = [];
-const COLUMNS: { status: TaskStatus; label: string; empty: string }[] = [
-  { status: "todo", label: "To do", empty: "The first tasks land here." },
-  { status: "doing", label: "In progress", empty: "Move a task here when you start." },
-  { status: "done", label: "Done", empty: "Finished tasks collect here." },
+const COLUMNS: {
+  status: TaskStatus;
+  label: string;
+  variant: "neutral" | "accent" | "success";
+  emptyTitle: string;
+  emptyDescription: string;
+  emptyIcon: typeof InboxIcon;
+}[] = [
+  {
+    status: "todo",
+    label: "To do",
+    variant: "neutral",
+    emptyTitle: "To do is empty",
+    emptyDescription: "The first tasks land here.",
+    emptyIcon: InboxIcon,
+  },
+  {
+    status: "doing",
+    label: "In progress",
+    variant: "accent",
+    emptyTitle: "Nothing in progress",
+    emptyDescription: "Move a task here when you start.",
+    emptyIcon: InboxIcon,
+  },
+  {
+    status: "done",
+    label: "Done",
+    variant: "success",
+    emptyTitle: "Nothing done yet",
+    emptyDescription: "Finished tasks collect here.",
+    emptyIcon: CheckCircleIcon,
+  },
 ];
 
 type Phase = "brief" | "tasks" | null;
@@ -92,7 +127,6 @@ type View =
   | { kind: "plan" }
   | { kind: "brief" }
   | { kind: "tasks" }
-  | { kind: "code"; fileId: string | null }
   | { kind: "design" }
   | { kind: "doc"; docId: string | null };
 
@@ -175,7 +209,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const isMobile = useMediaQuery("(max-width: 768px)");
 
   /** Which navbar tab the current view belongs to. */
-  const activeTab = view.kind === "design" ? "design" : view.kind === "code" ? "code" : "plan";
+  const activeTab = view.kind === "design" ? "design" : "plan";
 
   const runPlan = useCallback(
     async (force: boolean) => {
@@ -272,13 +306,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       void runPlan(false);
     });
   }, [hydrated, project, runPlan]);
-
-  // The Code pane seeds one clearly-marked local stub so it never opens
-  // empty. The model has not written app code yet; this is a placeholder.
-  useEffect(() => {
-    if (view.kind !== "code" || !project || files.length > 0) return;
-    useVibe.getState().setFiles(projectId, starterFiles(project));
-  }, [view.kind, project, files.length, projectId]);
 
   // The Plan documents seed once per project: the six engineering docs.
   // The PRD inherits whatever the brief holds at seed time; the brief
@@ -495,10 +522,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     [projectId],
   );
 
-  const activeFile =
-    view.kind === "code"
-      ? (files.find((file) => file.id === view.fileId) ?? files[0] ?? null)
-      : null;
   const prototypeScreen =
     screens.find((screen) => screen.name === "Prototype") ??
     screens[0] ??
@@ -669,7 +692,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           aria-label="Workspace views"
           className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 md:flex"
         >
-          {(["plan", "design", "code"] as const).map((tab) => {
+          {(["plan", "design"] as const).map((tab) => {
             const selected = activeTab === tab;
             return (
               <button
@@ -677,8 +700,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 type="button"
                 onClick={() => {
                   if (tab === "plan") setView({ kind: "plan" });
-                  else if (tab === "design") setView({ kind: "design" });
-                  else setView({ kind: "code", fileId: files[0]?.id ?? null });
+                  else setView({ kind: "design" });
                 }}
                 aria-current={selected || undefined}
                 className={`h-7 rounded-full px-4 text-[13px] font-medium capitalize transition-colors ${
@@ -702,15 +724,12 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             onChange={(next) => {
               if (next === "plan") setView({ kind: "plan" });
               else if (next === "design") setView({ kind: "design" });
-              else if (next === "code")
-                setView({ kind: "code", fileId: files[0]?.id ?? null });
             }}
             size="sm"
             layout="fill"
           >
             <SegmentedControlItem label="Plan" value="plan" />
             <SegmentedControlItem label="Design" value="design" />
-            <SegmentedControlItem label="Code" value="code" />
           </SegmentedControl>
         </div>
       )}
@@ -847,12 +866,11 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                   </p>
                 )}
 
-                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="mt-4 grid items-start gap-3 md:grid-cols-3">
                   {COLUMNS.map((column) => (
                     <TaskColumn
                       key={column.status}
-                      label={column.label}
-                      empty={column.empty}
+                      status={column.status}
                       tasks={tasks.filter((task) => task.status === column.status)}
                       loading={phase === "tasks" && tasks.length === 0}
                       onMove={(task, next) =>
@@ -864,56 +882,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                     />
                   ))}
                 </div>
-              </div>
-            </div>
-          )}
-
-          {view.kind === "code" && (
-            <div className="flex min-h-0 flex-1 flex-col">
-              {files.length > 0 && (
-                <div
-                  role="tablist"
-                  aria-label="Project files"
-                  className="flex shrink-0 items-center gap-1 overflow-x-auto border-b border-white/10 px-3 py-2"
-                >
-                  {files.map((file) => {
-                    const selected =
-                      (activeFile?.id ?? files[0]?.id) === file.id;
-                    return (
-                      <button
-                        key={file.id}
-                        type="button"
-                        role="tab"
-                        aria-selected={selected}
-                        onClick={() =>
-                          setView({ kind: "code", fileId: file.id })
-                        }
-                        className={`shrink-0 rounded-lg px-3 py-1.5 font-mono text-[12px] ${
-                          selected
-                            ? "bg-white/10 text-white"
-                            : "text-[#9aa0ae] hover:bg-white/5 hover:text-white"
-                        }`}
-                      >
-                        {file.path}
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-              <div className="min-h-0 flex-1 overflow-auto p-4">
-                {activeFile ? (
-                  <CodeBlock
-                    code={activeFile.content}
-                    language={codeLanguage(activeFile.path)}
-                    hasLineNumbers
-                    size="sm"
-                    style={{ width: "100%", height: "100%" }}
-                  />
-                ) : (
-                  <p className="text-[13px] text-[#9aa0ae]">
-                    Preparing the starter files…
-                  </p>
-                )}
               </div>
             </div>
           )}
@@ -1002,31 +970,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   );
 }
 
-/** Map a file path to a highlighter language the viewer supports. */
-function codeLanguage(path: string): string | undefined {
-  const ext = path.split(".").pop()?.toLowerCase();
-  if (
-    ext === "ts" ||
-    ext === "tsx" ||
-    ext === "typescript" ||
-    ext === "js" ||
-    ext === "jsx" ||
-    ext === "javascript" ||
-    ext === "json" ||
-    ext === "html" ||
-    ext === "xml" ||
-    ext === "svg" ||
-    ext === "css" ||
-    ext === "scss" ||
-    ext === "less" ||
-    ext === "bash" ||
-    ext === "sh"
-  ) {
-    return ext;
-  }
-  return undefined;
-}
-
 function OpeningProject() {
   return (
     <div
@@ -1051,43 +994,48 @@ function Bar({ width }: { width: string }) {
 }
 
 function TaskColumn({
-  label,
-  empty,
+  status,
   tasks,
   loading,
   onMove,
   onRemove,
 }: {
-  label: string;
-  empty: string;
+  status: TaskStatus;
   tasks: Task[];
   loading: boolean;
   onMove: (task: Task, next: TaskStatus) => void;
   onRemove: (task: Task) => void;
 }) {
+  const meta = COLUMNS.find((column) => column.status === status) ?? COLUMNS[0];
   return (
-    <div className="rounded-2xl border border-white/10 bg-[#0f1014] p-3">
-      <div className="flex items-center justify-between px-1 pb-2">
-        <h3 className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#9aa0ae]">
-          {label}
-        </h3>
-        <span className="text-[11px] text-[#5b6472]">{tasks.length}</span>
+    <Card variant="muted" padding={0}>
+      <div className="flex items-center gap-2 border-b border-white/10 px-3 py-2.5">
+        <StatusDot variant={meta.variant} label={`${meta.label} status`} />
+        <span className="text-[13px] font-semibold text-[#f5f6f8]">
+          {meta.label}
+        </span>
+        <span className="ml-auto text-[11px] tabular-nums text-[#9aa0ae]">
+          {tasks.length}
+        </span>
       </div>
 
-      <ul className="space-y-2">
+      <div className="flex flex-col gap-2 p-2">
         {loading && (
-          <li className="rounded-xl border border-white/10 bg-[#17181d] p-3">
+          <Card>
             <Bar width="82%" />
             <div className="mt-2">
               <Bar width="54%" />
             </div>
-          </li>
+          </Card>
         )}
 
         {!loading && tasks.length === 0 && (
-          <li className="rounded-xl border border-dashed border-white/10 px-3 py-6 text-center text-[11px] text-[#5b6472]">
-            {empty}
-          </li>
+          <EmptyState
+            isCompact
+            icon={<Icon icon={meta.emptyIcon} size="lg" color="secondary" />}
+            title={meta.emptyTitle}
+            description={meta.emptyDescription}
+          />
         )}
 
         {tasks.map((task) => {
@@ -1096,10 +1044,7 @@ function TaskColumn({
           const next = index < COLUMNS.length - 1 ? COLUMNS[index + 1] : null;
 
           return (
-            <li
-              key={task.id}
-              className="group rounded-xl border border-white/10 bg-[#17181d] p-3"
-            >
+            <Card key={task.id} className="group">
               <p
                 className={`text-[13px] font-medium leading-snug ${
                   task.status === "done"
@@ -1110,9 +1055,9 @@ function TaskColumn({
                 {task.title}
               </p>
               {task.notes && (
-                <p className="mt-1 text-[11px] leading-relaxed text-[#9aa0ae]">
+                <Text type="supporting" color="secondary" maxLines={3}>
                   {task.notes}
-                </p>
+                </Text>
               )}
 
               <div className="mt-2.5 flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
@@ -1151,11 +1096,11 @@ function TaskColumn({
                   </svg>
                 </button>
               </div>
-            </li>
+            </Card>
           );
         })}
-      </ul>
-    </div>
+      </div>
+    </Card>
   );
 }
 
