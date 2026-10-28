@@ -78,6 +78,7 @@ import { useVibe } from "@/lib/store";
 import { createDraftProject } from "@/lib/draft";
 
 const STEPS = [
+  { label: "Stack" },
   { label: "Questions" },
   { label: "Scope", isOptional: true },
   { label: "Logo", isOptional: true },
@@ -400,6 +401,17 @@ function Wizard() {
     }
   }, [idea, answers, questions, stackFor, projectModel]);
 
+  // The stack step comes first, so the recommendation starts from the idea
+  // alone as soon as the draft resolves. Answers refine it later when the
+  // user leaves the questions step; a fingerprint guard keeps it to one
+  // request per change.
+  useEffect(() => {
+    if (!idea.trim() || stackStatus !== "idle") return;
+    // Fire-and-forget fetch on mount, same pattern as the questions loader.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void recommendStack();
+  }, [idea, stackStatus, recommendStack]);
+
   const generateLogo = async () => {
     const description = logoPrompt.trim();
     if (!description || logoStatus === "loading") return;
@@ -464,14 +476,14 @@ function Wizard() {
     }
   }
 
-  const errorsByStep: Record<string, string>[] = [questionErrors, {}, {}, {}];
+  const errorsByStep: Record<string, string>[] = [{}, questionErrors, {}, {}, {}];
   const shownErrors = (index: number) =>
     attempted.has(index) ? errorsByStep[index] : {};
 
   const questionIssueCount = Object.keys(questionErrors).length;
   const outstanding = STEPS.map((s, index) => {
     let issues = Object.values(errorsByStep[index]);
-    if (index === 0 && questionIssueCount > 0) {
+    if (index === 1 && questionIssueCount > 0) {
       issues = [
         `${questionIssueCount} ${
           questionIssueCount === 1 ? "question needs" : "questions need"
@@ -488,7 +500,7 @@ function Wizard() {
     (idea.trim().length > 0 && generatedFor !== idea.trim());
 
   const focusFirstError = (index: number) => {
-    if (index !== 0) return false;
+    if (index !== 1) return false;
     const question = questions.find((item) => questionErrors[item.id]);
     const node = question ? questionRefs.current[question.id] : null;
     if (!node) return false;
@@ -548,8 +560,8 @@ function Wizard() {
   };
 
   const goToStep = (next: number) => {
-    if (next > 0 && questionsPending) return;
-    if (next === 1) {
+    if (next > 1 && questionsPending) return;
+    if (next === 2) {
       void recommendStack();
     }
     saveProgress(next);
@@ -558,30 +570,36 @@ function Wizard() {
 
   const goNext = () => {
     if (step === 0) {
-      if (questionStatus === "loading") return;
-      setAttempted((previous) => new Set(previous).add(0));
-      if (focusFirstError(0)) return;
-      void recommendStack();
       saveProgress(1);
       setStep(1);
       return;
     }
 
     if (step === 1) {
+      if (questionStatus === "loading") return;
+      setAttempted((previous) => new Set(previous).add(1));
+      if (focusFirstError(1)) return;
+      void recommendStack();
       saveProgress(2);
       setStep(2);
       return;
     }
 
     if (step === 2) {
+      saveProgress(3);
+      setStep(3);
+      return;
+    }
+
+    if (step === 3) {
       saveProgress(REVIEW_STEP);
       setStep(REVIEW_STEP);
       return;
     }
 
     if (questionsPending) {
-      saveProgress(0);
-      setStep(0);
+      saveProgress(1);
+      setStep(1);
       if (questionStatus !== "loading") void generateQuestions(idea);
       return;
     }
@@ -790,6 +808,106 @@ function Wizard() {
           {step === 0 && (
             <VStack gap={5}>
               <VStack gap={1}>
+                <Heading level={2}>Pick your stack</Heading>
+                <Text type="supporting" color="secondary">
+                  Choose where it runs and which framework to start from. The
+                  AI recommendation is marked from your idea, but the final
+                  call is yours.
+                </Text>
+              </VStack>
+
+              {idea.trim() && (
+                <Text type="supporting" color="secondary">
+                  From your idea: “{ideaPreview}”
+                </Text>
+              )}
+
+              {stackStatus === "loading" && (
+                <div
+                  role="status"
+                  aria-live="polite"
+                  className="flex items-center gap-3">
+                  <Spinner size="md" />
+                  <Text type="supporting" color="secondary">
+                    Reading your idea and picking a stack…
+                  </Text>
+                </div>
+              )}
+
+              {stackStatus === "ready" && stackSource === "local" && (
+                <Banner
+                  status="info"
+                  title="Using the default stack"
+                  description="The AI provider is unavailable right now, so this step starts from web and Next.js. You can still change everything."
+                  collapsible={false}
+                />
+              )}
+
+              {stackStatus !== "loading" && (
+                <FormLayout defaultOptionality="optional">
+                  <RadioList
+                    label="Platform"
+                    value={platform}
+                    onChange={pickPlatform}>
+                    {PLATFORMS.map((option) => {
+                      const isRecommended =
+                        stackSource === "ai" && stackRec?.platform === option.value;
+                      return (
+                        <RadioListItem
+                          key={option.value}
+                          value={option.value}
+                          label={isRecommended ? `${option.label} · Recommended` : option.label}
+                          description={option.description}
+                        />
+                      );
+                    })}
+                  </RadioList>
+                  <RadioList
+                    label="Framework"
+                    value={framework}
+                    onChange={pickFramework}
+                    description={
+                      stackSource === "ai" && stackRec?.reason
+                        ? `AI recommends ${frameworkLabel(stackRec.platform, stackRec.framework)}: ${stackRec.reason}`
+                        : "The starting point for generated code."
+                    }>
+                    {FRAMEWORKS[platform].map((option) => {
+                      const isRecommended =
+                        stackSource === "ai" &&
+                        stackRec?.platform === platform &&
+                        stackRec.framework === option.value;
+                      return (
+                        <RadioListItem
+                          key={option.value}
+                          value={option.value}
+                          label={isRecommended ? `${option.label} · Recommended` : option.label}
+                          description={option.description}
+                        />
+                      );
+                    })}
+                  </RadioList>
+                  {stackSource === "ai" &&
+                    stackRec &&
+                    (platform !== stackRec.platform || framework !== stackRec.framework) && (
+                      <Button
+                        label="Use AI pick"
+                        variant="ghost"
+                        size="sm"
+                        className="min-h-11 md:min-h-0 self-start"
+                        onClick={() => {
+                          setPlatform(stackRec.platform);
+                          setFramework(stackRec.framework);
+                        }}
+                      />
+                    )}
+                </FormLayout>
+              )}
+            </VStack>
+          )}
+
+          {step === 1 && (
+            <VStack gap={5}>
+              <VStack gap={1}>
                 <Heading level={2}>Shape the build</Heading>
                 <Text type="supporting" color="secondary">
                   Answer what you already know. These answers become context for
@@ -845,104 +963,30 @@ function Wizard() {
             </VStack>
           )}
 
-          {step === 1 && (
+          {step === 2 && (
             <VStack gap={5}>
               <VStack gap={1}>
-                <Heading level={2}>Shape the first build</Heading>
+                <Heading level={2}>Set the timeline</Heading>
                 <Text type="supporting" color="secondary">
-                  Pick where it runs, which framework to start from, and the
-                  window you want to aim for. Everything here has a default,
-                  so you can skip this step.
+                  Pick the window you want to aim for. It shapes how much the
+                  first version takes on. Everything here has a default, so
+                  you can skip this step.
                 </Text>
               </VStack>
 
-              {stackStatus === "loading" && (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className="flex items-center gap-3">
-                  <Spinner size="md" />
-                  <Text type="supporting" color="secondary">
-                    Reading your answers and picking a stack…
-                  </Text>
-                </div>
-              )}
-
-              {stackStatus === "ready" && stackSource === "local" && (
-                <Banner
-                  status="info"
-                  title="Using the default stack"
-                  description="The AI provider is unavailable right now, so this step starts from web and Next.js. You can still change everything."
-                  collapsible={false}
+              <FormLayout defaultOptionality="optional">
+                <Selector
+                  label="Target timeline"
+                  options={TIMELINES}
+                  value={timeline}
+                  onChange={(value) => setTimeline(value as Timeline)}
+                  description="A target, not a deadline."
                 />
-              )}
-
-              {stackStatus !== "loading" && (
-                <FormLayout defaultOptionality="optional">
-                  <RadioList
-                    label="Platform"
-                    value={platform}
-                    onChange={pickPlatform}>
-                    {PLATFORMS.map((option) => (
-                      <RadioListItem
-                        key={option.value}
-                        value={option.value}
-                        label={option.label}
-                        description={option.description}
-                      />
-                    ))}
-                  </RadioList>
-                  <RadioList
-                    label="Framework"
-                    value={framework}
-                    onChange={pickFramework}
-                    description={
-                      stackSource === "ai" && stackRec?.reason
-                        ? `AI recommends ${frameworkLabel(stackRec.platform, stackRec.framework)}: ${stackRec.reason}`
-                        : "The starting point for generated code."
-                    }>
-                    {FRAMEWORKS[platform].map((option) => {
-                      const isRecommended =
-                        stackSource === "ai" &&
-                        stackRec?.platform === platform &&
-                        stackRec.framework === option.value;
-                      return (
-                        <RadioListItem
-                          key={option.value}
-                          value={option.value}
-                          label={isRecommended ? `${option.label} · Recommended` : option.label}
-                          description={option.description}
-                        />
-                      );
-                    })}
-                  </RadioList>
-                  {stackSource === "ai" &&
-                    stackRec &&
-                    (platform !== stackRec.platform || framework !== stackRec.framework) && (
-                      <Button
-                        label="Use AI pick"
-                        variant="ghost"
-                        size="sm"
-                        className="min-h-11 md:min-h-0 self-start"
-                        onClick={() => {
-                          setPlatform(stackRec.platform);
-                          setFramework(stackRec.framework);
-                        }}
-                      />
-                    )}
-                  <Selector
-                    label="Target timeline"
-                    options={TIMELINES}
-                    value={timeline}
-                    onChange={(value) => setTimeline(value as Timeline)}
-                    description="A target, not a deadline."
-                  />
-                </FormLayout>
-              )}
+              </FormLayout>
             </VStack>
           )}
 
-          {step === 2 && (
+          {step === 3 && (
             <VStack gap={5}>
               <VStack gap={1}>
                 <Heading level={2}>Give it a mark</Heading>
@@ -1171,13 +1215,13 @@ function Wizard() {
                   label={
                     isLastStep
                       ? "Finish setup"
-                      : step === 0 && questionStatus === "loading"
+                      : step === 1 && questionStatus === "loading"
                         ? "Drafting questions…"
                         : "Next"
                   }
                   variant="primary"
                   className="min-h-11 md:min-h-0"
-                  isDisabled={step === 0 && questionStatus !== "ready"}
+                  isDisabled={step === 1 && questionStatus !== "ready"}
                   onClick={goNext}
                 />
               </HStack>

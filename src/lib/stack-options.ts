@@ -76,6 +76,7 @@ export function buildStackPrompt(idea: string, answers: string): string {
     trimmedAnswers ? `What the user already answered: "${trimmedAnswers}".` : "",
     "",
     "Choose one platform and one framework from exactly these pairs:",
+    "When no answers are given yet, base the pick on the idea alone.",
     '- web: "nextjs", "vite-react".',
     '- mobile: "expo", "react-native".',
     '- desktop: "tauri", "electron".',
