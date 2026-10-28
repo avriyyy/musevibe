@@ -988,24 +988,33 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           )}
 
           {view.kind === "design" && (
-            <div className="flex min-h-0 flex-1 flex-col">
-              <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-2">
-                <span className="font-mono text-[12px] text-[#c9cdd6]">
-                  prototype.html
-                </span>
-                <span className="hidden text-[11px] text-[#5b6472] sm:block">
-                  Live preview of the generated page
-                </span>
+            <div className="relative min-h-0 flex-1">
+              {prototypeFile && prototypeScreen && (
                 <button
                   type="button"
                   onClick={() => void generatePrototype()}
                   disabled={protoBusy}
-                  className="ml-auto flex h-7 items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-[12px] text-[#c9cdd6] hover:bg-white/10 hover:text-white disabled:opacity-50"
+                  title="Generate the page again from the idea and brief"
+                  className="absolute right-3 top-3 z-10 flex h-8 items-center gap-1.5 rounded-full border border-white/10 bg-[#17181d]/95 px-3 text-[12px] text-[#c9cdd6] shadow-xl hover:bg-white/10 hover:text-white disabled:opacity-50"
                 >
+                  <svg
+                    aria-hidden
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M20 11a8 8 0 1 0-2.3 5.7" />
+                    <path d="M20 4v7h-7" />
+                  </svg>
                   {protoBusy ? "Generating…" : "Regenerate"}
                 </button>
-              </div>
-              <div className="min-h-0 flex-1">
+              )}
+              <div className="h-full min-h-0">
                 {prototypeFile && prototypeScreen ? (
                   <DesignCanvas
                     key={prototypeScreen.id}
