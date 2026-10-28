@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { CodeBlock } from "@astryxdesign/core/CodeBlock";
+import Mermaid from "./Mermaid";
 
 /**
  * Small markdown renderer for AI briefs and plan documents. It covers
@@ -8,13 +10,48 @@ import type { ReactNode } from "react";
  */
 
 type Block =
-  | { kind: "heading"; level: 1 | 2 | 3; text: string }
+  | { kind: "heading"; level: 1 | 2 | 3; text: string; id: string }
   | { kind: "list"; ordered: boolean; items: string[] }
   | { kind: "table"; headers: string[]; aligns: ("left" | "center" | "right")[]; rows: string[][] }
   | { kind: "quote"; text: string }
-  | { kind: "code"; text: string }
+  | { kind: "code"; language: string; text: string }
   | { kind: "rule" }
   | { kind: "paragraph"; text: string };
+
+export interface DocHeading {
+  id: string;
+  level: number;
+  text: string;
+}
+
+/** Deterministic heading ids shared by the renderer and the TOC extractor. */
+function slugifyHeading(text: string, seen: Map<string, number>): string {
+  const base =
+    text
+      .toLowerCase()
+      .replace(/[`*_~[\]()]/g, "")
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-+|-+$/g, "") || "section";
+  const count = seen.get(base) ?? 0;
+  seen.set(base, count + 1);
+  return count === 0 ? base : `${base}-${count}`;
+}
+
+/** Headings in document order with the same ids the renderer assigns. */
+export function extractHeadings(markdown: string): DocHeading[] {
+  const seen = new Map<string, number>();
+  const out: DocHeading[] = [];
+  for (const raw of markdown.replace(/\r\n/g, "\n").split("\n")) {
+    const match = raw.trimEnd().match(/^(#{1,3})\s+(.*)$/);
+    if (!match) continue;
+    out.push({
+      id: slugifyHeading(match[2].trim(), seen),
+      level: match[1].length,
+      text: match[2].trim(),
+    });
+  }
+  return out;
+}
 
 export default function Markdown({
   text,
@@ -33,9 +70,10 @@ export default function Markdown({
 function toBlocks(text: string): Block[] {
   const lines = text.replace(/\r\n/g, "\n").split("\n");
   const blocks: Block[] = [];
+  const seenHeadings = new Map<string, number>();
   let paragraph: string[] = [];
   let list: { ordered: boolean; items: string[] } | null = null;
-  let code: string[] | null = null;
+  let code: { language: string; lines: string[] } | null = null;
 
   const flushParagraph = () => {
     if (!paragraph.length) return;
@@ -79,17 +117,18 @@ function toBlocks(text: string): Block[] {
 
     if (code) {
       if (line.trim().startsWith("```")) {
-        blocks.push({ kind: "code", text: code.join("\n") });
+        blocks.push({ kind: "code", language: code.language, text: code.lines.join("\n") });
         code = null;
       } else {
-        code.push(raw);
+        code.lines.push(raw);
       }
       continue;
     }
 
-    if (line.trim().startsWith("```")) {
+    const fence = line.trim().match(/^```(\S*)\s*$/);
+    if (fence) {
       flushAll();
-      code = [];
+      code = { language: fence[1].toLowerCase(), lines: [] };
       continue;
     }
 
@@ -101,10 +140,12 @@ function toBlocks(text: string): Block[] {
     const heading = line.match(/^(#{1,3})\s+(.*)$/);
     if (heading) {
       flushAll();
+      const headingText = heading[2].trim();
       blocks.push({
         kind: "heading",
         level: heading[1].length as 1 | 2 | 3,
-        text: heading[2].trim(),
+        text: headingText,
+        id: slugifyHeading(headingText, seenHeadings),
       });
       continue;
     }
@@ -162,7 +203,7 @@ function toBlocks(text: string): Block[] {
   }
 
   flushAll();
-  if (code) blocks.push({ kind: "code", text: code.join("\n") });
+  if (code) blocks.push({ kind: "code", language: code.language, text: code.lines.join("\n") });
   return blocks;
 }
 
@@ -176,7 +217,7 @@ function renderBlock(block: Block, key: number): ReactNode {
           : "text-[13px] uppercase tracking-[0.08em] text-[#9aa0ae]";
     const Tag = block.level === 1 ? "h2" : block.level === 2 ? "h2" : "h3";
     return (
-      <Tag key={key} className={`pt-3 font-semibold first:pt-0 ${size}`}>
+      <Tag key={key} id={block.id} className={`scroll-mt-2 pt-3 font-semibold first:pt-0 ${size}`}>
         {inline(block.text)}
       </Tag>
     );
@@ -249,13 +290,16 @@ function renderBlock(block: Block, key: number): ReactNode {
   }
 
   if (block.kind === "code") {
+    if (block.language === "mermaid") {
+      return <Mermaid key={key} chart={block.text} />;
+    }
     return (
-      <pre
+      <CodeBlock
         key={key}
-        className="scroll-surface overflow-x-auto rounded-xl border border-white/10 bg-black/30 p-3 font-mono text-[12px] leading-relaxed text-[#dfe3ea]"
-      >
-        <code>{block.text}</code>
-      </pre>
+        code={block.text}
+        language={block.language || undefined}
+        size="sm"
+      />
     );
   }
 

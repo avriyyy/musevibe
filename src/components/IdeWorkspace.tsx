@@ -32,9 +32,7 @@ import {
   InboxIcon,
 } from "@heroicons/react/24/outline";
 import type { TLEditorSnapshot } from "@tldraw/tldraw";
-import Markdown from "@/components/Markdown";
-import DocView from "@/components/DocView";
-import { buildPlanBoards, newDocumentBoard } from "@/lib/boardHtml";
+import DocumentsView from "@/components/DocumentsView";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
 import { formatModelLabel } from "@/lib/models";
@@ -65,20 +63,6 @@ const DesignCanvas = dynamic(() => import("@/components/DesignCanvas"), {
     >
       <span className="size-5 animate-pulse rounded-full bg-white/30" />
       <span className="sr-only">Opening the design canvas</span>
-    </div>
-  ),
-});
-
-const PlanCanvas = dynamic(() => import("@/components/PlanCanvas"), {
-  ssr: false,
-  loading: () => (
-    <div
-      role="status"
-      aria-live="polite"
-      className="grid h-full place-items-center bg-[#0b0c10]"
-    >
-      <span className="size-5 animate-pulse rounded-full bg-white/30" />
-      <span className="sr-only">Opening the plan canvas</span>
     </div>
   ),
 });
@@ -148,11 +132,9 @@ const COLUMNS: {
 type Phase = "brief" | "tasks" | null;
 
 type View =
-  | { kind: "plan" }
-  | { kind: "brief" }
+  | { kind: "documents" }
   | { kind: "tasks" }
-  | { kind: "design" }
-  | { kind: "doc"; docId: string | null };
+  | { kind: "design" };
 
 function subscribeHydration(onChange: () => void) {
   return useVibe.persist.onFinishHydration(onChange);
@@ -221,7 +203,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     (state) => state.docsByProject[projectId] ?? EMPTY_DOCS,
   );
 
-  const [view, setView] = useState<View>({ kind: "plan" });
+  const [view, setView] = useState<View>({ kind: "documents" });
+  const [selectedDocKey, setSelectedDocKey] = useState<string>("brief");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>(null);
   const [docBusy, setDocBusy] = useState<string | null>(null);
@@ -239,7 +222,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       ? "design"
       : view.kind === "tasks"
         ? "tasks"
-        : "plan";
+        : "documents";
 
   const runPlan = useCallback(
     async (force: boolean) => {
@@ -363,43 +346,33 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     ]);
   }, [project, projectId]);
 
-  // Plan and Design each keep exactly one canvas. An older multi-canvas
-  // project adopts its first canvas as the Prototype; the rest stay
-  // orphaned in storage but out of the way.
+  // Design keeps exactly one canvas, named Prototype. An older multi-canvas
+  // project adopts its first non-plan canvas; the rest stay orphaned in
+  // storage but out of the way.
   useEffect(() => {
     if (!project || project.status === "draft") return;
     const state = useVibe.getState();
     const list = state.screensByProject[projectId] ?? EMPTY_SCREENS;
+    if (list.some((screen) => screen.name === "Prototype")) return;
     const makeId = (prefix: string) =>
       typeof crypto !== "undefined" && "randomUUID" in crypto
         ? `${prefix}-${crypto.randomUUID()}`
         : `${prefix}-${Date.now()}`;
-    const next = [...list];
-    if (!next.some((screen) => screen.name === "Prototype")) {
-      const first = next.find((screen) => screen.name !== "Plan");
-      if (first) {
-        const at = next.indexOf(first);
-        next[at] = { ...first, name: "Prototype" };
-      } else {
-        next.push({
-          id: makeId("screen"),
-          name: "Prototype",
-          canvasJson: "",
-          components: [],
-        });
-      }
-    }
-    if (!next.some((screen) => screen.name === "Plan")) {
-      next.push({
-        id: makeId("screen"),
-        name: "Plan",
-        canvasJson: "",
-        components: [],
-      });
-    }
-    if (next.length !== list.length || next.some((screen, at) => screen !== list[at])) {
-      state.setScreens(projectId, next);
-    }
+    const first = list.find((screen) => screen.name !== "Plan");
+    const next = first
+      ? list.map((screen) =>
+          screen === first ? { ...screen, name: "Prototype" } : screen,
+        )
+      : [
+          ...list,
+          {
+            id: makeId("screen"),
+            name: "Prototype",
+            canvasJson: "",
+            components: [],
+          },
+        ];
+    state.setScreens(projectId, next);
   }, [project, projectId]);
 
   /** Write a doc and keep the Product brief in sync when it is the PRD. */
@@ -428,11 +401,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const deleteDoc = useCallback(
     (docId: string) => {
       useVibe.getState().removeDoc(projectId, docId);
-      if (view.kind === "doc" && view.docId === docId) {
-        setView({ kind: "plan" });
-      }
+      setSelectedDocKey((current) => (current === docId ? "brief" : current));
     },
-    [projectId, view],
+    [projectId],
   );
 
   const addDoc = useCallback(() => {
@@ -450,7 +421,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       updatedAt: new Date().toISOString(),
     };
     state.addDoc(projectId, doc);
-    setView({ kind: "doc", docId: doc.id });
+    setSelectedDocKey(doc.id);
+    setView({ kind: "documents" });
   }, [projectId]);
 
   const generateDoc = useCallback(
@@ -556,12 +528,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     screens.find((screen) => screen.name === "Prototype") ??
     screens[0] ??
     null;
-  const planScreen =
-    screens.find((screen) => screen.name === "Plan") ?? null;
   const activeDoc =
-    view.kind === "doc"
-      ? (docs.find((entry) => entry.id === view.docId) ?? null)
-      : null;
+    docs.find((entry) => entry.id === selectedDocKey) ?? null;
   const prototypeFile =
     files.find((file) => file.path === "prototype.html") ?? null;
   const selectedTask =
@@ -606,54 +574,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     () => parseSnapshot(prototypeScreen?.canvasJson ?? ""),
     [prototypeScreen?.canvasJson],
   );
-  const planSnapshot = useMemo(
-    () => parseSnapshot(planScreen?.canvasJson ?? ""),
-    [planScreen?.canvasJson],
-  );
-  const planBoards = useMemo(() => {
-    const boards = buildPlanBoards({
-      brief: prd,
-      tasks,
-      docs: docs.map((entry) => ({
-        id: entry.id,
-        kind: entry.kind,
-        title: entry.title,
-        markdown: entry.markdown,
-      })),
-      projectName: project?.name ?? "",
-    });
-    // The Documents row ends with a board that creates a new note. Its id
-    // intentionally skips the doc- prefix so it never collides.
-    const docBoards = boards.filter((board) =>
-      board.id.startsWith("shape:board-doc-"),
-    ).length;
-    return [
-      ...boards,
-      newDocumentBoard(80 + docBoards * 560, 800),
-    ];
-  }, [prd, tasks, docs, project?.name]);
-
-  const openBoard = useCallback((key: string) => {
-    if (key === "brief") {
-      setView({ kind: "brief" });
-      return;
-    }
-    if (key === "tasks") {
-      setView({ kind: "tasks" });
-      return;
-    }
-    if (key === "new-doc") {
-      addDoc();
-      return;
-    }
-    if (key.startsWith("doc-")) {
-      const docId = key.slice("doc-".length);
-      const state = useVibe.getState();
-      if ((state.docsByProject[projectId] ?? []).some((entry) => entry.id === docId)) {
-        setView({ kind: "doc", docId });
-      }
-    }
-  }, [projectId, addDoc]);
 
 
   if (!hydrated) {
@@ -755,14 +675,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           aria-label="Workspace views"
           className="absolute left-1/2 hidden -translate-x-1/2 items-center gap-1 rounded-full border border-white/10 bg-white/5 p-1 md:flex"
         >
-          {(["plan", "design", "tasks"] as const).map((tab) => {
+          {(["documents", "design", "tasks"] as const).map((tab) => {
             const selected = activeTab === tab;
             return (
               <button
                 key={tab}
                 type="button"
                 onClick={() => {
-                  if (tab === "plan") setView({ kind: "plan" });
+                  if (tab === "documents") setView({ kind: "documents" });
                   else if (tab === "tasks") setView({ kind: "tasks" });
                   else setView({ kind: "design" });
                 }}
@@ -786,14 +706,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             label="Workspace view"
             value={activeTab}
             onChange={(next) => {
-              if (next === "plan") setView({ kind: "plan" });
+              if (next === "documents") setView({ kind: "documents" });
               else if (next === "design") setView({ kind: "design" });
               else if (next === "tasks") setView({ kind: "tasks" });
             }}
             size="sm"
             layout="fill"
           >
-            <SegmentedControlItem label="Plan" value="plan" />
+            <SegmentedControlItem label="Documents" value="documents" />
             <SegmentedControlItem label="Design" value="design" />
             <SegmentedControlItem label="Tasks" value="tasks" />
           </SegmentedControl>
@@ -819,178 +739,30 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
 
       <div className="flex min-h-0 flex-1">
         <main className="flex min-w-0 flex-1 flex-col bg-[#0b0c10]">
-          {view.kind === "plan" && (
-            <div className="min-h-0 flex-1">
-              {planScreen ? (
-                <PlanCanvas
-                  key={planScreen.id}
-                  initialSnapshot={planSnapshot}
-                  ready={hydrated}
-                  boards={planBoards}
-                  onOpenBoard={openBoard}
-                  onSnapshot={(snapshot) =>
-                    handleSnapshot(planScreen.id, snapshot)
-                  }
-                />
-              ) : (
-                <div className="grid h-full place-items-center">
-                  <p className="text-[13px] text-[#9aa0ae]">
-                    Preparing the plan board…
-                  </p>
-                </div>
-              )}
-            </div>
-          )}
-
-          {view.kind === "brief" && (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <div className="mx-auto w-full max-w-[860px] px-5 pb-20 pt-7">
-                <p className="text-[11px] uppercase tracking-[0.14em] text-[#5b6472]">
-                  Plan
-                </p>
-                <h2 className="mt-1 text-[22px] font-semibold tracking-tight">
-                  Product brief
-                </h2>
-
-                {briefLocal && (
-                  <p className="mt-2 text-[11px] text-[#9aa0ae]">
-                    Drafted locally from your setup answers, without the model.
-                  </p>
-                )}
-
-                <div className="mt-4 rounded-2xl border border-white/10 bg-[#17181d] p-5 sm:p-6">
-                  {prd ? (
-                    <Markdown text={prd} />
-                  ) : (
-                    <div className="space-y-3" role="status" aria-live="polite">
-                      <p className="text-[12px] text-[#9aa0ae]">
-                        {phase === "tasks"
-                          ? "Brief is ready. Turning it into tasks."
-                          : "Writing the brief from your idea and answers."}
-                      </p>
-                      <div className="space-y-2">
-                        <Bar width="92%" />
-                        <Bar width="84%" />
-                        <Bar width="70%" />
-                        <Bar width="88%" />
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {answers && (
-                  <details className="mt-5 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3">
-                    <summary className="cursor-pointer text-[12px] font-medium text-[#c9cdd6]">
-                      What you told the wizard
-                    </summary>
-                    <dl className="mt-3 space-y-3">
-                      {(project.answers ?? []).map((entry) => {
-                        const value = describeAnswerValue(
-                          entry.values ?? entry.answer,
-                        );
-                        if (!value) return null;
-                        return (
-                          <div key={entry.qid}>
-                            <dt className="text-[11px] uppercase tracking-[0.08em] text-[#5b6472]">
-                              {entry.question}
-                            </dt>
-                            <dd className="mt-0.5 text-[13px] text-[#dfe3ea]">
-                              {value}
-                            </dd>
-                          </div>
-                        );
-                      })}
-                    </dl>
-                  </details>
-                )}
-              </div>
-            </div>
-          )}
-
-          {view.kind === "tasks" && (
-            <div className="relative flex min-h-0 flex-1 overflow-hidden">
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-4">
-                {tasksLocal && (
-                  <p className="mb-3 shrink-0 text-[11px] text-[#9aa0ae]">
-                    Tasks were drafted locally, without the model.
-                  </p>
-                )}
-
-                <div className="flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto pb-1">
-                  {COLUMNS.map((column) => (
-                    <TaskColumn
-                      key={column.status}
-                      status={column.status}
-                      tasks={tasks.filter((task) => task.status === column.status)}
-                      loading={phase === "tasks" && tasks.length === 0}
-                      selectedId={selectedTaskId}
-                      onOpen={(task) => setSelectedTaskId(task.id)}
-                      onMoveById={moveTaskById}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              {selectedTask && (
-                <>
-                  <button
-                    type="button"
-                    aria-label="Close task details"
-                    onClick={() => setSelectedTaskId(null)}
-                    className="absolute inset-0 z-20 bg-black/50 md:hidden"
-                  />
-                  <TaskDetailPanel
-                    task={selectedTask}
-                    onPatch={(patch) => patchTask(selectedTask.id, patch)}
-                    onMove={(next) => moveTaskById(selectedTask.id, next)}
-                    onDelete={() => {
-                      useVibe.getState().removeTask(projectId, selectedTask.id);
-                      setSelectedTaskId(null);
-                    }}
-                    onClose={() => setSelectedTaskId(null)}
-                  />
-                </>
-              )}
-            </div>
-          )}
-
-          {view.kind === "doc" && (
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {activeDoc ? (
-                <DocView
-                  doc={activeDoc}
-                  canGenerate={activeDoc.kind !== "note"}
-                  generating={docBusy === activeDoc.id}
-                  modelLabel={
-                    project.model ? formatModelLabel(project.model) : "Muse"
-                  }
-                  onTitle={(title) => saveDocTitle(activeDoc.id, title)}
-                  onMarkdown={(markdown) =>
-                    saveDocMarkdown(activeDoc.id, markdown)
-                  }
-                  onDelete={() => deleteDoc(activeDoc.id)}
-                  onGenerate={() => void generateDoc(activeDoc.id)}
-                  onBack={() => setView({ kind: "plan" })}
-                />
-              ) : (
-                <div className="mx-auto w-full max-w-[860px] px-5 py-24 text-center">
-                  <p className="text-[15px] font-semibold">
-                    Document not found
-                  </p>
-                  <p className="mx-auto mt-2 max-w-sm text-[13px] text-[#9aa0ae]">
-                    It may have been deleted. Back to the plan overview to
-                    pick another.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={() => setView({ kind: "plan" })}
-                    className="mt-6 inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90"
-                  >
-                    Plan overview
-                  </button>
-                </div>
-              )}
-            </div>
+          {view.kind === "documents" && (
+            <DocumentsView
+              brief={prd}
+              briefLocal={briefLocal}
+              briefWords={
+                prd.trim() ? prd.trim().split(/\s+/).filter(Boolean).length : 0
+              }
+              docs={docs}
+              selectedKey={selectedDocKey}
+              onSelect={setSelectedDocKey}
+              onAddDoc={addDoc}
+              activeDoc={activeDoc}
+              canGenerate={!!activeDoc && activeDoc.kind !== "note"}
+              generating={!!activeDoc && docBusy === activeDoc.id}
+              modelLabel={
+                project.model ? formatModelLabel(project.model) : "Muse"
+              }
+              onTitle={(title) => activeDoc && saveDocTitle(activeDoc.id, title)}
+              onMarkdown={(markdown) =>
+                activeDoc && saveDocMarkdown(activeDoc.id, markdown)
+              }
+              onDelete={() => activeDoc && deleteDoc(activeDoc.id)}
+              onGenerate={() => activeDoc && void generateDoc(activeDoc.id)}
+            />
           )}
 
           {view.kind === "design" && (

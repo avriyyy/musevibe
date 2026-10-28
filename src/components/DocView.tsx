@@ -24,7 +24,6 @@ interface DocViewProps {
   onMarkdown: (markdown: string) => void;
   onDelete: () => void;
   onGenerate: () => void;
-  onBack?: () => void;
 }
 
 export default function DocView({
@@ -36,7 +35,6 @@ export default function DocView({
   onMarkdown,
   onDelete,
   onGenerate,
-  onBack,
 }: DocViewProps) {
   const [mode, setMode] = useState<"edit" | "preview">(
     doc.markdown.trim() ? "preview" : "edit",
@@ -73,30 +71,8 @@ export default function DocView({
   return (
     <div className="mx-auto w-full max-w-[860px] px-5 pb-20 pt-7">
       <p className="text-[11px] uppercase tracking-[0.14em] text-[#5b6472]">
-        Plan
+        Documents
       </p>
-      {onBack && (
-        <button
-          type="button"
-          onClick={onBack}
-          className="mt-3 flex items-center gap-1 text-[13px] text-[#9aa0ae] hover:text-white"
-        >
-          <svg
-            aria-hidden
-            width="12"
-            height="12"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          >
-            <path d="M15 6l-6 6 6 6" />
-          </svg>
-          Plan overview
-        </button>
-      )}
       <input
         value={doc.title}
         onChange={(event) => onTitle(event.target.value)}
