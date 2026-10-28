@@ -301,7 +301,7 @@ export default function Home() {
     setIdea((prev) => (prev ? prev + "\n\n" : "") + `--- ${f.name} ---\n` + text.slice(0, 2000));
   };
 
-  const openProject = (id: string, ideaText: string) => {
+  const openProject = (id: string) => {
     if (window.innerWidth < 768) {
       setNavOpen(false);
       setNavPinned(false);
@@ -312,7 +312,7 @@ export default function Home() {
       return;
     }
     touchProject(id);
-    setIdea(ideaText);
+    router.push(`/project/${id}`);
   };
 
   const toggleNav = () => {
@@ -436,7 +436,7 @@ export default function Home() {
                 <li key={p.id}>
                   <button
                     type="button"
-                    onClick={() => openProject(p.id, p.idea)}
+                    onClick={() => openProject(p.id)}
                     aria-label={p.status === "draft" ? `Continue setting up ${p.name}` : `Open ${p.name}`}
                     className="group flex w-full items-center gap-2.5 px-3 py-3 text-left hover:bg-white/5 focus-visible:bg-white/5 focus-visible:outline-none"
                   >

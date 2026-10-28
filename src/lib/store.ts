@@ -16,6 +16,7 @@ interface VibeState {
   setPrd: (projectId: string, md: string) => void;
   setTasks: (projectId: string, tasks: Task[]) => void;
   moveTask: (projectId: string, taskId: string, status: Task["status"]) => void;
+  removeTask: (projectId: string, taskId: string) => void;
   setScreens: (projectId: string, screens: Screen[]) => void;
   setFiles: (projectId: string, files: CodeFile[]) => void;
   updateFile: (projectId: string, fileId: string, content: string) => void;
@@ -113,6 +114,15 @@ const vibeState: StateCreator<VibeState> = (set) => ({
         ...s.tasksByProject,
         [projectId]: (s.tasksByProject[projectId] || []).map((t) =>
           t.id === taskId ? { ...t, status } : t
+        ),
+      },
+    })),
+  removeTask: (projectId, taskId) =>
+    set((s) => ({
+      tasksByProject: {
+        ...s.tasksByProject,
+        [projectId]: (s.tasksByProject[projectId] || []).filter(
+          (t) => t.id !== taskId
         ),
       },
     })),

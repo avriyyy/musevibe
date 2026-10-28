@@ -505,7 +505,7 @@ function Wizard() {
     submitted.current = true;
     saveProgress(REVIEW_STEP);
     updateProject(projectId, { status: "ready" });
-    router.push("/");
+    router.push(`/project/${projectId}`);
   };
 
   const pickPlatform = (value: string) => {
