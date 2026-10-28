@@ -21,6 +21,13 @@ export function clampText(value: string, max: number): string {
   return `${normalized.slice(0, max - 1).trimEnd()}…`;
 }
 
+/** Capitalize a clause and drop a trailing stop, so it fits mid-sentence. */
+function sentence(value: string): string {
+  const trimmed = value.trim().replace(/[.!?]+$/, "");
+  if (!trimmed) return "";
+  return trimmed[0].toUpperCase() + trimmed.slice(1);
+}
+
 /** Q&A pairs as one compact paragraph for prompts. */
 export function describeAnswers(project: Project): string {
   const parts: string[] = [];
@@ -194,7 +201,7 @@ export function fallbackPrd(project: Project): string {
 
   const ships = [
     "The core screen that delivers the idea",
-    `A working path for: ${clampText(core, 160)}`,
+    `A working path for: ${sentence(clampText(core, 160))}`,
     "Local data so a reload keeps the work",
     "Empty, loading, and error states on every screen",
   ];
@@ -211,11 +218,11 @@ export function fallbackPrd(project: Project): string {
     `${clampText(project.idea, 240)} is still just a note. The first version should prove the idea works before it grows a feature list.`,
     "",
     "## Who it is for",
-    `${clampText(audience, 160)}. They want the result without learning a new tool first.`,
+    `${sentence(clampText(audience, 160))}. They want the result without learning a new tool first.`,
     "",
     "## The core flow",
     `1. Open the app and see the main screen.`,
-    `2. ${clampText(core, 200)}.`,
+    `2. ${sentence(clampText(core, 200))}.`,
     "3. See the result and keep it for next time.",
     "",
     "## What ships first",
@@ -225,7 +232,7 @@ export function fallbackPrd(project: Project): string {
     ...excluded.map((item) => `- ${item}`),
     "",
     "## How we know it works",
-    `A new person can finish this check without help: ${clampText(core, 160)}.`,
+    `A new person can finish this check without help: ${sentence(clampText(core, 160))}.`,
   ];
   return lines.join("\n");
 }
@@ -241,7 +248,7 @@ export function fallbackTasks(project: Project): Task[] {
   const titles = [
     ["Set up the app shell and base layout", stack ? `Target: ${clampText(stack, 120)}` : ""],
     ["Build the main screen and its empty state", ""],
-    [core ? `Wire the flow: ${clampText(core, 80)}` : "Wire the core action end to end", ""],
+    [core ? `Wire the flow: ${sentence(clampText(core, 80))}` : "Wire the core action end to end", ""],
     ["Add local data so reloads keep the work", ""],
     ["Handle loading and error states", ""],
     ["Review the flow on a small screen", ""],

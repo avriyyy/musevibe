@@ -93,7 +93,8 @@ function ProjectView() {
   const tasks = useVibe((state) => state.tasksByProject[id] ?? EMPTY_TASKS);
 
   const [phase, setPhase] = useState<Phase>(null);
-  const [local, setLocal] = useState(false);
+  const [briefLocal, setBriefLocal] = useState(false);
+  const [tasksLocal, setTasksLocal] = useState(false);
   const [error, setError] = useState("");
   const runningRef = useRef(false);
   const startedRef = useRef(false);
@@ -112,10 +113,10 @@ function ProjectView() {
       runningRef.current = true;
       startedRef.current = true;
       setError("");
-      setLocal(false);
+      setBriefLocal(false);
+      setTasksLocal(false);
 
       let brief = savedBrief;
-      let usedLocal = false;
 
       if (force || !brief.trim()) {
         setPhase("brief");
@@ -129,11 +130,11 @@ function ProjectView() {
             brief = reply.text.trim();
           } else {
             brief = fallbackPrd(current);
-            usedLocal = true;
+            setBriefLocal(true);
           }
         } catch {
           brief = fallbackPrd(current);
-          usedLocal = true;
+          setBriefLocal(true);
           setError("The model did not answer, so this brief was drafted from your setup answers.");
         }
         useVibe.getState().setPrd(id, brief);
@@ -155,11 +156,11 @@ function ProjectView() {
             useVibe.getState().setTasks(id, parsed);
           } else {
             useVibe.getState().setTasks(id, fallbackTasks(current));
-            usedLocal = true;
+            setTasksLocal(true);
           }
         } catch {
           useVibe.getState().setTasks(id, fallbackTasks(current));
-          usedLocal = true;
+          setTasksLocal(true);
           setError((previous) =>
             previous ||
             "The model did not answer, so the task list was drafted locally.",
@@ -167,7 +168,6 @@ function ProjectView() {
         }
       }
 
-      setLocal(usedLocal);
       setPhase(null);
       runningRef.current = false;
     },
@@ -326,7 +326,7 @@ function ProjectView() {
           </button>
         </div>
 
-        {local && (
+        {briefLocal && (
           <p className="mt-2 text-[11px] text-[#9aa0ae]">
             Drafted locally from your setup answers, without the model.
           </p>
@@ -369,6 +369,12 @@ function ProjectView() {
               : `${tasks.length} ${tasks.length === 1 ? "task" : "tasks"}`}
           </p>
         </div>
+
+        {tasksLocal && (
+          <p className="mt-2 text-[11px] text-[#9aa0ae]">
+            Tasks were drafted locally, without the model.
+          </p>
+        )}
 
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           {COLUMNS.map((column) => (
