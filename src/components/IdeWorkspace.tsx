@@ -204,12 +204,11 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   );
 
   const [view, setView] = useState<View>({ kind: "documents" });
-  const [selectedDocKey, setSelectedDocKey] = useState<string>("brief");
+  const [selectedDocKey, setSelectedDocKey] = useState<string>("doc-prd");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>(null);
   const [docBusy, setDocBusy] = useState<string | null>(null);
   const [protoBusy, setProtoBusy] = useState(false);
-  const [briefLocal, setBriefLocal] = useState(false);
   const [tasksLocal, setTasksLocal] = useState(false);
   const [error, setError] = useState("");
   const runningRef = useRef(false);
@@ -238,7 +237,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       runningRef.current = true;
       startedRef.current = true;
       setError("");
-      setBriefLocal(false);
       setTasksLocal(false);
 
       let brief = savedBrief;
@@ -255,11 +253,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             brief = reply.text.trim();
           } else {
             brief = fallbackPrd(current);
-            setBriefLocal(true);
           }
         } catch {
           brief = fallbackPrd(current);
-          setBriefLocal(true);
           setError("The model did not answer, so this brief was drafted from your setup answers.");
         }
         useVibe.getState().setPrd(projectId, brief);
@@ -389,25 +385,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     [projectId],
   );
 
-  const addDoc = useCallback(() => {
-    const state = useVibe.getState();
-    const existing = state.docsByProject[projectId] ?? EMPTY_DOCS;
-    const count = existing.filter((entry) => entry.kind === "note").length;
-    const doc: ProjectDoc = {
-      id:
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? `doc-${crypto.randomUUID()}`
-          : `doc-note-${Date.now()}`,
-      kind: "note",
-      title: `Note ${count + 1}`,
-      markdown: "",
-      updatedAt: new Date().toISOString(),
-    };
-    state.addDoc(projectId, doc);
-    setSelectedDocKey(doc.id);
-    setView({ kind: "documents" });
-  }, [projectId]);
-
   const generateDoc = useCallback(
     async (docId: string) => {
       const state = useVibe.getState();
@@ -512,7 +489,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     screens[0] ??
     null;
   const activeDoc =
-    docs.find((entry) => entry.id === selectedDocKey) ?? null;
+    docs.find((entry) => entry.id === selectedDocKey) ?? docs[0] ?? null;
   const prototypeFile =
     files.find((file) => file.path === "prototype.html") ?? null;
   const selectedTask =
@@ -724,15 +701,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         <main className="flex min-w-0 flex-1 flex-col bg-[#0b0c10]">
           {view.kind === "documents" && (
             <DocumentsView
-              brief={prd}
-              briefLocal={briefLocal}
-              briefWords={
-                prd.trim() ? prd.trim().split(/\s+/).filter(Boolean).length : 0
-              }
               docs={docs}
               selectedKey={selectedDocKey}
               onSelect={setSelectedDocKey}
-              onAddDoc={addDoc}
               activeDoc={activeDoc}
               canGenerate={!!activeDoc && activeDoc.kind !== "note"}
               generating={!!activeDoc && docBusy === activeDoc.id}

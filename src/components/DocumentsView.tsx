@@ -9,21 +9,15 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import Markdown, { extractHeadings } from "@/components/Markdown";
 import DocView from "@/components/DocView";
+import { extractHeadings } from "@/components/Markdown";
 import { docFullName, docLabel } from "@/lib/docs";
 import type { ProjectDoc } from "@/lib/types";
 
-export const BRIEF_KEY = "brief";
-
 interface DocumentsViewProps {
-  brief: string;
-  briefLocal: boolean;
-  briefWords: number;
   docs: ProjectDoc[];
   selectedKey: string;
   onSelect: (key: string) => void;
-  onAddDoc: () => void;
   activeDoc: ProjectDoc | null;
   canGenerate: boolean;
   generating: boolean;
@@ -33,13 +27,9 @@ interface DocumentsViewProps {
 }
 
 export default function DocumentsView({
-  brief,
-  briefLocal,
-  briefWords,
   docs,
   selectedKey,
   onSelect,
-  onAddDoc,
   activeDoc,
   canGenerate,
   generating,
@@ -50,8 +40,7 @@ export default function DocumentsView({
   const centerRef = useRef<HTMLDivElement>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
 
-  const shownMarkdown =
-    selectedKey === BRIEF_KEY ? brief : (activeDoc?.markdown ?? "");
+  const shownMarkdown = activeDoc?.markdown ?? "";
   const headings = useMemo(
     () => extractHeadings(shownMarkdown).filter((h) => h.level >= 2),
     [shownMarkdown],
@@ -101,34 +90,6 @@ export default function DocumentsView({
       ?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const listButton = (
-    key: string,
-    primary: string,
-    secondary: string,
-  ) => {
-    const selected = selectedKey === key;
-    return (
-      <button
-        key={key}
-        type="button"
-        onClick={() => onSelect(key)}
-        aria-current={selected || undefined}
-        className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${
-          selected
-            ? "border-white/25 bg-white/10"
-            : "border-transparent hover:border-white/10 hover:bg-white/5"
-        }`}
-      >
-        <span className="block truncate text-[13px] font-semibold text-[#f5f6f8]">
-          {primary}
-        </span>
-        <span className="mt-0.5 block truncate font-mono text-[11px] text-[#5b6472]">
-          {secondary}
-        </span>
-      </button>
-    );
-  };
-
   return (
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       {/* Mobile document switcher. */}
@@ -138,11 +99,6 @@ export default function DocumentsView({
           aria-label="Documents"
           className="flex gap-2 overflow-x-auto"
         >
-          <DocChip
-            label="Brief"
-            selected={selectedKey === BRIEF_KEY}
-            onClick={() => onSelect(BRIEF_KEY)}
-          />
           {docs.map((entry) => (
             <DocChip
               key={entry.id}
@@ -160,66 +116,37 @@ export default function DocumentsView({
           aria-label="Document list"
           className="hidden min-h-0 flex-col gap-1 overflow-y-auto border-r border-white/10 p-3 lg:flex"
         >
-          {listButton(BRIEF_KEY, "Product brief", "brief.md")}
-          <p className="px-2 pb-1 pt-3 text-[10px] font-medium uppercase tracking-[0.12em] text-[#5b6472]">
+          <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.12em] text-[#5b6472]">
             Documents · {docs.length}
           </p>
-          {docs.map((entry) =>
-            listButton(
-              entry.id,
-              entry.title || docLabel(entry.kind),
-              docFullName(entry.kind),
-            ),
-          )}
-          <button
-            type="button"
-            onClick={onAddDoc}
-            className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl border border-dashed border-white/15 px-3 py-2.5 text-[13px] text-[#9aa0ae] hover:border-white/25 hover:text-white"
-          >
-            <span aria-hidden className="text-[15px] leading-none">
-              +
-            </span>
-            New document
-          </button>
+          {docs.map((entry) => {
+            const selected = selectedKey === entry.id;
+            return (
+              <button
+                key={entry.id}
+                type="button"
+                onClick={() => onSelect(entry.id)}
+                aria-current={selected || undefined}
+                className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${
+                  selected
+                    ? "border-white/25 bg-white/10"
+                    : "border-transparent hover:border-white/10 hover:bg-white/5"
+                }`}
+              >
+                <span className="block truncate text-[13px] font-semibold text-[#f5f6f8]">
+                  {entry.title || docLabel(entry.kind)}
+                </span>
+                <span className="mt-0.5 block truncate text-[11px] text-[#5b6472]">
+                  {docFullName(entry.kind)}
+                </span>
+              </button>
+            );
+          })}
         </aside>
 
         {/* Preview. Only this column scrolls. */}
         <div ref={centerRef} className="min-h-0 min-w-0 overflow-y-auto">
-          {selectedKey === BRIEF_KEY || !activeDoc ? (
-            <div className="mx-auto w-full max-w-[720px] px-5 pb-20 pt-7 sm:px-8">
-              <p className="text-[11px] uppercase tracking-[0.14em] text-[#5b6472]">
-                Documents
-              </p>
-              <h2 className="mt-1 text-[22px] font-semibold tracking-tight text-[#f5f6f8]">
-                Product brief
-              </h2>
-              <p className="mt-1 font-mono text-[11px] text-[#5b6472]">
-                brief.md
-                {briefWords > 0 ? ` · ${briefWords} words` : ""}
-              </p>
-              {briefLocal && (
-                <p className="mt-2 text-[11px] text-[#9aa0ae]">
-                  Drafted locally from your setup answers, without the model.
-                </p>
-              )}
-              <div className="mt-4 rounded-2xl border border-white/10 bg-[#17181d] p-5 sm:p-6">
-                {brief.trim() ? (
-                  <Markdown text={brief} />
-                ) : (
-                  <p
-                    role="status"
-                    className="py-6 text-center text-[13px] text-[#9aa0ae]"
-                  >
-                    Writing the brief from your idea and answers…
-                  </p>
-                )}
-              </div>
-              <p className="mt-4 text-[12px] leading-relaxed text-[#5b6472]">
-                The brief stays in lockstep with the PRD document: editing one
-                updates the other.
-              </p>
-            </div>
-          ) : (
+          {activeDoc ? (
             <DocView
               doc={activeDoc}
               canGenerate={canGenerate}
@@ -228,6 +155,13 @@ export default function DocumentsView({
               onMarkdown={onMarkdown}
               onGenerate={onGenerate}
             />
+          ) : (
+            <p
+              role="status"
+              className="mx-auto max-w-md px-5 py-24 text-center text-[13px] text-[#9aa0ae]"
+            >
+              Preparing the documents…
+            </p>
           )}
         </div>
 
