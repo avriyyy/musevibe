@@ -1,4 +1,5 @@
-import { create } from "zustand";
+import { create, type StateCreator } from "zustand";
+import { createJSONStorage, persist } from "zustand/middleware";
 import type { CodeFile, Project, Screen, Task } from "./types";
 
 interface VibeState {
@@ -47,7 +48,7 @@ export const seedProjects: Project[] = [
   { id: "seed-docs", name: "Docs Starter", idea: "A docs site scaffolded from a markdown folder", createdAt: new Date(now - 9 * DAY).toISOString(), lastOpenedAt: new Date(now - 10 * DAY).toISOString() },
 ];
 
-export const useVibe = create<VibeState>((set) => ({
+const vibeState: StateCreator<VibeState> = (set) => ({
   projects: seedProjects,
   draftIdea: "",
   tasksByProject: {
@@ -128,6 +129,28 @@ export const useVibe = create<VibeState>((set) => ({
         ),
       },
     })),
-}));
+});
+
+/**
+ * The workspace survives a reload through localStorage. Hydration is skipped
+ * during store creation because the pages are prerendered: reading storage
+ * before the first client render would swap the project list mid-hydration.
+ * StoreHydrator rehydrates right after mount instead.
+ */
+export const useVibe = create<VibeState>()(
+  persist(vibeState, {
+    name: "musevibe-store",
+    version: 1,
+    skipHydration: true,
+    storage: createJSONStorage(() => localStorage),
+    partialize: (state) => ({
+      projects: state.projects,
+      tasksByProject: state.tasksByProject,
+      screensByProject: state.screensByProject,
+      filesByProject: state.filesByProject,
+      prdByProject: state.prdByProject,
+    }),
+  }),
+);
 
 export { seedId };
