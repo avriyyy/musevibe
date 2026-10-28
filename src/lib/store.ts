@@ -1,6 +1,6 @@
 import { create, type StateCreator } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { CodeFile, Project, Screen, Task } from "./types";
+import type { CodeFile, Project, ProjectDoc, Screen, Task } from "./types";
 
 interface VibeState {
   projects: Project[];
@@ -9,6 +9,7 @@ interface VibeState {
   screensByProject: Record<string, Screen[]>;
   filesByProject: Record<string, CodeFile[]>;
   prdByProject: Record<string, string>;
+  docsByProject: Record<string, ProjectDoc[]>;
   setDraftIdea: (idea: string) => void;
   addProject: (p: Project) => void;
   updateProject: (id: string, patch: Partial<Project>) => void;
@@ -20,6 +21,14 @@ interface VibeState {
   setScreens: (projectId: string, screens: Screen[]) => void;
   setFiles: (projectId: string, files: CodeFile[]) => void;
   updateFile: (projectId: string, fileId: string, content: string) => void;
+  seedDocs: (projectId: string, docs: ProjectDoc[]) => void;
+  addDoc: (projectId: string, doc: ProjectDoc) => void;
+  updateDoc: (
+    projectId: string,
+    docId: string,
+    patch: Partial<ProjectDoc>,
+  ) => void;
+  removeDoc: (projectId: string, docId: string) => void;
 }
 
 const seedId = () =>
@@ -72,6 +81,7 @@ const vibeState: StateCreator<VibeState> = (set) => ({
     ],
   },
   prdByProject: { "demo-indie": "# PRD Demo\n\nProblem: indie devs keep switching tools." },
+  docsByProject: {},
 
   setDraftIdea: (idea) => set({ draftIdea: idea }),
   updateProject: (id, patch) =>
@@ -139,6 +149,37 @@ const vibeState: StateCreator<VibeState> = (set) => ({
         ),
       },
     })),
+  seedDocs: (projectId, docs) =>
+    set((s) =>
+      s.docsByProject[projectId] === undefined
+        ? { docsByProject: { ...s.docsByProject, [projectId]: docs } }
+        : s,
+    ),
+  addDoc: (projectId, doc) =>
+    set((s) => ({
+      docsByProject: {
+        ...s.docsByProject,
+        [projectId]: [...(s.docsByProject[projectId] || []), doc],
+      },
+    })),
+  updateDoc: (projectId, docId, patch) =>
+    set((s) => ({
+      docsByProject: {
+        ...s.docsByProject,
+        [projectId]: (s.docsByProject[projectId] || []).map((d) =>
+          d.id === docId ? { ...d, ...patch } : d
+        ),
+      },
+    })),
+  removeDoc: (projectId, docId) =>
+    set((s) => ({
+      docsByProject: {
+        ...s.docsByProject,
+        [projectId]: (s.docsByProject[projectId] || []).filter(
+          (d) => d.id !== docId
+        ),
+      },
+    })),
 });
 
 /**
@@ -159,6 +200,7 @@ export const useVibe = create<VibeState>()(
       screensByProject: state.screensByProject,
       filesByProject: state.filesByProject,
       prdByProject: state.prdByProject,
+      docsByProject: state.docsByProject,
     }),
   }),
 );

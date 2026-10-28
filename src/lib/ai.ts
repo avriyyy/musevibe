@@ -1,10 +1,11 @@
 import type { Prd } from "./types";
 import { FALLBACK_QUESTIONS, deriveProjectName } from "./wizard";
+import { docFullName } from "./docs";
 
 // Abstraction AI agar bisa swap provider Meta (Muse Spark).
 // Kalau AI_API_URL / AI_API_KEY kosong -> mock lokal, demo tetap jalan.
 
-export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo" | "stack" | "name";
+export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo" | "stack" | "name" | "doc" | "prototype";
 
 export interface AiGenerateResult {
   text: string;
@@ -178,6 +179,13 @@ function mockGenerate(kind: AiGenerateKind, prompt: string): string {
   }
   if (kind === "name") {
     return deriveProjectName(prompt) || "Untitled project";
+  }
+  if (kind === "doc") {
+    const label = docFullName("prd");
+    return `# ${label} (local draft)\n\n> The model is unavailable, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${idea}\n\n## Overview\nFill in the product context from the brief.\n\n## Details\nExpand each required section with concrete, product-specific content.\n\n## Open questions\nList what still needs a decision before building.`;
+  }
+  if (kind === "prototype") {
+    return `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8" />\n<meta name="viewport" content="width=device-width, initial-scale=1" />\n<title>Prototype (local draft)</title>\n<style>\nbody { font-family: system-ui, sans-serif; margin: 0; padding: 32px; background: #0b0c10; color: #f5f6f8; }\nmain { max-width: 640px; margin: 0 auto; }\n</style>\n</head>\n<body>\n<main>\n<h1>Prototype (local draft)</h1>\n<p>${idea}</p>\n<p>The model is unavailable, so this is a placeholder. Generate again with the model for the full prototype.</p>\n</main>\n</body>\n</html>`;
   }
   return `// starter (mock) untuk: ${idea}\nexport default function App() {\n  return <h1>MuseVibe starter</h1>;\n}`;
 }

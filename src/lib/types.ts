@@ -10,6 +10,15 @@ export interface ProjectAnswer {
   values?: WizardAnswerValue;
 }
 
+export interface ProjectDoc {
+  id: string;
+  /** One of the six plan kinds, or "note" for a custom supporting document. */
+  kind: string;
+  title: string;
+  markdown: string;
+  updatedAt: string;
+}
+
 export interface Project {
   id: string;
   name: string;

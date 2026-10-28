@@ -1,14 +1,16 @@
 import type { ReactNode } from "react";
 
 /**
- * Small markdown renderer for AI briefs. It covers headings, lists, quotes,
- * rules, code blocks, bold, and inline code. Anything else stays as plain
- * text, so model output can never inject markup into the page.
+ * Small markdown renderer for AI briefs and plan documents. It covers
+ * headings, lists, tables, quotes, rules, code blocks, bold, and inline
+ * code. Anything else stays as plain text, so model output can never inject
+ * markup into the page.
  */
 
 type Block =
   | { kind: "heading"; level: 1 | 2 | 3; text: string }
   | { kind: "list"; ordered: boolean; items: string[] }
+  | { kind: "table"; headers: string[]; aligns: ("left" | "center" | "right")[]; rows: string[][] }
   | { kind: "quote"; text: string }
   | { kind: "code"; text: string }
   | { kind: "rule" }
@@ -50,7 +52,29 @@ function toBlocks(text: string): Block[] {
     flushList();
   };
 
-  for (const raw of lines) {
+  const isTableRow = (line: string) =>
+    /^\|.*\|\s*$/.test(line.trim()) && (line.match(/\|/g) ?? []).length >= 2;
+
+  const splitRow = (line: string) => {
+    const cells = line.trim().split("|");
+    // Drop the empty caps the leading and trailing pipes produce.
+    if (cells.length && cells[0].trim() === "") cells.shift();
+    if (cells.length && cells[cells.length - 1].trim() === "") cells.pop();
+    return cells.map((cell) => cell.trim());
+  };
+
+  const isSeparatorRow = (cells: string[]) =>
+    cells.length > 0 &&
+    cells.every((cell) => /^:?-+:?$/.test(cell));
+
+  const alignOf = (cell: string): "left" | "center" | "right" => {
+    if (/^:.+:$/.test(cell)) return "center";
+    if (/:$/.test(cell)) return "right";
+    return "left";
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const raw = lines[index];
     const line = raw.trimEnd();
 
     if (code) {
@@ -93,6 +117,29 @@ function toBlocks(text: string): Block[] {
 
     const bullet = line.match(/^[-*]\s+(.*)$/);
     const ordered = line.match(/^\d+[.)]\s+(.*)$/);
+    if (isTableRow(line) && !bullet && !ordered) {
+      flushAll();
+      const rows: string[][] = [splitRow(line)];
+      let cursor = index + 1;
+      while (cursor < lines.length && isTableRow(lines[cursor].trimEnd())) {
+        rows.push(splitRow(lines[cursor].trimEnd()));
+        cursor += 1;
+      }
+      // A lone pipe row is a paragraph, not a table.
+      if (rows.length < 2) {
+        paragraph.push(line.trim());
+      } else {
+        const [headers, maybeSeparator, ...rest] = rows;
+        const hasSeparator = isSeparatorRow(maybeSeparator ?? []);
+        const body = hasSeparator ? rest : [maybeSeparator, ...rest];
+        const aligns = headers.map((_, column) =>
+          hasSeparator ? alignOf(maybeSeparator[column] ?? "") : "left",
+        );
+        blocks.push({ kind: "table", headers, aligns, rows: body });
+      }
+      index = cursor;
+      continue;
+    }
     if (bullet || ordered) {
       flushParagraph();
       const nextOrdered = Boolean(ordered);
@@ -146,6 +193,47 @@ function renderBlock(block: Block, key: number): ReactNode {
           <li key={index}>{inline(item)}</li>
         ))}
       </Tag>
+    );
+  }
+
+  if (block.kind === "table") {
+    const alignClass = (align: "left" | "center" | "right") =>
+      align === "center"
+        ? "text-center"
+        : align === "right"
+          ? "text-right"
+          : "text-left";
+    return (
+      <div key={key} className="scroll-surface -mx-1 overflow-x-auto px-1">
+        <table className="w-full min-w-[480px] border-collapse text-[13px]">
+          <thead>
+            <tr>
+              {block.headers.map((cell, index) => (
+                <th
+                  key={index}
+                  className={`border-b border-white/20 px-3 py-2 font-semibold text-[#f5f6f8] ${alignClass(block.aligns[index] ?? "left")}`}
+                >
+                  {inline(cell)}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {block.rows.map((row, rowIndex) => (
+              <tr key={rowIndex} className="border-b border-white/5 last:border-0">
+                {block.headers.map((_, cellIndex) => (
+                  <td
+                    key={cellIndex}
+                    className={`px-3 py-2 align-top ${alignClass(block.aligns[cellIndex] ?? "left")}`}
+                  >
+                    {inline(row[cellIndex] ?? "")}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     );
   }
 

@@ -33,10 +33,10 @@ import {
   DocumentTextIcon,
   FolderIcon,
   PaintBrushIcon,
-  PhotoIcon,
 } from "@heroicons/react/24/outline";
 import type { TLEditorSnapshot } from "@tldraw/tldraw";
 import Markdown from "@/components/Markdown";
+import DocView from "@/components/DocView";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
 import { formatModelLabel } from "@/lib/models";
@@ -44,13 +44,22 @@ import { platformLabel } from "@/lib/project-options";
 import { frameworkLabel } from "@/lib/stack-options";
 import { starterFiles } from "@/lib/starter";
 import {
+  DOC_TYPES,
+  buildDocPrompt,
+  buildPrototypePrompt,
+  docLabel,
+  parseDocMarkdown,
+  parsePrototypeHtml,
+  type DocKind,
+} from "@/lib/docs";
+import {
   buildPrdPrompt,
   buildTasksPrompt,
   fallbackPrd,
   fallbackTasks,
   parseTasks,
 } from "@/lib/plan";
-import type { CodeFile, Screen, Task, TaskStatus } from "@/lib/types";
+import type { CodeFile, ProjectDoc, Screen, Task, TaskStatus } from "@/lib/types";
 
 const DesignCanvas = dynamic(() => import("@/components/DesignCanvas"), {
   ssr: false,
@@ -69,6 +78,7 @@ const DesignCanvas = dynamic(() => import("@/components/DesignCanvas"), {
 const EMPTY_TASKS: Task[] = [];
 const EMPTY_FILES: CodeFile[] = [];
 const EMPTY_SCREENS: Screen[] = [];
+const EMPTY_DOCS: ProjectDoc[] = [];
 const COLUMNS: { status: TaskStatus; label: string; empty: string }[] = [
   { status: "todo", label: "To do", empty: "The first tasks land here." },
   { status: "doing", label: "In progress", empty: "Move a task here when you start." },
@@ -81,7 +91,9 @@ type View =
   | { kind: "brief" }
   | { kind: "tasks" }
   | { kind: "code"; fileId: string | null }
-  | { kind: "design"; screenId: string | null };
+  | { kind: "design" }
+  | { kind: "docs" }
+  | { kind: "doc"; docId: string | null };
 
 function subscribeHydration(onChange: () => void) {
   return useVibe.persist.onFinishHydration(onChange);
@@ -101,7 +113,7 @@ interface AiReply {
 }
 
 async function requestAi(
-  kind: "prd" | "tasks",
+  kind: "prd" | "tasks" | "doc" | "prototype",
   prompt: string,
   model?: string,
 ): Promise<AiReply> {
@@ -146,9 +158,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const screens = useVibe(
     (state) => state.screensByProject[projectId] ?? EMPTY_SCREENS,
   );
+  const docs = useVibe(
+    (state) => state.docsByProject[projectId] ?? EMPTY_DOCS,
+  );
 
   const [view, setView] = useState<View>({ kind: "brief" });
   const [phase, setPhase] = useState<Phase>(null);
+  const [docBusy, setDocBusy] = useState<string | null>(null);
+  const [protoBusy, setProtoBusy] = useState(false);
   const [briefLocal, setBriefLocal] = useState(false);
   const [tasksLocal, setTasksLocal] = useState(false);
   const [error, setError] = useState("");
@@ -201,6 +218,16 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           setError("The model did not answer, so this brief was drafted from your setup answers.");
         }
         useVibe.getState().setPrd(projectId, brief);
+        // Keep the PRD document in lockstep with the brief view.
+        const prdDoc = useVibe
+          .getState()
+          .docsByProject[projectId]?.find((entry) => entry.kind === "prd");
+        if (prdDoc && prdDoc.markdown !== brief) {
+          useVibe.getState().updateDoc(projectId, prdDoc.id, {
+            markdown: brief,
+            updatedAt: new Date().toISOString(),
+          });
+        }
       }
 
       if (force || !savedTasks.length) {
@@ -255,21 +282,181 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     useVibe.getState().setFiles(projectId, starterFiles(project));
   }, [view.kind, project, files.length, projectId]);
 
-  // The Design pane seeds one blank canvas on first open.
+  // The Plan documents seed once per project: the six engineering docs.
+  // The PRD inherits whatever the brief holds at seed time; the brief
+  // generator writes back to it afterwards, so they never drift apart.
   useEffect(() => {
-    if (view.kind !== "design" || !project || screens.length > 0) return;
-    useVibe.getState().setScreens(projectId, [
+    if (!project || project.status === "draft") return;
+    const state = useVibe.getState();
+    if (state.docsByProject[projectId] !== undefined) return;
+    const now = new Date().toISOString();
+    state.seedDocs(projectId, [
+      {
+        id: "doc-prd",
+        kind: "prd",
+        title: "PRD",
+        markdown: state.prdByProject[projectId] ?? "",
+        updatedAt: now,
+      },
+      ...DOC_TYPES.filter((entry) => entry.kind !== "prd").map((entry) => ({
+        id: `doc-${entry.kind}`,
+        kind: entry.kind,
+        title: entry.label,
+        markdown: "",
+        updatedAt: now,
+      })),
+    ]);
+  }, [project, projectId]);
+
+  // The Design pane keeps exactly one canvas, named Prototype. An older
+  // multi-canvas project adopts its first canvas; the rest stay orphaned in
+  // storage but out of the way.
+  useEffect(() => {
+    if (!project || project.status === "draft") return;
+    const state = useVibe.getState();
+    const list = state.screensByProject[projectId] ?? EMPTY_SCREENS;
+    if (list.some((screen) => screen.name === "Prototype")) return;
+    if (list.length > 0) {
+      const [first] = list;
+      state.setScreens(projectId, [{ ...first, name: "Prototype" }]);
+      return;
+    }
+    state.setScreens(projectId, [
       {
         id:
           typeof crypto !== "undefined" && "randomUUID" in crypto
             ? crypto.randomUUID()
             : `screen-${Date.now()}`,
-        name: "Canvas",
+        name: "Prototype",
         canvasJson: "",
         components: [],
       },
     ]);
-  }, [view.kind, project, screens.length, projectId]);
+  }, [project, projectId]);
+
+  /** Write a doc and keep the Product brief in sync when it is the PRD. */
+  const saveDocMarkdown = useCallback(
+    (docId: string, markdown: string) => {
+      const now = new Date().toISOString();
+      const state = useVibe.getState();
+      state.updateDoc(projectId, docId, { markdown, updatedAt: now });
+      const doc = state.docsByProject[projectId]?.find(
+        (entry) => entry.id === docId,
+      );
+      if (doc?.kind === "prd") state.setPrd(projectId, markdown);
+    },
+    [projectId],
+  );
+
+  const saveDocTitle = useCallback(
+    (docId: string, title: string) => {
+      useVibe
+        .getState()
+        .updateDoc(projectId, docId, { title, updatedAt: new Date().toISOString() });
+    },
+    [projectId],
+  );
+
+  const deleteDoc = useCallback(
+    (docId: string) => {
+      useVibe.getState().removeDoc(projectId, docId);
+      if (view.kind === "doc" && view.docId === docId) {
+        setView({ kind: "brief" });
+      }
+    },
+    [projectId, view],
+  );
+
+  const addDoc = useCallback(() => {
+    const state = useVibe.getState();
+    const existing = state.docsByProject[projectId] ?? EMPTY_DOCS;
+    const count = existing.filter((entry) => entry.kind === "note").length;
+    const doc: ProjectDoc = {
+      id:
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? `doc-${crypto.randomUUID()}`
+          : `doc-note-${Date.now()}`,
+      kind: "note",
+      title: `Note ${count + 1}`,
+      markdown: "",
+      updatedAt: new Date().toISOString(),
+    };
+    state.addDoc(projectId, doc);
+    setView({ kind: "doc", docId: doc.id });
+  }, [projectId]);
+
+  const generateDoc = useCallback(
+    async (docId: string) => {
+      const state = useVibe.getState();
+      const current = state.projects.find((entry) => entry.id === projectId);
+      const doc = state.docsByProject[projectId]?.find(
+        (entry) => entry.id === docId,
+      );
+      if (!current || !doc || doc.kind === "note" || docBusy) return;
+      setDocBusy(docId);
+      try {
+        const reply = await requestAi(
+          "doc",
+          buildDocPrompt(doc.kind as DocKind, current, state.prdByProject[projectId] ?? ""),
+          current.model,
+        );
+        const markdown = parseDocMarkdown(reply.text);
+        if (markdown.trim()) saveDocMarkdown(docId, markdown);
+        else {
+          saveDocMarkdown(
+            docId,
+            `# ${doc.title} (local draft)\n\n> The model is unavailable, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${current.idea}\n`,
+          );
+        }
+      } catch {
+        saveDocMarkdown(
+          docId,
+          `# ${doc.title} (local draft)\n\n> The model did not answer, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${current.idea}\n`,
+        );
+      } finally {
+        setDocBusy(null);
+      }
+    },
+    [projectId, docBusy, saveDocMarkdown],
+  );
+
+  const generatePrototype = useCallback(async () => {
+    const state = useVibe.getState();
+    const current = state.projects.find((entry) => entry.id === projectId);
+    if (!current || protoBusy) return;
+    setProtoBusy(true);
+    try {
+      const reply = await requestAi(
+        "prototype",
+        buildPrototypePrompt(current, state.prdByProject[projectId] ?? ""),
+        current.model,
+      );
+      const html =
+        parsePrototypeHtml(reply.text) ||
+        `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8" />\n<title>${current.name}</title>\n</head>\n<body>\n<h1>${current.name}</h1>\n<p>${current.idea}</p>\n</body>\n</html>`;
+      const existing = (state.filesByProject[projectId] ?? EMPTY_FILES).find(
+        (file) => file.path === "prototype.html",
+      );
+      if (existing) {
+        state.updateFile(projectId, existing.id, html);
+      } else {
+        state.setFiles(projectId, [
+          ...(state.filesByProject[projectId] ?? []),
+          {
+            id:
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `file-${Date.now()}`,
+            path: "prototype.html",
+            content: html,
+            language: "html",
+          },
+        ]);
+      }
+    } finally {
+      setProtoBusy(false);
+    }
+  }, [projectId, protoBusy]);
 
   const handleSnapshot = useCallback(
     (screenId: string, snapshot: TLEditorSnapshot) => {
@@ -302,11 +489,15 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       ? (files.find((file) => file.id === view.fileId) ?? files[0] ?? null)
       : null;
   const activeScreen =
-    view.kind === "design"
-      ? (screens.find((screen) => screen.id === view.screenId) ??
-        screens[0] ??
-        null)
+    screens.find((screen) => screen.name === "Prototype") ??
+    screens[0] ??
+    null;
+  const activeDoc =
+    view.kind === "doc"
+      ? (docs.find((entry) => entry.id === view.docId) ?? null)
       : null;
+  const prototypeFile =
+    files.find((file) => file.path === "prototype.html") ?? null;
   // Referentially stable across renders: a fresh object identity on every
   // render would look like a new snapshot to the canvas and remount it.
   const activeSnapshot = useMemo(
@@ -318,7 +509,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     const sectionIcon = <Icon icon={FolderIcon} size="xsm" />;
     const docIcon = <Icon icon={DocumentTextIcon} size="xsm" />;
     const fileIcon = <Icon icon={CodeBracketIcon} size="xsm" />;
-    const screenIcon = <Icon icon={PhotoIcon} size="xsm" />;
     return [
       {
         id: "plan",
@@ -339,6 +529,28 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             startContent: docIcon,
             isSelected: view.kind === "tasks",
             onClick: () => setView({ kind: "tasks" }),
+          },
+          {
+            id: "plan-docs",
+            label: "Documents",
+            startContent: docIcon,
+            isExpanded: true,
+            children:
+              docs.length > 0
+                ? docs.map((entry) => ({
+                    id: `doc-${entry.id}`,
+                    label: `${docLabel(entry.kind)} — ${entry.title || "Untitled"}`,
+                    startContent: docIcon,
+                    isSelected:
+                      view.kind === "doc" && view.docId === entry.id,
+                    onClick: () => setView({ kind: "doc", docId: entry.id }),
+                  }))
+                : [
+                    {
+                      id: "docs-empty",
+                      label: "No documents yet",
+                    },
+                  ],
           },
         ],
       },
@@ -373,44 +585,18 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         label: "Design",
         startContent: <Icon icon={PaintBrushIcon} size="xsm" />,
         isExpanded: true,
-        children:
-          screens.length > 0
-            ? screens.map((screen) => ({
-                id: `screen-${screen.id}`,
-                label: screen.name,
-                startContent: screenIcon,
-                isSelected:
-                  view.kind === "design" &&
-                  (view.screenId ?? screens[0]?.id) === screen.id,
-                onClick: () =>
-                  setView({ kind: "design", screenId: screen.id }),
-              }))
-            : [
-                {
-                  id: "design-empty",
-                  label: "Canvas",
-                  startContent: screenIcon,
-                  isSelected: view.kind === "design",
-                  onClick: () => setView({ kind: "design", screenId: null }),
-                },
-              ],
+        children: [
+          {
+            id: "design-prototype",
+            label: "prototype.html",
+            startContent: fileIcon,
+            isSelected: view.kind === "design",
+            onClick: () => setView({ kind: "design" }),
+          },
+        ],
       },
     ];
-  }, [files, screens, view]);
-
-  const addCanvas = () => {
-    const screen: Screen = {
-      id:
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? crypto.randomUUID()
-          : `screen-${Date.now()}`,
-      name: `Canvas ${screens.length + 1}`,
-      canvasJson: "",
-      components: [],
-    };
-    useVibe.getState().setScreens(projectId, [...screens, screen]);
-    setView({ kind: "design", screenId: screen.id });
-  };
+  }, [docs, files, view]);
 
   if (!hydrated) {
     return <OpeningProject />;
@@ -523,14 +709,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         <div className="shrink-0 border-b border-white/10 px-4 py-2">
           <SegmentedControl
             label="Workspace view"
-            value={view.kind}
+            value={view.kind === "doc" ? "docs" : view.kind}
             onChange={(next) => {
               if (next === "brief") setView({ kind: "brief" });
               else if (next === "tasks") setView({ kind: "tasks" });
               else if (next === "code")
                 setView({ kind: "code", fileId: files[0]?.id ?? null });
-              else if (next === "design")
-                setView({ kind: "design", screenId: screens[0]?.id ?? null });
+              else if (next === "design") setView({ kind: "design" });
+              else if (next === "docs") setView({ kind: "docs" });
             }}
             size="sm"
             layout="fill"
@@ -538,6 +724,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             <SegmentedControlItem label="Brief" value="brief" />
             <SegmentedControlItem label="Tasks" value="tasks" />
             <SegmentedControlItem label="Code" value="code" />
+            <SegmentedControlItem label="Docs" value="docs" />
             <SegmentedControlItem label="Design" value="design" />
           </SegmentedControl>
         </div>
@@ -576,13 +763,13 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               <div className="shrink-0 border-t border-white/10 p-2">
                 <button
                   type="button"
-                  onClick={addCanvas}
+                  onClick={addDoc}
                   className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left text-[13px] text-[#9aa0ae] hover:bg-white/5 hover:text-white"
                 >
                   <span aria-hidden className="text-[16px] leading-none">
                     +
                   </span>
-                  New canvas
+                  New document
                 </button>
               </div>
             </div>
@@ -774,7 +961,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 {activeFile ? (
                   <CodeBlock
                     code={activeFile.content}
-                    language="typescript"
+                    language={codeLanguage(activeFile.path)}
                     hasLineNumbers
                     size="sm"
                     style={{ width: "100%", height: "100%" }}
@@ -788,29 +975,186 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             </div>
           )}
 
-          {view.kind === "design" && (
-            <div className="min-h-0 flex-1">
-              {activeScreen ? (
-                <DesignCanvas
-                  key={activeScreen.id}
-                  initialSnapshot={activeSnapshot}
-                  onSnapshot={(snapshot) =>
-                    handleSnapshot(activeScreen.id, snapshot)
+          {view.kind === "docs" && (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <div className="mx-auto w-full max-w-[860px] px-5 pb-20 pt-7">
+                <p className="text-[11px] uppercase tracking-[0.14em] text-[#5b6472]">
+                  Plan
+                </p>
+                <h2 className="mt-1 text-[22px] font-semibold tracking-tight">
+                  Documents
+                </h2>
+                <p className="mt-1 text-[12px] text-[#9aa0ae]">
+                  Generated from the idea and brief, then yours to edit.
+                </p>
+                <ul className="mt-4 space-y-2">
+                  {docs.map((entry) => (
+                    <li key={entry.id}>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setView({ kind: "doc", docId: entry.id })
+                        }
+                        className="group flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-[#17181d] px-4 py-3 text-left hover:border-white/25"
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[14px] font-semibold text-[#f5f6f8]">
+                            {docLabel(entry.kind)} — {entry.title || "Untitled"}
+                          </span>
+                          <span className="mt-0.5 block truncate text-[12px] text-[#9aa0ae]">
+                            {entry.markdown.trim()
+                              ? `${entry.markdown.trim().split(/\s+/).length} words`
+                              : "Empty — generate or write it"}
+                          </span>
+                        </span>
+                        <svg
+                          aria-hidden
+                          width="14"
+                          height="14"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="shrink-0 text-[#5b6472] group-hover:text-white"
+                        >
+                          <path d="M9 6l6 6-6 6" />
+                        </svg>
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+                <button
+                  type="button"
+                  onClick={addDoc}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 px-4 py-3 text-[13px] text-[#9aa0ae] hover:border-white/25 hover:text-white"
+                >
+                  <span aria-hidden className="text-[16px] leading-none">
+                    +
+                  </span>
+                  New document
+                </button>
+              </div>
+            </div>
+          )}
+
+          {view.kind === "doc" && (
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              {activeDoc ? (
+                <DocView
+                  doc={activeDoc}
+                  canGenerate={activeDoc.kind !== "note"}
+                  generating={docBusy === activeDoc.id}
+                  modelLabel={
+                    project.model ? formatModelLabel(project.model) : "Muse"
+                  }
+                  onTitle={(title) => saveDocTitle(activeDoc.id, title)}
+                  onMarkdown={(markdown) =>
+                    saveDocMarkdown(activeDoc.id, markdown)
+                  }
+                  onDelete={() => deleteDoc(activeDoc.id)}
+                  onGenerate={() => void generateDoc(activeDoc.id)}
+                  onBack={
+                    isMobile ? () => setView({ kind: "docs" }) : undefined
                   }
                 />
               ) : (
-                <div className="grid h-full place-items-center">
-                  <p className="text-[13px] text-[#9aa0ae]">
-                    Preparing the canvas…
+                <div className="mx-auto w-full max-w-[860px] px-5 py-24 text-center">
+                  <p className="text-[15px] font-semibold">
+                    Document not found
+                  </p>
+                  <p className="mx-auto mt-2 max-w-sm text-[13px] text-[#9aa0ae]">
+                    It may have been deleted. Pick another from the list.
                   </p>
                 </div>
               )}
+            </div>
+          )}
+
+          {view.kind === "design" && (
+            <div className="flex min-h-0 flex-1 flex-col">
+              <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-2">
+                <span className="font-mono text-[12px] text-[#c9cdd6]">
+                  prototype.html
+                </span>
+                <span className="hidden text-[11px] text-[#5b6472] sm:block">
+                  Live preview of the generated page
+                </span>
+                <button
+                  type="button"
+                  onClick={() => void generatePrototype()}
+                  disabled={protoBusy}
+                  className="ml-auto flex h-7 items-center gap-1.5 rounded-full border border-white/10 bg-white/5 px-3 text-[12px] text-[#c9cdd6] hover:bg-white/10 hover:text-white disabled:opacity-50"
+                >
+                  {protoBusy ? "Generating…" : "Regenerate"}
+                </button>
+              </div>
+              <div className="min-h-0 flex-1">
+                {prototypeFile && activeScreen ? (
+                  <DesignCanvas
+                    key={activeScreen.id}
+                    initialSnapshot={activeSnapshot}
+                    html={prototypeFile.content}
+                    onSnapshot={(snapshot) =>
+                      handleSnapshot(activeScreen.id, snapshot)
+                    }
+                  />
+                ) : (
+                  <div className="grid h-full place-items-center px-5">
+                    <div className="max-w-sm text-center">
+                      <p className="text-[15px] font-semibold">
+                        No prototype yet
+                      </p>
+                      <p className="mt-2 text-[13px] text-[#9aa0ae]">
+                        Generate a single-file page from the idea and brief.
+                        It renders live on the canvas as an HTML prototype.
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void generatePrototype()}
+                        disabled={protoBusy}
+                        className="mt-4 inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90 disabled:opacity-50"
+                      >
+                        {protoBusy
+                          ? "Generating…"
+                          : `Generate with ${project.model ? formatModelLabel(project.model) : "Muse"}`}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </main>
       </div>
     </div>
   );
+}
+
+/** Map a file path to a highlighter language the viewer supports. */
+function codeLanguage(path: string): string | undefined {
+  const ext = path.split(".").pop()?.toLowerCase();
+  if (
+    ext === "ts" ||
+    ext === "tsx" ||
+    ext === "typescript" ||
+    ext === "js" ||
+    ext === "jsx" ||
+    ext === "javascript" ||
+    ext === "json" ||
+    ext === "html" ||
+    ext === "xml" ||
+    ext === "svg" ||
+    ext === "css" ||
+    ext === "scss" ||
+    ext === "less" ||
+    ext === "bash" ||
+    ext === "sh"
+  ) {
+    return ext;
+  }
+  return undefined;
 }
 
 function OpeningProject() {
