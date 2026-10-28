@@ -622,7 +622,8 @@ function Wizard() {
           isRequired={question.required || undefined}
           value={typeof value === "string" ? value : ""}
           onChange={(next) => setAnswer(question.id, next)}
-          status={status}>
+          status={status}
+          orientation="horizontal">
           {(question.options ?? []).map((option) => (
             <RadioListItem key={option} value={option} label={option} />
           ))}
@@ -639,7 +640,8 @@ function Wizard() {
           description={description}
           value={Array.isArray(value) ? value : []}
           onChange={(next) => setAnswer(question.id, next)}
-          status={status}>
+          status={status}
+          controlClassName="[&>ul]:flex [&>ul]:flex-row! [&>ul]:flex-wrap [&>ul]:gap-x-6 [&>ul]:gap-y-2">
           {(question.options ?? []).map((option) => (
             <CheckboxListItem key={option} value={option} label={option} />
           ))}
