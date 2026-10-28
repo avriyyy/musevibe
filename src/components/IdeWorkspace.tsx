@@ -222,6 +222,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   );
 
   const [view, setView] = useState<View>({ kind: "plan" });
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>(null);
   const [docBusy, setDocBusy] = useState<string | null>(null);
   const [protoBusy, setProtoBusy] = useState(false);
@@ -563,6 +564,42 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       : null;
   const prototypeFile =
     files.find((file) => file.path === "prototype.html") ?? null;
+  const selectedTask =
+    selectedTaskId ? (tasks.find((task) => task.id === selectedTaskId) ?? null) : null;
+
+  const patchTask = useCallback(
+    (id: string, patch: Partial<Pick<Task, "title" | "notes">>) => {
+      const all = useVibe.getState().tasksByProject[projectId] ?? EMPTY_TASKS;
+      useVibe
+        .getState()
+        .setTasks(
+          projectId,
+          all.map((task) => (task.id === id ? { ...task, ...patch } : task)),
+        );
+    },
+    [projectId],
+  );
+
+  const moveTaskById = useCallback(
+    (id: string, next: TaskStatus) => {
+      const task = (useVibe.getState().tasksByProject[projectId] ?? EMPTY_TASKS).find(
+        (entry) => entry.id === id,
+      );
+      if (task && task.status !== next) {
+        useVibe.getState().moveTask(projectId, id, next);
+      }
+    },
+    [projectId],
+  );
+
+  useEffect(() => {
+    if (!selectedTaskId) return;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedTaskId(null);
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [selectedTaskId]);
   // Referentially stable across renders: a fresh object identity on every
   // render would look like a new snapshot to the canvas and remount it.
   const designSnapshot = useMemo(
@@ -871,32 +908,49 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           )}
 
           {view.kind === "tasks" && (
-            <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-4">
-              {tasksLocal && (
-                <p className="mb-3 shrink-0 text-[11px] text-[#9aa0ae]">
-                  Tasks were drafted locally, without the model.
-                </p>
-              )}
+            <div className="relative flex min-h-0 flex-1 overflow-hidden">
+              <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-4">
+                {tasksLocal && (
+                  <p className="mb-3 shrink-0 text-[11px] text-[#9aa0ae]">
+                    Tasks were drafted locally, without the model.
+                  </p>
+                )}
 
-              <div className="flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto pb-1">
-                {COLUMNS.map((column) => (
-                  <TaskColumn
-                    key={column.status}
-                    status={column.status}
-                    tasks={tasks.filter((task) => task.status === column.status)}
-                    loading={phase === "tasks" && tasks.length === 0}
-                    onMoveById={(id, next) => {
-                      const task = tasks.find((entry) => entry.id === id);
-                      if (task && task.status !== next) {
-                        useVibe.getState().moveTask(projectId, id, next);
-                      }
-                    }}
-                    onRemove={(task) =>
-                      useVibe.getState().removeTask(projectId, task.id)
-                    }
-                  />
-                ))}
+                <div className="flex min-h-0 flex-1 items-stretch gap-3 overflow-x-auto pb-1">
+                  {COLUMNS.map((column) => (
+                    <TaskColumn
+                      key={column.status}
+                      status={column.status}
+                      tasks={tasks.filter((task) => task.status === column.status)}
+                      loading={phase === "tasks" && tasks.length === 0}
+                      selectedId={selectedTaskId}
+                      onOpen={(task) => setSelectedTaskId(task.id)}
+                      onMoveById={moveTaskById}
+                    />
+                  ))}
+                </div>
               </div>
+
+              {selectedTask && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Close task details"
+                    onClick={() => setSelectedTaskId(null)}
+                    className="absolute inset-0 z-20 bg-black/50 md:hidden"
+                  />
+                  <TaskDetailPanel
+                    task={selectedTask}
+                    onPatch={(patch) => patchTask(selectedTask.id, patch)}
+                    onMove={(next) => moveTaskById(selectedTask.id, next)}
+                    onDelete={() => {
+                      useVibe.getState().removeTask(projectId, selectedTask.id);
+                      setSelectedTaskId(null);
+                    }}
+                    onClose={() => setSelectedTaskId(null)}
+                  />
+                </>
+              )}
             </div>
           )}
 
@@ -1007,18 +1061,227 @@ function Bar({ width }: { width: string }) {
   );
 }
 
+function StatusPicker({
+  value,
+  onChange,
+}: {
+  value: TaskStatus;
+  onChange: (next: TaskStatus) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    return () => document.removeEventListener("mousedown", onPointerDown);
+  }, [open ]);
+
+  const current = COLUMNS.find((column) => column.status === value) ?? COLUMNS[0];
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label="Task status"
+        onClick={() => setOpen((previous) => !previous)}
+        className="flex h-9 w-full items-center gap-2.5 rounded-xl border border-white/10 bg-white/5 px-3 text-left text-[13px] text-[#f5f6f8] hover:border-white/25 hover:bg-white/10"
+      >
+        <StatusDot variant={current.variant} label={`${current.label} status`} />
+        <span className="flex-1">{current.label}</span>
+        <svg
+          aria-hidden
+          width="12"
+          height="12"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="1.8"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          className={`shrink-0 text-[#9aa0ae] transition-transform ${open ? "rotate-180" : ""}`}
+        >
+          <path d="M6 9l6 6 6-6" />
+        </svg>
+      </button>
+
+      {open && (
+        <div
+          role="listbox"
+          aria-label="Pick a task status"
+          className="absolute left-0 right-0 top-full z-50 mt-1.5 rounded-xl border border-white/10 bg-[#17181d] p-1.5 shadow-2xl"
+        >
+          {COLUMNS.map((column) => {
+            const selected = column.status === value;
+            return (
+              <button
+                key={column.status}
+                type="button"
+                role="option"
+                aria-selected={selected}
+                onClick={() => {
+                  onChange(column.status);
+                  setOpen(false);
+                }}
+                className={`flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-[13px] ${
+                  selected
+                    ? "bg-white/10 text-white"
+                    : "text-[#c9cdd6] hover:bg-white/5 hover:text-white"
+                }`}
+              >
+                <StatusDot
+                  variant={column.variant}
+                  label={`${column.label} status`}
+                />
+                <span className="flex-1">{column.label}</span>
+                {selected && (
+                  <svg
+                    aria-hidden
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="shrink-0"
+                  >
+                    <path d="M5 12l5 5L19 7" />
+                  </svg>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TaskDetailPanel({
+  task,
+  onPatch,
+  onMove,
+  onDelete,
+  onClose,
+}: {
+  task: Task;
+  onPatch: (patch: Partial<Pick<Task, "title" | "notes">>) => void;
+  onMove: (next: TaskStatus) => void;
+  onDelete: () => void;
+  onClose: () => void;
+}) {
+  const meta = COLUMNS.find((column) => column.status === task.status) ?? COLUMNS[0];
+  return (
+    <aside
+      aria-label="Task details"
+      className="absolute inset-y-0 right-0 z-30 flex w-[320px] max-w-[85vw] flex-col border-l border-white/10 bg-[#0f1014] md:static md:z-auto md:w-[320px] md:max-w-none md:shrink-0"
+    >
+      <div className="flex shrink-0 items-center gap-2 border-b border-white/10 px-4 py-3">
+        <StatusDot variant={meta.variant} label={`${meta.label} status`} />
+        <span className="text-[13px] font-semibold text-[#f5f6f8]">
+          Task details
+        </span>
+        <button
+          type="button"
+          onClick={onClose}
+          aria-label="Close task details"
+          className="ml-auto flex h-7 w-7 items-center justify-center rounded-lg text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+        >
+          <svg
+            aria-hidden
+            width="13"
+            height="13"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+          >
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      </div>
+
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4">
+        <div>
+          <label
+            htmlFor="task-detail-title"
+            className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#5b6472]"
+          >
+            Title
+          </label>
+          <input
+            id="task-detail-title"
+            value={task.title}
+            onChange={(event) => onPatch({ title: event.target.value })}
+            placeholder="Untitled task"
+            className="mt-1.5 w-full rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[13px] font-medium text-[#f5f6f8] placeholder:text-[#5b6472] focus:border-white/25 focus:outline-none"
+          />
+        </div>
+
+        <div>
+          <label
+            htmlFor="task-detail-status"
+            className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#5b6472]"
+          >
+            Status
+          </label>
+          <div id="task-detail-status" className="mt-1.5">
+            <StatusPicker value={task.status} onChange={onMove} />
+          </div>
+        </div>
+
+        <div>
+          <label
+            htmlFor="task-detail-notes"
+            className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#5b6472]"
+          >
+            Notes
+          </label>
+          <textarea
+            id="task-detail-notes"
+            value={task.notes ?? ""}
+            onChange={(event) => onPatch({ notes: event.target.value })}
+            placeholder="Add details, links, acceptance criteria…"
+            rows={6}
+            className="mt-1.5 w-full resize-y rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-[13px] leading-relaxed text-[#e8ebf0] placeholder:text-[#5b6472] focus:border-white/25 focus:outline-none"
+          />
+        </div>
+
+        <div className="mt-auto pt-2">
+          <button
+            type="button"
+            onClick={onDelete}
+            className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-[#f0a6a6]/40 px-3 text-[13px] font-medium text-[#f0a6a6] hover:bg-[#f0a6a6]/10"
+          >
+            Delete task
+          </button>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
 function TaskColumn({
   status,
   tasks,
   loading,
+  selectedId,
+  onOpen,
   onMoveById,
-  onRemove,
 }: {
   status: TaskStatus;
   tasks: Task[];
   loading: boolean;
+  selectedId: string | null;
+  onOpen: (task: Task) => void;
   onMoveById: (id: string, next: TaskStatus) => void;
-  onRemove: (task: Task) => void;
 }) {
   const meta = COLUMNS.find((column) => column.status === status) ?? COLUMNS[0];
   const [draggingId, setDraggingId] = useState<string | null>(null);
@@ -1086,9 +1349,19 @@ function TaskColumn({
               setDraggingId(task.id);
             }}
             onDragEnd={() => setDraggingId(null)}
-            className={`group cursor-grab active:cursor-grabbing ${draggingId === task.id ? "opacity-50" : ""}`}
+            onClick={() => onOpen(task)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                onOpen(task);
+              }
+            }}
+            role="button"
+            tabIndex={0}
+            aria-label={`Open details for ${task.title}`}
+            className={`group cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${draggingId === task.id ? "opacity-50" : ""}`}
           >
-            <Card>
+            <Card className={selectedId === task.id ? "ring-1 ring-white/50" : ""}>
               <p
                 className={`text-[13px] font-medium leading-snug ${
                   task.status === "done" || task.status === "cancelled"
@@ -1103,43 +1376,6 @@ function TaskColumn({
                   {task.notes}
                 </Text>
               )}
-
-              <div className="mt-2.5 flex items-center gap-1 opacity-100 transition-opacity md:opacity-0 md:group-hover:opacity-100 md:group-focus-within:opacity-100">
-                <select
-                  aria-label={`Move ${task.title} to another status`}
-                  value={task.status}
-                  onChange={(event) =>
-                    onMoveById(task.id, event.target.value as TaskStatus)
-                  }
-                  className="h-6 min-w-0 flex-1 rounded-md bg-white/5 px-1 text-[11px] text-[#9aa0ae] hover:bg-white/10 hover:text-white focus:outline-none"
-                >
-                  {COLUMNS.map((column) => (
-                    <option key={column.status} value={column.status}>
-                      {column.label}
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={() => onRemove(task)}
-                  aria-label={`Delete ${task.title}`}
-                  title="Delete task"
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-[#5b6472] hover:bg-white/10 hover:text-[#f0a6a6]"
-                >
-                  <svg
-                    aria-hidden
-                    width="12"
-                    height="12"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                  >
-                    <path d="M6 6l12 12M18 6L6 18" />
-                  </svg>
-                </button>
-              </div>
             </Card>
           </div>
         ))}
