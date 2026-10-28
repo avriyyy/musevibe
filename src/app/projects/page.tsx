@@ -112,27 +112,27 @@ export default function ProjectsPage() {
                 </button>
               </div>
             ) : (
-              <ul className="grid gap-3 sm:grid-cols-2">
+              <ul className="flex flex-col gap-2">
                 {sorted.map((p) => (
                   <li key={p.id}>
                     <button
                       type="button"
                       onClick={() => openProject(p.id)}
                       aria-label={p.status === "draft" ? `Continue setting up ${p.name}` : `Open ${p.name}`}
-                      className="group flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-[#17181d] px-4 py-4 text-left hover:border-white/25"
+                      className="group flex w-full items-center gap-3 rounded-2xl border border-white/10 bg-[#17181d] px-4 py-3 text-left hover:border-white/25"
                     >
                       {p.logoUrl ? (
                         <img
                           src={p.logoUrl}
                           alt=""
-                          width={44}
-                          height={44}
-                          className="h-11 w-11 shrink-0 rounded-full object-cover"
+                          width={40}
+                          height={40}
+                          className="h-10 w-10 shrink-0 rounded-full object-cover"
                         />
                       ) : (
                         <span
                           aria-hidden
-                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-white/10 text-[15px] font-semibold text-[#c9cdd6]"
+                          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white/10 text-[14px] font-semibold text-[#c9cdd6]"
                         >
                           {initials(p.name)}
                         </span>
@@ -151,13 +151,13 @@ export default function ProjectsPage() {
                         <span className="mt-0.5 block truncate text-[12px] text-[#9aa0ae]">
                           {p.idea}
                         </span>
-                        <span className="mt-1 block truncate text-[11px] text-[#5b6472]">
-                          {p.platform && p.timeline
-                            ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)}`
-                            : p.status === "draft"
-                              ? "Continue setup"
-                              : ""}
-                        </span>
+                      </span>
+                      <span className="hidden shrink-0 text-[11px] text-[#5b6472] sm:block">
+                        {p.platform && p.timeline
+                          ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)}`
+                          : p.status === "draft"
+                            ? "Continue setup"
+                            : ""}
                       </span>
                       <svg
                         aria-hidden

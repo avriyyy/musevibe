@@ -33,7 +33,6 @@ import {
 } from "@astryxdesign/core/Layout";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
-import { Selector } from "@astryxdesign/core/Selector";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { HStack, StackItem, VStack } from "@astryxdesign/core/Stack";
 import { Step, Stepper } from "@astryxdesign/core/Stepper";
@@ -43,7 +42,6 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import {
   PLATFORMS,
-  TIMELINES,
   platformLabel,
   timelineLabel,
   type Platform,
@@ -80,7 +78,6 @@ import { createDraftProject } from "@/lib/draft";
 const STEPS = [
   { label: "Stack" },
   { label: "Questions" },
-  { label: "Scope", isOptional: true },
   { label: "Logo", isOptional: true },
   { label: "Review" },
 ];
@@ -561,7 +558,7 @@ function Wizard() {
 
   const goToStep = (next: number) => {
     if (next > 1 && questionsPending) return;
-    if (next === 2) {
+    if (next >= 2) {
       void recommendStack();
     }
     saveProgress(next);
@@ -586,12 +583,6 @@ function Wizard() {
     }
 
     if (step === 2) {
-      saveProgress(3);
-      setStep(3);
-      return;
-    }
-
-    if (step === 3) {
       saveProgress(REVIEW_STEP);
       setStep(REVIEW_STEP);
       return;
@@ -964,29 +955,6 @@ function Wizard() {
           )}
 
           {step === 2 && (
-            <VStack gap={5}>
-              <VStack gap={1}>
-                <Heading level={2}>Set the timeline</Heading>
-                <Text type="supporting" color="secondary">
-                  Pick the window you want to aim for. It shapes how much the
-                  first version takes on. Everything here has a default, so
-                  you can skip this step.
-                </Text>
-              </VStack>
-
-              <FormLayout defaultOptionality="optional">
-                <Selector
-                  label="Target timeline"
-                  options={TIMELINES}
-                  value={timeline}
-                  onChange={(value) => setTimeline(value as Timeline)}
-                  description="A target, not a deadline."
-                />
-              </FormLayout>
-            </VStack>
-          )}
-
-          {step === 3 && (
             <VStack gap={5}>
               <VStack gap={1}>
                 <Heading level={2}>Give it a mark</Heading>
