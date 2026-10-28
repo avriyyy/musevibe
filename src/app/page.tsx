@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
+import { createDraftProject } from "@/lib/draft";
 import { platformLabel, timelineLabel } from "@/lib/project-options";
 import { frameworkLabel } from "@/lib/stack-options";
 import ScrollArea from "@/components/ScrollArea";
@@ -28,7 +29,7 @@ function timeAgo(iso: string | undefined, now: number | null) {
 
 export default function Home() {
   const router = useRouter();
-  const { projects, setDraftIdea, touchProject } = useVibe();
+  const { projects, touchProject } = useVibe();
   const [idea, setIdea] = useState("");
   const [focused, setFocused] = useState(false);
   const [typed, setTyped] = useState("");
@@ -94,13 +95,29 @@ export default function Home() {
     return () => clearTimeout(timer);
   }, [idea, focused]);
 
-  const submit = () => {
+  const submitInFlight = useRef(false);
+  const [naming, setNaming] = useState(false);
+
+  const submit = async () => {
     const text = idea.trim();
-    if (!text) return;
-    setDraftIdea(text);
+    if (!text || submitInFlight.current) return;
+    submitInFlight.current = true;
+    setNaming(true);
+
+    let id = "";
+    try {
+      id = await createDraftProject(text);
+    } catch {
+      setNaming(false);
+      submitInFlight.current = false;
+      return;
+    }
+
     setIdea("");
     if (fileRef.current) fileRef.current.value = "";
-    router.push("/form-wizard");
+    setNaming(false);
+    submitInFlight.current = false;
+    router.push(`/form-wizard?id=${id}`);
   };
 
   const attach = async (f: File | undefined) => {
@@ -110,6 +127,11 @@ export default function Home() {
   };
 
   const openProject = (id: string, ideaText: string) => {
+    const project = projects.find((p) => p.id === id);
+    if (project?.status === "draft") {
+      router.push(`/form-wizard?id=${id}`);
+      return;
+    }
     touchProject(id);
     setIdea(ideaText);
   };
@@ -247,11 +269,11 @@ export default function Home() {
             </div>
             <button
               onClick={submit}
-              disabled={!idea.trim()}
-              aria-label="Create project from this idea"
+              disabled={!idea.trim() || naming}
+              aria-label={naming ? "Naming your project" : "Create project from this idea"}
               className="w-9 h-9 rounded-full bg-meta text-white text-[18px] leading-none hover:bg-meta-hover active:bg-meta-pressed disabled:opacity-40"
             >
-              ↑
+              {naming ? "…" : "↑"}
             </button>
           </div>
         </div>
@@ -315,6 +337,7 @@ export default function Home() {
                       {p.idea}
                     </span>
                     <span className="mt-0.5 block text-[11px] text-[#5b6472]">
+                      {p.status === "draft" ? "Draft · continue setup · " : ""}
                       {p.platform && p.timeline
                         ? `${platformLabel(p.platform)}${p.framework ? ` · ${frameworkLabel(p.platform, p.framework)}` : ""} · ${timelineLabel(p.timeline)} · `
                         : ""}
@@ -323,10 +346,10 @@ export default function Home() {
                   </div>
                   <button
                     onClick={() => openProject(p.id, p.idea)}
-                    aria-label={`Open ${p.name}`}
+                    aria-label={p.status === "draft" ? `Continue setting up ${p.name}` : `Open ${p.name}`}
                     className="shrink-0 px-4 py-1.5 rounded-full bg-white/10 text-[13px] font-medium text-[#c9cdd6] hover:bg-meta hover:text-white"
                   >
-                    Open
+                    {p.status === "draft" ? "Continue" : "Open"}
                   </button>
                 </li>
               ))}

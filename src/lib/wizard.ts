@@ -240,3 +240,32 @@ export function deriveProjectName(idea: string): string {
   if (!words) return "";
   return words.length > 48 ? `${words.slice(0, 47).trimEnd()}…` : words;
 }
+
+/** Prompt that asks the model for nothing but a short project name. */
+export function buildNamePrompt(idea: string): string {
+  const trimmed = idea.replace(/\s+/g, " ").trim().slice(0, 500);
+  return [
+    "Give this app idea a short project name.",
+    `Idea: "${trimmed}".`,
+    "",
+    "Rules: 2 to 5 words, Title Case, plain words only.",
+    "No quotes, no punctuation, no tagline, no explanation.",
+    "Reply with ONLY the name.",
+  ].join("\n");
+}
+
+/**
+ * Accept the model's raw reply and return a clean name, or null when nothing
+ * usable survives. The caller falls back to deriveProjectName.
+ */
+export function parseProjectName(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const firstLine = raw.split("\n")[0]?.trim() ?? "";
+  const cleaned = firstLine
+    .replace(/^["'`*#>\\-\\s]+/, "")
+    .replace(/["'`*\\s.]+$/, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 48);
+  return cleaned || null;
+}

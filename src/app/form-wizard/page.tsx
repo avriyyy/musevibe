@@ -11,6 +11,7 @@
  */
 
 import {
+  Suspense,
   useCallback,
   useEffect,
   useRef,
@@ -18,7 +19,7 @@ import {
   useSyncExternalStore,
   type CSSProperties,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList";
@@ -52,7 +53,6 @@ import {
   FALLBACK_QUESTIONS,
   answerToText,
   buildQuestionPrompt,
-  deriveProjectName,
   isAnswered,
   parseWizardQuestions,
   type WizardAnswerValue,
@@ -75,9 +75,9 @@ import {
   type StackRecommendation,
 } from "@/lib/stack-options";
 import { useVibe } from "@/lib/store";
+import { createDraftProject } from "@/lib/draft";
 
 const STEPS = [
-  { label: "Project" },
   { label: "Questions" },
   { label: "Scope", isOptional: true },
   { label: "Logo", isOptional: true },
@@ -115,29 +115,60 @@ export default function FormWizardPage() {
     getClientSnapshot,
     getServerSnapshot,
   );
-  return isClient ? <Wizard /> : <WizardLoading />;
+  // `useSearchParams` re-renders on query changes; reading window.location in
+  // a state initializer would keep the prerender's empty query forever.
+  return isClient ? (
+    <Suspense fallback={<WizardLoading />}>
+      <Wizard />
+    </Suspense>
+  ) : (
+    <WizardLoading />
+  );
 }
 
 function Wizard() {
   const router = useRouter();
-  const draftIdea = useVibe((state) => state.draftIdea);
+  const updateProject = useVibe((state) => state.updateProject);
   const setDraftIdea = useVibe((state) => state.setDraftIdea);
-  const addProject = useVibe((state) => state.addProject);
   const isNarrow = useMediaQuery("(max-width: 640px)");
 
-  const nameRef = useRef<HTMLInputElement>(null);
-  const ideaRef = useRef<HTMLTextAreaElement>(null);
+  // The chat creates the draft project before navigating here, so the wizard
+  // always edits an existing project and can be left and resumed. A legacy
+  // ?idea= link without an id creates its draft on mount instead.
+  const searchParams = useSearchParams();
+  const liveId = searchParams.get("id") ?? "";
+  const [createdId, setCreatedId] = useState("");
+  const projectId = liveId || createdId;
+  const project = useVibe((state) =>
+    projectId ? state.projects.find((p) => p.id === projectId) : undefined,
+  );
+  const resolvingRef = useRef(false);
+
+  useEffect(() => {
+    if (projectId || resolvingRef.current) return;
+    const rawIdea = searchParams.get("idea") ?? "";
+    const fallbackIdea = rawIdea.trim() || useVibe.getState().draftIdea.trim();
+    if (!fallbackIdea) return;
+    resolvingRef.current = true;
+    setDraftIdea("");
+    void createDraftProject(fallbackIdea).then((id) => {
+      setCreatedId(id);
+      router.replace(`/form-wizard?id=${id}`);
+    });
+  }, [projectId, router, setDraftIdea, searchParams]);
+
+  const idea = project?.idea ?? "";
+  const name = project?.name ?? "";
+
   const questionRefs = useRef<Record<string, HTMLElement | null>>({});
   const submitted = useRef(false);
-  const startedRef = useRef(false);
-  const requestRef = useRef(0);
-
-  const [idea, setIdea] = useState(() => {
-    const queryIdea = (new URLSearchParams(window.location.search).get("idea") ?? "").trim();
-    return (draftIdea || queryIdea).trim();
+  const hydratedRef = useRef("");
+  const projectIdRef = useRef(projectId);
+  useEffect(() => {
+    projectIdRef.current = projectId;
   });
-  const [name, setName] = useState(() => deriveProjectName(idea));
-  const [step, setStep] = useState(() => (idea.trim() ? 1 : 0));
+  const requestRef = useRef(0);
+  const [step, setStep] = useState(0);
   const [attempted, setAttempted] = useState<ReadonlySet<number>>(new Set());
   const [generatedFor, setGeneratedFor] = useState("");
 
@@ -154,9 +185,7 @@ function Wizard() {
   const stackRequestRef = useRef(0);
 
   const [questions, setQuestions] = useState<WizardQuestion[]>([]);
-  const [questionStatus, setQuestionStatus] = useState<QuestionStatus>(() =>
-    idea.trim() ? "loading" : "idle",
-  );
+  const [questionStatus, setQuestionStatus] = useState<QuestionStatus>("loading");
   const [questionSource, setQuestionSource] = useState<QuestionSource>(null);
   const [answers, setAnswers] = useState<WizardAnswers>({});
 
@@ -167,6 +196,36 @@ function Wizard() {
   const [logoError, setLogoError] = useState("");
   const logoFileRef = useRef<HTMLInputElement>(null);
   const logoRequestRef = useRef(0);
+  const stackTouchedRef = useRef(false);
+
+  // Saved answers ride on the project so a resumed draft keeps its progress.
+  // Match by question id first, then by label for older drafts. Reads from
+  // the store directly so the generator callback never captures stale state.
+  const restoreAnswers = (list: WizardQuestion[]): WizardAnswers => {
+    const saved =
+      useVibe.getState().projects.find((p) => p.id === projectIdRef.current)?.answers ?? [];
+    if (!saved.length) return {};
+    const next: WizardAnswers = {};
+    for (const question of list) {
+      const entry =
+        saved.find((item) => item.qid === question.id) ??
+        saved.find((item) => item.question === question.label);
+      if (!entry) continue;
+      const value = entry.values ?? entry.answer;
+      if (Array.isArray(value)) {
+        const options = new Set(question.options ?? []);
+        const kept = value.filter((option) => options.has(option));
+        if (kept.length) next[question.id] = kept;
+      } else if (typeof value === "string" && value.trim()) {
+        if (question.type === "single") {
+          if ((question.options ?? []).includes(value)) next[question.id] = value;
+        } else {
+          next[question.id] = value;
+        }
+      }
+    }
+    return next;
+  };
 
   const generateQuestions = useCallback(async (ideaText: string) => {
     const trimmed = ideaText.trim();
@@ -209,8 +268,10 @@ function Wizard() {
     setQuestionSource(nextSource);
     setQuestionStatus("ready");
     setAnswers((current) => {
-      const next: WizardAnswers = {};
+      const restored = restoreAnswers(nextQuestions);
+      const next: WizardAnswers = { ...restored };
       for (const question of nextQuestions) {
+        if (next[question.id] !== undefined) continue;
         const value = current[question.id];
         if (value === undefined) continue;
         if (Array.isArray(value)) {
@@ -227,12 +288,31 @@ function Wizard() {
   }, []);
 
   useEffect(() => {
-    if (startedRef.current) return;
-    startedRef.current = true;
-    // Kick off the one request this mount needs; the generator owns its state.
+    if (!idea.trim() || generatedFor === idea.trim()) return;
+    // One request per idea text; the generator records its target up front.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    if (idea.trim()) void generateQuestions(idea);
-  }, [idea, generateQuestions]);
+    void generateQuestions(idea);
+  }, [idea, generatedFor, generateQuestions]);
+
+  // Hydrate local state from the project once it resolves: a resumed draft
+  // continues with its saved scope, logo, answers, and step.
+  useEffect(() => {
+    if (!project || hydratedRef.current === project.id) return;
+    hydratedRef.current = project.id;
+    if (project.platform || project.framework) stackTouchedRef.current = true;
+    setPlatform(project.platform ?? "web");
+    setTimeline(project.timeline ?? "two-weeks");
+    setFramework(
+      project.framework && isFrameworkFor(project.platform ?? "web", project.framework)
+        ? project.framework
+        : FRAMEWORKS[project.platform ?? "web"][0].value,
+    );
+    setLogoUrl(project.logoUrl ?? null);
+    setLogoOrigin(project.logoUrl ? "upload" : null);
+    setLogoStatus("idle");
+    setStep(Math.min(project.wizardStep ?? 0, REVIEW_STEP));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project?.id]);
 
   const setAnswer = (id: string, value: WizardAnswerValue) => {
     setAnswers((current) => ({ ...current, [id]: value }));
@@ -278,8 +358,12 @@ function Wizard() {
     setStackRec(next);
     setStackSource(nextSource);
     setStackStatus("ready");
-    setPlatform(next.platform);
-    setFramework(next.framework);
+    // Apply the recommendation only when the user has not picked a stack yet.
+    // A resumed draft keeps its saved platform and framework.
+    if (!stackTouchedRef.current) {
+      setPlatform(next.platform);
+      setFramework(next.framework);
+    }
   }, [idea, answers, questions, stackFor]);
 
   const generateLogo = async () => {
@@ -339,14 +423,6 @@ function Wizard() {
     }
   };
 
-  const projectErrors: Record<string, string> = {};
-  if (!name.trim()) {
-    projectErrors.name = "Name the project before you continue.";
-  }
-  if (!idea.trim()) {
-    projectErrors.idea = "Write the one sentence you want to build from.";
-  }
-
   const questionErrors: Record<string, string> = {};
   for (const question of questions) {
     if (question.required && !isAnswered(answers[question.id])) {
@@ -354,14 +430,14 @@ function Wizard() {
     }
   }
 
-  const errorsByStep: Record<string, string>[] = [projectErrors, questionErrors, {}, {}, {}];
+  const errorsByStep: Record<string, string>[] = [questionErrors, {}, {}, {}];
   const shownErrors = (index: number) =>
     attempted.has(index) ? errorsByStep[index] : {};
 
   const questionIssueCount = Object.keys(questionErrors).length;
   const outstanding = STEPS.map((s, index) => {
     let issues = Object.values(errorsByStep[index]);
-    if (index === 1 && questionIssueCount > 0) {
+    if (index === 0 && questionIssueCount > 0) {
       issues = [
         `${questionIssueCount} ${
           questionIssueCount === 1 ? "question needs" : "questions need"
@@ -378,99 +454,100 @@ function Wizard() {
     (idea.trim().length > 0 && generatedFor !== idea.trim());
 
   const focusFirstError = (index: number) => {
-    if (index === 0) {
-      const target = !name.trim() ? nameRef : !idea.trim() ? ideaRef : null;
-      if (!target) return false;
-      requestAnimationFrame(() => target.current?.focus());
-      return true;
-    }
-
-    if (index === 1) {
-      const question = questions.find((item) => questionErrors[item.id]);
-      const node = question ? questionRefs.current[question.id] : null;
-      if (!node) return false;
-      requestAnimationFrame(() => {
-        if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
-          node.focus();
-          return;
-        }
-        node.querySelector<HTMLElement>("input, textarea, button")?.focus();
-      });
-      return true;
-    }
-
-    return false;
+    if (index !== 0) return false;
+    const question = questions.find((item) => questionErrors[item.id]);
+    const node = question ? questionRefs.current[question.id] : null;
+    if (!node) return false;
+    requestAnimationFrame(() => {
+      if (node instanceof HTMLInputElement || node instanceof HTMLTextAreaElement) {
+        node.focus();
+        return;
+      }
+      node.querySelector<HTMLElement>("input, textarea, button")?.focus();
+    });
+    return true;
   };
 
-  const createProject = () => {
-    if (submitted.current) return;
-    submitted.current = true;
-
-    const answersList = questions
+  const answersList = () =>
+    questions
       .map((question) => ({
+        qid: question.id,
         question: question.label,
         answer: answerToText(answers[question.id]),
+        values: answers[question.id],
       }))
       .filter((entry) => entry.answer.length > 0);
 
-    addProject({
-      id: crypto.randomUUID(),
-      name: name.trim(),
-      idea: idea.trim(),
-      createdAt: new Date().toISOString(),
+  /** Persist wizard progress onto the project so leaving resumes cleanly. */
+  const saveProgress = (nextStep: number) => {
+    if (!projectId) return;
+    updateProject(projectId, {
+      answers: answersList(),
       platform,
       timeline,
       framework,
-      answers: answersList,
       ...(logoUrl ? { logoUrl } : {}),
+      wizardStep: nextStep,
     });
-    setDraftIdea("");
+  };
+
+  const finishSetup = () => {
+    if (submitted.current || !projectId) return;
+    submitted.current = true;
+    saveProgress(REVIEW_STEP);
+    updateProject(projectId, { status: "ready" });
     router.push("/");
   };
 
+  const pickPlatform = (value: string) => {
+    const next = value as Platform;
+    stackTouchedRef.current = true;
+    setPlatform(next);
+    setFramework((current) =>
+      isFrameworkFor(next, current) ? current : FRAMEWORKS[next][0].value,
+    );
+  };
+
+  const pickFramework = (value: string) => {
+    stackTouchedRef.current = true;
+    setFramework(value);
+  };
+
   const goToStep = (next: number) => {
-    if (next > 1 && questionsPending) return;
-    if (next === 1 && idea.trim() && generatedFor !== idea.trim()) {
-      void generateQuestions(idea);
-    }
-    if (next === 2) {
+    if (next > 0 && questionsPending) return;
+    if (next === 1) {
       void recommendStack();
     }
+    saveProgress(next);
     setStep(next);
   };
 
   const goNext = () => {
     if (step === 0) {
+      if (questionStatus === "loading") return;
       setAttempted((previous) => new Set(previous).add(0));
       if (focusFirstError(0)) return;
-      if (!questions.length || generatedFor !== idea.trim()) {
-        void generateQuestions(idea);
-      }
+      void recommendStack();
+      saveProgress(1);
       setStep(1);
       return;
     }
 
     if (step === 1) {
-      if (questionStatus === "loading") return;
-      setAttempted((previous) => new Set(previous).add(1));
-      if (focusFirstError(1)) return;
-      void recommendStack();
+      saveProgress(2);
       setStep(2);
       return;
     }
 
     if (step === 2) {
-      setStep(3);
-      return;
-    }
-
-    if (step === 3) {
+      saveProgress(REVIEW_STEP);
       setStep(REVIEW_STEP);
       return;
     }
 
     if (questionsPending) {
-      setStep(1);
+      saveProgress(0);
+      setStep(0);
       if (questionStatus !== "loading") void generateQuestions(idea);
       return;
     }
@@ -480,11 +557,12 @@ function Wizard() {
     );
     if (invalid !== -1) {
       setAttempted((previous) => new Set(previous).add(invalid));
+      saveProgress(invalid);
       setStep(invalid);
       focusFirstError(invalid);
       return;
     }
-    createProject();
+    finishSetup();
   };
 
   const renderQuestion = (question: WizardQuestion) => {
@@ -572,6 +650,58 @@ function Wizard() {
   const ideaPreview =
     idea.length > 160 ? `${idea.slice(0, 157).trimEnd()}…` : idea;
 
+  if (!projectId) {
+    return (
+      <Layout
+        height="fill"
+        contentWidth={720}
+        padding={5}
+        content={
+          <LayoutContent>
+            <VStack gap={3}>
+              <Heading level={1}>Project not found</Heading>
+              <Text type="supporting" color="secondary">
+                This setup link has no project behind it. Start from the home
+                screen by typing your idea into the chat.
+              </Text>
+              <HStack gap={3}>
+                <Button
+                  label="Back home"
+                  variant="primary"
+                  className="min-h-11 md:min-h-0"
+                  onClick={() => router.push("/")}
+                />
+              </HStack>
+            </VStack>
+          </LayoutContent>
+        }
+      />
+    );
+  }
+
+  if (!project) {
+    return (
+      <Layout
+        height="fill"
+        contentWidth={720}
+        padding={5}
+        content={
+          <LayoutContent>
+            <div
+              role="status"
+              aria-live="polite"
+              className="flex flex-col items-center gap-3 py-10">
+              <Spinner size="lg" />
+              <Text type="supporting" color="secondary">
+                Opening your project…
+              </Text>
+            </div>
+          </LayoutContent>
+        }
+      />
+    );
+  }
+
   return (
     <Layout
       height="fill"
@@ -583,14 +713,14 @@ function Wizard() {
           <VStack gap={isNarrow ? 3 : 5}>
             <HStack gap={3} vAlign="center">
               <StackItem size="fill">
-                <Heading level={1}>New project</Heading>
+                <Heading level={1}>{name || "New project"}</Heading>
               </StackItem>
               <Button
                 label="Cancel"
                 variant="ghost"
                 className="min-h-11 md:min-h-0"
                 onClick={() => {
-                  setDraftIdea("");
+                  saveProgress(step);
                   router.push("/");
                 }}
               />
@@ -599,7 +729,7 @@ function Wizard() {
               activeStep={step}
               orientation="horizontal"
               onStepClick={goToStep}
-              label="New project progress"
+              label={`${name || "New project"} setup progress`}
               density="balanced"
               indicatorPosition="on-track">
               {STEPS.map((s, index) => (
@@ -622,49 +752,6 @@ function Wizard() {
       content={
         <LayoutContent key={step}>
           {step === 0 && (
-            <VStack gap={5}>
-              <VStack gap={1}>
-                <Heading level={2}>Start with the idea</Heading>
-                <Text type="supporting" color="secondary">
-                  Give the project a name and keep the idea to one sentence.
-                  Both appear on your home screen.
-                </Text>
-              </VStack>
-              <FormLayout>
-                <TextInput
-                  label="Project name"
-                  ref={nameRef}
-                  isRequired
-                  value={name}
-                  onChange={setName}
-                  placeholder="Habit tracker for indie devs"
-                  status={
-                    currentErrors.name
-                      ? { type: "error", message: currentErrors.name }
-                      : undefined
-                  }
-                />
-                <TextArea
-                  label="One-sentence idea"
-                  ref={ideaRef}
-                  isRequired
-                  rows={3}
-                  value={idea}
-                  onChange={setIdea}
-                  maxLength={280}
-                  placeholder="A habit tracker that never guilt-trips."
-                  description="A concrete sentence is easier to turn into tasks than a category."
-                  status={
-                    currentErrors.idea
-                      ? { type: "error", message: currentErrors.idea }
-                      : undefined
-                  }
-                />
-              </FormLayout>
-            </VStack>
-          )}
-
-          {step === 1 && (
             <VStack gap={5}>
               <VStack gap={1}>
                 <Heading level={2}>Shape the build</Heading>
@@ -691,22 +778,6 @@ function Wizard() {
                     />
                   )}
                 </HStack>
-              )}
-
-              {questionStatus === "idle" && (
-                <Banner
-                  status="info"
-                  title="Add the idea first"
-                  description="The questions are written from your idea. Go back one step and describe the project."
-                  collapsible={false}>
-                  <Button
-                    label="Back to the idea"
-                    variant="secondary"
-                    size="sm"
-                    className="min-h-11 md:min-h-0"
-                    onClick={() => setStep(0)}
-                  />
-                </Banner>
               )}
 
               {questionStatus === "loading" && (
@@ -738,7 +809,7 @@ function Wizard() {
             </VStack>
           )}
 
-          {step === 2 && (
+          {step === 1 && (
             <VStack gap={5}>
               <VStack gap={1}>
                 <Heading level={2}>Shape the first build</Heading>
@@ -775,13 +846,7 @@ function Wizard() {
                   <RadioList
                     label="Platform"
                     value={platform}
-                    onChange={(value) => {
-                      const next = value as Platform;
-                      setPlatform(next);
-                      setFramework((current) =>
-                        isFrameworkFor(next, current) ? current : FRAMEWORKS[next][0].value,
-                      );
-                    }}>
+                    onChange={pickPlatform}>
                     {PLATFORMS.map((option) => (
                       <RadioListItem
                         key={option.value}
@@ -794,7 +859,7 @@ function Wizard() {
                   <RadioList
                     label="Framework"
                     value={framework}
-                    onChange={setFramework}
+                    onChange={pickFramework}
                     description={
                       stackSource === "ai" && stackRec?.reason
                         ? `AI recommends ${frameworkLabel(stackRec.platform, stackRec.framework)}: ${stackRec.reason}`
@@ -841,7 +906,7 @@ function Wizard() {
             </VStack>
           )}
 
-          {step === 3 && (
+          {step === 2 && (
             <VStack gap={5}>
               <VStack gap={1}>
                 <Heading level={2}>Give it a mark</Heading>
@@ -947,10 +1012,10 @@ function Wizard() {
           {step === REVIEW_STEP && (
             <VStack gap={5}>
               <VStack gap={1}>
-                <Heading level={2}>Review and create</Heading>
+                <Heading level={2}>Review and finish</Heading>
                 <Text type="supporting" color="secondary">
-                  Check the brief. Creating a project only writes to this
-                  browser session.
+                  Check the brief before finishing setup. Everything stays in
+                  this browser session.
                 </Text>
               </VStack>
 
@@ -1043,7 +1108,10 @@ function Wizard() {
                   label="Skip"
                   variant="ghost"
                   className="min-h-11 md:min-h-0"
-                  onClick={() => setStep(REVIEW_STEP)}
+                  onClick={() => {
+                    saveProgress(REVIEW_STEP);
+                    setStep(REVIEW_STEP);
+                  }}
                 />
               )}
             </StackItem>
@@ -1057,22 +1125,23 @@ function Wizard() {
                   variant="secondary"
                   className="min-h-11 md:min-h-0"
                   isDisabled={step === 0}
-                  onClick={() => setStep((current) => Math.max(0, current - 1))}
+                  onClick={() => {
+                    const next = Math.max(0, step - 1);
+                    saveProgress(next);
+                    setStep(next);
+                  }}
                 />
                 <Button
                   label={
                     isLastStep
-                      ? "Create project"
-                      : step === 1 && questionStatus === "loading"
+                      ? "Finish setup"
+                      : step === 0 && questionStatus === "loading"
                         ? "Drafting questions…"
                         : "Next"
                   }
                   variant="primary"
                   className="min-h-11 md:min-h-0"
-                  isDisabled={
-                    step === 1 &&
-                    (questionStatus === "loading" || questionStatus === "idle")
-                  }
+                  isDisabled={step === 0 && questionStatus !== "ready"}
                   onClick={goNext}
                 />
               </HStack>

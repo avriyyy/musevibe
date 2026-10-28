@@ -1,10 +1,10 @@
 import type { Prd } from "./types";
-import { FALLBACK_QUESTIONS } from "./wizard";
+import { FALLBACK_QUESTIONS, deriveProjectName } from "./wizard";
 
 // Abstraction AI agar bisa swap provider Meta (Muse Spark).
 // Kalau AI_API_URL / AI_API_KEY kosong -> mock lokal, demo tetap jalan.
 
-export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo" | "stack";
+export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo" | "stack" | "name";
 
 export interface AiGenerateResult {
   text: string;
@@ -167,6 +167,9 @@ function mockGenerate(kind: AiGenerateKind, prompt: string): string {
   }
   if (kind === "stack") {
     return JSON.stringify({ platform: "web", framework: "nextjs", reason: "" });
+  }
+  if (kind === "name") {
+    return deriveProjectName(prompt) || "Untitled project";
   }
   return `// starter (mock) untuk: ${idea}\nexport default function App() {\n  return <h1>MuseVibe starter</h1>;\n}`;
 }

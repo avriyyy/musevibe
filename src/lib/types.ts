@@ -1,10 +1,13 @@
 import type { Platform, Timeline } from "./project-options";
+import type { WizardAnswerValue } from "./wizard";
 
 export type TaskStatus = "todo" | "doing" | "done";
 
 export interface ProjectAnswer {
+  qid: string;
   question: string;
   answer: string;
+  values?: WizardAnswerValue;
 }
 
 export interface Project {
@@ -13,6 +16,10 @@ export interface Project {
   idea: string;
   createdAt: string;
   lastOpenedAt?: string;
+  /** Draft means the setup wizard is not finished yet and can be resumed. */
+  status?: "draft" | "ready";
+  /** Last wizard step reached, so an unfinished draft resumes where it stopped. */
+  wizardStep?: number;
   platform?: Platform;
   timeline?: Timeline;
   /** Framework value from the stack picker, e.g. "nextjs". */

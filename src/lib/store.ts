@@ -10,6 +10,7 @@ interface VibeState {
   prdByProject: Record<string, string>;
   setDraftIdea: (idea: string) => void;
   addProject: (p: Project) => void;
+  updateProject: (id: string, patch: Partial<Project>) => void;
   touchProject: (id: string) => void;
   setPrd: (projectId: string, md: string) => void;
   setTasks: (projectId: string, tasks: Task[]) => void;
@@ -71,6 +72,12 @@ export const useVibe = create<VibeState>((set) => ({
   prdByProject: { "demo-indie": "# PRD Demo\n\nProblem: indie devs keep switching tools." },
 
   setDraftIdea: (idea) => set({ draftIdea: idea }),
+  updateProject: (id, patch) =>
+    set((s) => ({
+      projects: s.projects.map((p) =>
+        p.id === id ? { ...p, ...patch, lastOpenedAt: new Date().toISOString() } : p
+      ),
+    })),
   addProject: (p) =>
     set((s) => ({
       projects: [{ ...p, lastOpenedAt: new Date().toISOString() }, ...s.projects],
