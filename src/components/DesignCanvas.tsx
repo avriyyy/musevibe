@@ -76,8 +76,10 @@ interface DesignCanvasProps {
   suggesting?: boolean;
   /** Pending pages without HTML; hides the generate-all control at zero. */
   pendingCount?: number;
-  /** Label for generate buttons, e.g. "Muse". */
-  modelLabel?: string;
+  /** Planned pages overall; shown in the done state. */
+  planCount?: number;
+  /** True once every planned page has a frame. */
+  planDone?: boolean;
   onShapes: (shapesJson: string) => void;
   /** Quoted annotation text goes into the chat input (never auto-sent). */
   onQuoteToChat: (text: string) => void;
@@ -127,14 +129,12 @@ function PendingCard({
   title,
   brief,
   busy,
-  modelLabel,
   onGenerate,
 }: {
   left: number;
   title: string;
   brief?: string;
   busy: boolean;
-  modelLabel: string;
   onGenerate?: () => void;
 }) {
   return (
@@ -162,9 +162,10 @@ function PendingCard({
               disabled={busy}
               onClick={onGenerate}
               onPointerDown={halt}
+              aria-label={`Generate the ${title} page`}
               className="mt-4 inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90 disabled:opacity-50"
             >
-              {busy ? "Generating…" : `Generate with ${modelLabel}`}
+              {busy ? "Generating…" : "Generate"}
             </button>
           )}
         </div>
@@ -178,14 +179,16 @@ function SuggestCard({
   left,
   suggesting,
   pendingCount,
-  modelLabel,
+  totalCount,
+  done,
   onSuggestPages,
   onGenerateAll,
 }: {
   left: number;
   suggesting: boolean;
   pendingCount: number;
-  modelLabel: string;
+  totalCount: number;
+  done: boolean;
   onSuggestPages?: () => void;
   onGenerateAll?: () => void;
 }) {
@@ -195,7 +198,7 @@ function SuggestCard({
         <span className="text-[12px] font-medium text-[#c9cdd6]">Next pages</span>
         <span aria-hidden className="h-3 w-px bg-white/15" />
         <span className="font-mono text-[11px] tabular-nums text-[#5b6472]">
-          {pendingCount > 0 ? `${pendingCount} to go` : "from the PRD"}
+          {done ? `done \u00b7 ${totalCount} of ${totalCount}` : pendingCount > 0 ? `${pendingCount} to go` : "from the PRD"}
         </span>
       </div>
       <div className="grid h-full w-full place-items-center rounded-2xl border-2 border-dashed border-[#8ab4ff]/40 bg-[#8ab4ff]/[0.04]">
@@ -205,22 +208,28 @@ function SuggestCard({
           onPointerUp={halt}
         >
           <p className="text-[14px] font-semibold text-[#f5f6f8]">
-            {pendingCount > 0 ? "Pages still need frames" : "What should this app show?"}
+            {done
+              ? "Done \u2014 all pages have frames"
+              : pendingCount > 0
+                ? "Pages still need frames"
+                : "What should this app show?"}
           </p>
           <p className="mt-1.5 text-[12px] leading-5 text-[#9aa0ae]">
-            {pendingCount > 0
-              ? "Generate them one by one on their own frames, or draw every remaining page at once."
-              : "Draft the page list from the PRD, then generate each page on its own frame."}
+            {done
+              ? `Every page from the plan (${totalCount}) is generated. Refresh to let the model re-check the plan.`
+              : pendingCount > 0
+                ? "Generate the recommended page on its own frame, or draw every remaining page at once."
+                : "Draft the page list from the PRD, then generate each page on its own frame."}
           </p>
           <div className="mt-4 flex flex-col items-center gap-2">
-            {pendingCount > 0 && onGenerateAll && (
+            {!done && pendingCount > 0 && onGenerateAll && (
               <button
                 type="button"
                 onClick={onGenerateAll}
                 onPointerDown={halt}
                 className="inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90"
               >
-                {`Generate all ${pendingCount} with ${modelLabel}`}
+                {`Generate all ${pendingCount}`}
               </button>
             )}
             {onSuggestPages && (
@@ -233,9 +242,11 @@ function SuggestCard({
               >
                 {suggesting
                   ? "Suggesting…"
-                  : pendingCount > 0
-                    ? "Refresh suggestions"
-                    : "Suggest pages"}
+                  : done
+                    ? "Re-check the plan"
+                    : pendingCount > 0
+                      ? "Refresh suggestions"
+                      : "Suggest pages"}
               </button>
             )}
           </div>
@@ -253,7 +264,8 @@ export default function DesignCanvas({
   onGenerateAll,
   suggesting,
   pendingCount,
-  modelLabel,
+  planCount,
+  planDone,
   onShapes,
   onQuoteToChat,
   picking,
@@ -1044,7 +1056,8 @@ export default function DesignCanvas({
               left={frameLeft(index)}
               suggesting={!!suggesting}
               pendingCount={pendingCount ?? 0}
-              modelLabel={modelLabel ?? "Muse"}
+              totalCount={planCount ?? 0}
+              done={!!planDone}
               onSuggestPages={onSuggestPages}
               onGenerateAll={onGenerateAll}
             />
@@ -1099,7 +1112,6 @@ export default function DesignCanvas({
               title={frame.title}
               brief={frame.brief}
               busy={!!frame.busy}
-              modelLabel={modelLabel ?? "Muse"}
               onGenerate={
                 frame.slug && onGeneratePage
                   ? () => onGeneratePage(frame.slug as string)

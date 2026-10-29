@@ -644,9 +644,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     selectedTaskId ? (tasks.find((task) => task.id === selectedTaskId) ?? null) : null;
 
   const pagePlan = project?.pagePlan ?? null;
-  const pendingPageCount = (pagePlan ?? []).filter(
+  const pendingPages = (pagePlan ?? []).filter(
     (page) => !files.some((file) => file.path === pageFilePath(page.slug)),
-  ).length;
+  );
+  // One recommendation at a time: the top pending page takes the frame
+  // next to the generated ones, and the next one appears once it exists.
+  const nextPage = pendingPages[0] ?? null;
+  const pendingPageCount = pendingPages.length;
+  const planDone = pagePlan !== null && pendingPageCount === 0;
   const designFrames: CanvasFrame[] = useMemo(() => {
     const list: CanvasFrame[] = [];
     const showcase =
@@ -665,11 +670,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     });
     for (const page of pagePlan ?? []) {
       const file = files.find((entry) => entry.path === pageFilePath(page.slug));
+      // Already generated, or the single next recommendation: everything
+      // else stays off the canvas until its turn comes.
+      if (!file && page.slug !== nextPage?.slug) continue;
       list.push({
         id: pageFilePath(page.slug),
         slug: page.slug,
         title: page.title,
-        subtitle: file ? `${FRAME_W} × ${FRAME_H}` : "not yet generated",
+        subtitle: file ? `${FRAME_W} × ${FRAME_H}` : "recommended next",
         html: file?.content ?? null,
         kind: "page",
         brief: page.brief,
@@ -686,19 +694,20 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         kind: "page",
       });
     }
-    if (pagePlan === null || pendingPageCount > 0) {
-      list.push({
-        id: "suggest",
-        title: "Next pages",
-        subtitle: "from the PRD",
-        html: null,
-        kind: "suggest",
-      });
-    }
+    // The suggestion card stays at the end through every state: drafting
+    // the list, generating the rest, and the done stamp at the end.
+    list.push({
+      id: "suggest",
+      title: "Next pages",
+      subtitle: "from the PRD",
+      html: null,
+      kind: "suggest",
+    });
     return list;
   }, [
     files,
     pagePlan,
+    nextPage?.slug,
     pendingPageCount,
     project?.designSystem,
     showcaseBusy,
@@ -992,9 +1001,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                   onGenerateAll={() => void generateAllPages()}
                   suggesting={suggesting}
                   pendingCount={pendingPageCount}
-                  modelLabel={
-                    project.model ? formatModelLabel(project.model) : "Muse"
-                  }
+                  planCount={pagePlan?.length ?? 0}
+                  planDone={planDone}
                   onShapes={(shapesJson) =>
                     prototypeScreen &&
                     handleShapes(prototypeScreen.id, shapesJson)
