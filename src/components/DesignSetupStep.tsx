@@ -204,30 +204,9 @@ export default function DesignSetupStep({
       <VStack gap={1}>
         <Heading level={2}>Set the look</Heading>
         <Text type="supporting" color="secondary">
-          Pick a design system template and preview it, upload your own
-          design.md, or paste a reference link to convert. The canvas renders
+          Pick a design system template and preview it. The canvas renders
           this system first, before any app page.
         </Text>
-      </VStack>
-
-      <VStack gap={2}>
-        <Text type="label">Chosen system: {selectedLabel}</Text>
-        {design && (
-          <HStack gap={2}>
-            <Button
-              label={showMd ? "Hide DESIGN.md" : "Show DESIGN.md"}
-              variant="ghost"
-              size="sm"
-              className="min-h-11 md:min-h-0"
-              onClick={() => setShowMd((current) => !current)}
-            />
-          </HStack>
-        )}
-        {design && showMd && (
-          <pre className="max-h-56 overflow-auto rounded-xl border border-white/10 bg-white/[0.03] p-3 font-mono text-[12px] leading-5 text-[#c9cdd6] whitespace-pre-wrap">
-            {design.designMd.slice(0, 4000)}
-          </pre>
-        )}
       </VStack>
 
       <VStack gap={2}>
@@ -319,6 +298,26 @@ export default function DesignSetupStep({
           <Text type="supporting" color="secondary">
             No template matches that search. Try another word.
           </Text>
+        )}
+      </VStack>
+
+      <VStack gap={2}>
+        <Text type="label">Chosen system: {selectedLabel}</Text>
+        {design && (
+          <HStack gap={2}>
+            <Button
+              label={showMd ? "Hide DESIGN.md" : "Show DESIGN.md"}
+              variant="ghost"
+              size="sm"
+              className="min-h-11 md:min-h-0"
+              onClick={() => setShowMd((current) => !current)}
+            />
+          </HStack>
+        )}
+        {design && showMd && (
+          <pre className="max-h-56 overflow-auto rounded-xl border border-white/10 bg-white/[0.03] p-3 font-mono text-[12px] leading-5 text-[#c9cdd6] whitespace-pre-wrap">
+            {design.designMd.slice(0, 4000)}
+          </pre>
         )}
       </VStack>
 
