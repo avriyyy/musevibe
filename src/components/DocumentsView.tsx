@@ -147,11 +147,17 @@ export default function DocumentsView({
         </aside>
 
         {/* Preview. Only this column scrolls; it pads its bottom edge
-            by the chat height so the last lines clear the chat. */}
+            so the last lines clear the chat, capped to keep the page
+            compact when the panel is tall (collapse the chat to read
+            the very bottom). */}
         <div
           ref={centerRef}
           className="min-h-0 min-w-0 overflow-y-auto"
-          style={bottomPad > 0 ? { paddingBottom: bottomPad + 16 } : undefined}
+          style={
+            bottomPad > 0
+              ? { paddingBottom: Math.min(bottomPad + 16, 240) }
+              : undefined
+          }
         >
           {activeDoc ? (
             <DocView
