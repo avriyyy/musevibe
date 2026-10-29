@@ -32,6 +32,7 @@ import {
   InboxIcon,
 } from "@heroicons/react/24/outline";
 import DocumentsView from "@/components/DocumentsView";
+import DesignSidebar from "@/components/DesignSidebar";
 import type { CanvasFrame } from "@/components/DesignCanvas";
 import WorkspaceChat from "@/components/WorkspaceChat";
 import WorkspacePicker from "@/components/WorkspacePicker";
@@ -567,6 +568,19 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       setGeneratingSlugs((prev) => new Set(prev).add(slug));
       try {
         const system = await resolveProjectDesignSystem(current);
+        // Earlier screens in plan order, so the new page reuses their
+        // header, nav, footer, and route names instead of drifting.
+        const priorPages = plan
+          .slice(0, plan.findIndex((entry) => entry.slug === slug))
+          .map((entry) => {
+            const file = (
+              useVibe.getState().filesByProject[projectId] ?? []
+            ).find((candidate) => candidate.path === pageFilePath(entry.slug));
+            return file
+              ? { title: entry.title, slug: entry.slug, html: file.content }
+              : null;
+          })
+          .filter((entry) => entry !== null);
         const reply = await requestAi(
           "prototype",
           buildPagePrompt(
@@ -576,6 +590,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             page,
             system.designMd,
             system.tokensCss,
+            priorPages,
           ),
           current.model,
         );
@@ -861,13 +876,18 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     selectedTaskId ? (tasks.find((task) => task.id === selectedTaskId) ?? null) : null;
 
   const pagePlan = project?.pagePlan ?? null;
-  const pendingPages = (pagePlan ?? []).filter(
-    (page) => !files.some((file) => file.path === pageFilePath(page.slug)),
-  );
-  // One recommendation at a time: the top pending page takes the frame
-  // next to the generated ones, and the next one appears once it exists.
-  const nextPage = pendingPages[0] ?? null;
-  const pendingPageCount = pendingPages.length;
+  const doneSlugs = useMemo(() => {
+    const done = new Set<string>();
+    for (const page of pagePlan ?? []) {
+      if (files.some((file) => file.path === pageFilePath(page.slug))) {
+        done.add(page.slug);
+      }
+    }
+    return done;
+  }, [pagePlan, files]);
+  const pendingPageCount = (pagePlan ?? []).filter(
+    (page) => !doneSlugs.has(page.slug),
+  ).length;
   const planDone = pagePlan !== null && pendingPageCount === 0;
   const designFrames: CanvasFrame[] = useMemo(() => {
     const list: CanvasFrame[] = [];
@@ -888,65 +908,44 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     } else {
       const showcase =
         files.find((file) => file.path === SHOWCASE_PATH) ?? null;
-      list.push({
-        id: SHOWCASE_PATH,
-        title: "Design system",
-        subtitle: showcase
-          ? `${project?.designSystem?.name ?? "Minimal"} · ${FRAME_W} × ${FRAME_H}`
-          : showcaseBusy
-            ? "drawing…"
-            : "not yet drawn",
-        html: showcase?.content ?? null,
-        kind: "page",
-        busy: showcaseBusy && !showcase,
-      });
+      if (showcase) {
+        list.push({
+          id: SHOWCASE_PATH,
+          title: "Design system",
+          subtitle: `${project?.designSystem?.name ?? "Minimal"} · ${FRAME_W} × ${FRAME_H}`,
+          html: showcase.content,
+          kind: "page",
+        });
+      }
     }
+    // Only generated pages take a frame. Pending pages live in the
+    // sidebar with their own Generate buttons.
     for (const page of pagePlan ?? []) {
       const file = files.find((entry) => entry.path === pageFilePath(page.slug));
-      // Already generated, or the single next recommendation: everything
-      // else stays off the canvas until its turn comes.
-      if (!file && page.slug !== nextPage?.slug) continue;
+      if (!file) continue;
       list.push({
         id: pageFilePath(page.slug),
         slug: page.slug,
         title: page.title,
-        subtitle: file ? `${FRAME_W} × ${FRAME_H}` : "recommended next",
-        html: file?.content ?? null,
-        kind: "page",
-        brief: page.brief,
-        busy: generatingSlugs.has(page.slug),
-      });
-    }
-    const legacy = files.find((file) => file.path === "prototype.html");
-    if (legacy) {
-      list.push({
-        id: "prototype.html",
-        title: "Prototype",
-        subtitle: "Earlier draft",
-        html: legacy.content,
+        subtitle: `${FRAME_W} × ${FRAME_H}`,
+        html: file.content,
         kind: "page",
       });
     }
-    // The suggestion card stays at the end through every state: drafting
-    // the list, generating the rest, and the done stamp at the end.
-    list.push({
-      id: "suggest",
-      title: "Next pages",
-      subtitle: "from the PRD",
-      html: null,
-      kind: "suggest",
-    });
     return list;
   }, [
     files,
     pagePlan,
-    nextPage?.slug,
-    pendingPageCount,
     useTemplatePreviews,
     dsEntry,
-    showcaseBusy,
-    generatingSlugs,
+    project?.designSystem,
   ]);
+  const [focusedFrame, setFocusedFrame] = useState<string | null>(null);
+  const [focusSeq, setFocusSeq] = useState(0);
+  const focusFrame = useCallback((frameId: string) => {
+    setFocusedFrame(frameId);
+    setFocusSeq((n) => n + 1);
+  }, []);
 
   const patchTask = useCallback(
     (id: string, patch: Partial<Pick<Task, "title" | "notes">>) => {
@@ -1275,29 +1274,46 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           )}
 
           {view.kind === "design" && (
-            <div className="relative min-h-0 flex-1">
-              <div className="h-full min-h-0">
-                <DesignCanvas
-                  key={prototypeScreen?.id ?? "canvas"}
-                  initialShapes={designShapes}
-                  frames={designFrames}
-                  onGeneratePage={(slug) => void generatePage(slug)}
-                  onSuggestPages={() => void suggestPages()}
-                  onGenerateAll={() => void generateAllPages()}
-                  suggesting={suggesting}
-                  pendingCount={pendingPageCount}
-                  planCount={pagePlan?.length ?? 0}
-                  planDone={planDone}
-                  onShapes={(shapesJson) =>
-                    prototypeScreen &&
-                    handleShapes(prototypeScreen.id, shapesJson)
-                  }
-                  onQuoteToChat={(text) => quoteToChat(text)}
-                  picking={picking}
-                  pickSession={pickSession}
-                  onPickingChange={setPicking}
-                  bottomInset={chatHeight}
-                />
+            <div className="flex min-h-0 flex-1">
+              <DesignSidebar
+                dsFrames={designFrames.filter((frame) =>
+                  frame.id.startsWith("ds-"),
+                )}
+                pages={pagePlan ?? []}
+                doneSlugs={doneSlugs}
+                busySlugs={generatingSlugs}
+                focusedId={focusedFrame}
+                onFocus={focusFrame}
+                onGenerate={(slug) => void generatePage(slug)}
+                onGenerateAll={() => void generateAllPages()}
+                onSuggest={() => void suggestPages()}
+                suggesting={suggesting}
+                pendingCount={pendingPageCount}
+                planDone={planDone}
+                planTotal={pagePlan?.length ?? 0}
+              />
+              <div className="relative min-h-0 min-w-0 flex-1">
+                <div className="h-full min-h-0">
+                  <DesignCanvas
+                    key={prototypeScreen?.id ?? "canvas"}
+                    initialShapes={designShapes}
+                    frames={designFrames}
+                    focusRequest={
+                      focusedFrame
+                        ? { id: focusedFrame, seq: focusSeq }
+                        : null
+                    }
+                    onShapes={(shapesJson) =>
+                      prototypeScreen &&
+                      handleShapes(prototypeScreen.id, shapesJson)
+                    }
+                    onQuoteToChat={(text) => quoteToChat(text)}
+                    picking={picking}
+                    pickSession={pickSession}
+                    onPickingChange={setPicking}
+                    bottomInset={chatHeight}
+                  />
+                </div>
               </div>
             </div>
           )}

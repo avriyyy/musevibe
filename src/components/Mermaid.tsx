@@ -8,6 +8,28 @@
 
 import { useEffect, useId, useState } from "react";
 
+/**
+ * Models love inventing crow's-foot cardinalities mermaid rejects, most
+ * often `oM`/`Mo` where the spec only allows `o{`/`}o`. Those lines fail
+ * the whole render and the diagram degrades to a code dump, so repair the
+ * relationship operator before handing the chart to the renderer. Only
+ * relationship lines (containing `--`) are touched; labels after the
+ * colon are left alone.
+ */
+function repairChart(chart: string): string {
+  return chart
+    .split("\n")
+    .map((line) => {
+      if (!line.includes("--")) return line;
+      const cut = line.indexOf(":");
+      const head = cut === -1 ? line : line.slice(0, cut);
+      const tail = cut === -1 ? "" : line.slice(cut);
+      const fixed = head.replace(/oM/g, "o{").replace(/Mo/g, "}o");
+      return fixed + tail;
+    })
+    .join("\n");
+}
+
 export default function Mermaid({ chart }: { chart: string }) {
   const [svg, setSvg] = useState<string | null>(null);
   const [failed, setFailed] = useState(false);
@@ -24,8 +46,7 @@ export default function Mermaid({ chart }: { chart: string }) {
     void (async () => {
       try {
         const mermaid = (await import("mermaid")).default;
-        mermaid.initialize({
-          startOnLoad: false,
+        mermaid.initialize({          startOnLoad: false,
           theme: "dark",
           securityLevel: "strict",
           themeVariables: {
@@ -40,7 +61,7 @@ export default function Mermaid({ chart }: { chart: string }) {
             noteTextColor: "#c9cdd6",
           },
         });
-        const { svg: rendered } = await mermaid.render(diagramId, chart);
+        const { svg: rendered } = await mermaid.render(diagramId, repairChart(chart));
         if (alive) setSvg(rendered);
       } catch {
         if (alive) setFailed(true);

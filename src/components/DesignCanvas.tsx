@@ -68,20 +68,8 @@ interface DesignCanvasProps {
   initialShapes: readonly CanvasShape[] | null;
   /** Every frame on the shared canvas, left to right. */
   frames: CanvasFrame[];
-  /** Generate one pending page. */
-  onGeneratePage?: (slug: string) => void;
-  /** Draft the page list from the PRD. */
-  onSuggestPages?: () => void;
-  /** Generate every pending page in plan order. */
-  onGenerateAll?: () => void;
-  /** True while the page list is being drafted. */
-  suggesting?: boolean;
-  /** Pending pages without HTML; hides the generate-all control at zero. */
-  pendingCount?: number;
-  /** Planned pages overall; shown in the done state. */
-  planCount?: number;
-  /** True once every planned page has a frame. */
-  planDone?: boolean;
+  /** Center the canvas on this frame; bump seq to re-trigger. */
+  focusRequest?: { id: string; seq: number } | null;
   onShapes: (shapesJson: string) => void;
   /** Quoted annotation text goes into the chat input (never auto-sent). */
   onQuoteToChat: (text: string) => void;
@@ -120,154 +108,10 @@ type Gesture =
 
 const GRID = 28;
 
-/** Stop canvas gestures from starting on interactive card controls. */
-function halt(event: React.SyntheticEvent) {
-  event.stopPropagation();
-}
-
-/** Dashed placeholder for a page that has no HTML yet. */
-function PendingCard({
-  left,
-  title,
-  brief,
-  busy,
-  onGenerate,
-}: {
-  left: number;
-  title: string;
-  brief?: string;
-  busy: boolean;
-  onGenerate?: () => void;
-}) {
-  return (
-    <div className="absolute" style={{ left, top: 0, width: FRAME_W, height: FRAME_H }}>
-      <div className="pointer-events-none absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap">
-        <span className="text-[12px] font-medium text-[#c9cdd6]">{title}</span>
-        <span aria-hidden className="h-3 w-px bg-white/15" />
-        <span className="font-mono text-[11px] tabular-nums text-[#5b6472]">
-          {busy ? "generating" : "not yet generated"}
-        </span>
-      </div>
-      <div className="grid h-full w-full place-items-center rounded-2xl border-2 border-dashed border-white/20 bg-white/[0.02]">
-        <div
-          className="max-w-xs px-6 text-center"
-          onPointerDown={halt}
-          onPointerUp={halt}
-        >
-          <p className="text-[14px] font-semibold text-[#f5f6f8]">{title}</p>
-          {!!brief && (
-            <p className="mt-1.5 text-[12px] leading-5 text-[#9aa0ae]">{brief}</p>
-          )}
-          {onGenerate && (
-            <button
-              type="button"
-              disabled={busy}
-              onClick={onGenerate}
-              onPointerDown={halt}
-              aria-label={`Generate the ${title} page`}
-              className="mt-4 inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90 disabled:opacity-50"
-            >
-              {busy ? "Generating…" : "Generate"}
-            </button>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-/** The card at the end of the row: suggest pages, then generate them all. */
-function SuggestCard({
-  left,
-  suggesting,
-  pendingCount,
-  totalCount,
-  done,
-  onSuggestPages,
-  onGenerateAll,
-}: {
-  left: number;
-  suggesting: boolean;
-  pendingCount: number;
-  totalCount: number;
-  done: boolean;
-  onSuggestPages?: () => void;
-  onGenerateAll?: () => void;
-}) {
-  return (
-    <div className="absolute" style={{ left, top: 0, width: FRAME_W, height: FRAME_H }}>
-      <div className="pointer-events-none absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap">
-        <span className="text-[12px] font-medium text-[#c9cdd6]">Next pages</span>
-        <span aria-hidden className="h-3 w-px bg-white/15" />
-        <span className="font-mono text-[11px] tabular-nums text-[#5b6472]">
-          {done ? `done \u00b7 ${totalCount} of ${totalCount}` : pendingCount > 0 ? `${pendingCount} to go` : "from the PRD"}
-        </span>
-      </div>
-      <div className="grid h-full w-full place-items-center rounded-2xl border-2 border-dashed border-[#8ab4ff]/40 bg-[#8ab4ff]/[0.04]">
-        <div
-          className="max-w-xs px-6 text-center"
-          onPointerDown={halt}
-          onPointerUp={halt}
-        >
-          <p className="text-[14px] font-semibold text-[#f5f6f8]">
-            {done
-              ? "Done \u2014 all pages have frames"
-              : pendingCount > 0
-                ? "Pages still need frames"
-                : "What should this app show?"}
-          </p>
-          <p className="mt-1.5 text-[12px] leading-5 text-[#9aa0ae]">
-            {done
-              ? `Every page from the plan (${totalCount}) is generated. Refresh to let the model re-check the plan.`
-              : pendingCount > 0
-                ? "Generate the recommended page on its own frame, or draw every remaining page at once."
-                : "Draft the page list from the PRD, then generate each page on its own frame."}
-          </p>
-          <div className="mt-4 flex flex-col items-center gap-2">
-            {!done && pendingCount > 0 && onGenerateAll && (
-              <button
-                type="button"
-                onClick={onGenerateAll}
-                onPointerDown={halt}
-                className="inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90"
-              >
-                {`Generate all ${pendingCount}`}
-              </button>
-            )}
-            {onSuggestPages && (
-              <button
-                type="button"
-                disabled={suggesting}
-                onClick={onSuggestPages}
-                onPointerDown={halt}
-                className="inline-flex h-9 items-center rounded-full border border-white/15 px-4 text-[13px] font-medium text-[#c9cdd6] hover:bg-white/10 hover:text-white disabled:opacity-50"
-              >
-                {suggesting
-                  ? "Suggesting…"
-                  : done
-                    ? "Re-check the plan"
-                    : pendingCount > 0
-                      ? "Refresh suggestions"
-                      : "Suggest pages"}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 export default function DesignCanvas({
   initialShapes,
   frames,
-  onGeneratePage,
-  onSuggestPages,
-  onGenerateAll,
-  suggesting,
-  pendingCount,
-  planCount,
-  planDone,
+  focusRequest,
   onShapes,
   onQuoteToChat,
   picking,
@@ -595,6 +439,31 @@ export default function DesignCanvas({
     fitToScreen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Sidebar jumps: center the canvas on one frame when asked. Bump seq
+  // to revisit the same frame twice in a row.
+  const lastFocusSeq = useRef(0);
+  useEffect(() => {
+    if (!focusRequest || focusRequest.seq === lastFocusSeq.current) return;
+    lastFocusSeq.current = focusRequest.seq;
+    const index = frames.findIndex((frame) => frame.id === focusRequest.id);
+    if (index < 0) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const rect = el.getBoundingClientRect();
+    if (rect.width < 10 || rect.height < 10) return;
+    const pad = 72;
+    const k = Math.min(
+      1.5,
+      rect.width / (FRAME_W + pad * 2),
+      rect.height / (FRAME_H + pad * 2),
+    );
+    setTransform({
+      k,
+      x: rect.width / 2 - (frameLeft(index) + FRAME_W / 2) * k,
+      y: rect.height / 2 - (FRAME_H / 2) * k,
+    });
+  }, [focusRequest, frames]);
 
   // Track the visible size so the overview map draws the viewport box.
   useEffect(() => {
@@ -1130,18 +999,7 @@ export default function DesignCanvas({
             and highlight the elements inside them; canvas gestures start
             from the gaps around the frames or the wheel. */}
         {frames.map((frame, index) =>
-          frame.kind === "suggest" ? (
-            <SuggestCard
-              key={frame.id}
-              left={frameLeft(index)}
-              suggesting={!!suggesting}
-              pendingCount={pendingCount ?? 0}
-              totalCount={planCount ?? 0}
-              done={!!planDone}
-              onSuggestPages={onSuggestPages}
-              onGenerateAll={onGenerateAll}
-            />
-          ) : frame.html || frame.src ? (
+          frame.html || frame.src ? (
             <div
               key={frame.id}
               className="absolute"
@@ -1187,20 +1045,7 @@ export default function DesignCanvas({
                 />
               </div>
             </div>
-          ) : (
-            <PendingCard
-              key={frame.id}
-              left={frameLeft(index)}
-              title={frame.title}
-              brief={frame.brief}
-              busy={!!frame.busy}
-              onGenerate={
-                frame.slug && onGeneratePage
-                  ? () => onGeneratePage(frame.slug as string)
-                  : undefined
-              }
-            />
-          ),
+          ) : null,
         )}
 
         {/* Pick highlight, drawn in frame space so it tracks pan and zoom. */}

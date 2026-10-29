@@ -208,6 +208,23 @@ export function parsePagePlan(raw: unknown): PlannedPage[] | null {
 }
 
 /** Generate one app page in the chosen design system. */
+export interface PriorPageContext {
+  title: string;
+  slug: string;
+  html: string;
+}
+
+/** Shrink generated HTML to its structural shell: head, header, nav, headings. */
+function excerptPageHtml(html: string, maxChars = 2200): string {
+  const head = html.match(/<head[\s>][\s\S]*?<\/head\s*>/i)?.[0] ?? "";
+  const body = html.match(/<body[\s>][\s\S]*$/i)?.[0] ?? html;
+  const shell = (head + "\n" + body)
+    .replace(/<script[\s>][\s\S]*?<\/script\s*>/gi, "")
+    .replace(/<!--([\s\S]*?)-->/g, "");
+  const text = shell.replace(/\s+/g, " ").trim();
+  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+}
+
 export function buildPagePrompt(
   projectName: string,
   idea: string,
@@ -215,13 +232,24 @@ export function buildPagePrompt(
   page: PlannedPage,
   designMd: string,
   tokensCss: string,
+  priorPages: PriorPageContext[] = [],
 ): string {
+  const prior = priorPages
+    .map(
+      (entry) =>
+        `--- Earlier screen "${entry.title}" (${entry.slug}.html) ---\n${excerptPageHtml(entry.html)}`,
+    )
+    .join("\n")
+    .slice(0, 6000);
   return [
     `Write one self-contained HTML file: the "${page.title}" screen of the app below.`,
     `Project: "${projectName}". Idea: "${idea.slice(0, 400)}".`,
     brief ? `Product brief: """${brief.slice(0, 3000)}"""` : "",
     `This screen: ${page.brief || page.title}.`,
     "",
+    prior
+      ? `Already generated screens this page must connect to (reuse the SAME header, nav, footer, and route names; link back and forth so nothing dangles):\n${prior}\n`
+      : "",
     "The design system this screen must follow:",
     `"""${designMd.slice(0, 3000)}"""`,
     "",
