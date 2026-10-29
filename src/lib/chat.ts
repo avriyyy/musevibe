@@ -18,6 +18,13 @@ function clamp(text: string, max: number): string {
   return `${text.slice(0, max)}…`;
 }
 
+export interface Mention {
+  id: string;
+  kind: "component" | "doc" | "task";
+  label: string;
+  text: string;
+}
+
 export function buildChatPrompt(
   project: Project,
   brief: string,
@@ -25,6 +32,7 @@ export function buildChatPrompt(
   tasks: Task[],
   history: ChatMessage[],
   message: string,
+  mentions: Mention[] = [],
 ): string {
   const lines = [
     `You are MuseVibe, a concise product assistant inside a project workspace.`,
@@ -54,6 +62,12 @@ export function buildChatPrompt(
     lines.push(``, `Conversation so far:`);
     for (const turn of recent) {
       lines.push(`${turn.role === "user" ? "User" : "Assistant"}: ${turn.content}`);
+    }
+  }
+  if (mentions.length) {
+    lines.push(``, `Attached context the user explicitly selected:`);
+    for (const mention of mentions.slice(0, 8)) {
+      lines.push(`- [${mention.kind}: ${mention.label}] ${clamp(mention.text, 600)}`);
     }
   }
   lines.push(``, `User: ${message}`, ``, `Assistant:`);

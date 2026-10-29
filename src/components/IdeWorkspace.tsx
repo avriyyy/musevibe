@@ -33,6 +33,7 @@ import {
 } from "@heroicons/react/24/outline";
 import DocumentsView from "@/components/DocumentsView";
 import WorkspaceChat from "@/components/WorkspaceChat";
+import type { Mention } from "@/lib/chat";
 import { parseCanvasShapes, type CanvasShape } from "@/lib/canvas";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
@@ -196,7 +197,38 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [selectedDocKey, setSelectedDocKey] = useState<string>("doc-prd");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [chatHeight, setChatHeight] = useState(0);
-  const [chatPrefill, setChatPrefill] = useState<{ id: number; text: string } | null>(null);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [mentions, setMentions] = useState<Mention[]>([]);
+
+  const addMention = useCallback(
+    (mention: Omit<Mention, "id">) => {
+      const id =
+        typeof crypto !== "undefined" && "randomUUID" in crypto
+          ? `mention-${crypto.randomUUID()}`
+          : `mention-${Date.now()}`;
+      setMentions((prev) =>
+        prev.length >= 8 ? prev : [...prev, { ...mention, id }],
+      );
+      setChatOpen(true);
+    },
+    [],
+  );
+
+  const removeMention = useCallback((id: string) => {
+    setMentions((prev) => prev.filter((entry) => entry.id !== id));
+  }, []);
+
+  const clearMentions = useCallback(() => {
+    setMentions([]);
+  }, []);
+
+  // Mentions belong to one project; drop them when switching projects.
+  // Render-phase reset (no effect): the guard flips false immediately.
+  const [mentionProject, setMentionProject] = useState(projectId);
+  if (mentionProject !== projectId) {
+    setMentionProject(projectId);
+    setMentions([]);
+  }
   const [phase, setPhase] = useState<Phase>(null);
   const [docBusy, setDocBusy] = useState<string | null>(null);
   const [protoBusy, setProtoBusy] = useState(false);
@@ -692,6 +724,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               onSelect={setSelectedDocKey}
               activeDoc={activeDoc}
               bottomPad={chatHeight}
+              onQuote={(label, text) =>
+                addMention({ kind: "doc", label, text })
+              }
               canGenerate={!!activeDoc && activeDoc.kind !== "note"}
               generating={!!activeDoc && docBusy === activeDoc.id}
               modelLabel={
@@ -745,6 +780,13 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                       setSelectedTaskId(null);
                     }}
                     onClose={() => setSelectedTaskId(null)}
+                    onQuote={() =>
+                      addMention({
+                        kind: "task",
+                        label: selectedTask.title || "Untitled task",
+                        text: `Status: ${selectedTask.status}${selectedTask.notes ? ` Notes: ${selectedTask.notes}` : ""}`,
+                      })
+                    }
                   />
                 </>
               )}
@@ -762,8 +804,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                     onShapes={(shapesJson) =>
                       handleShapes(prototypeScreen.id, shapesJson)
                     }
-                    onQuoteToChat={(text) =>
-                      setChatPrefill({ id: Date.now(), text })
+                    onMention={(label, text) =>
+                      addMention({ kind: "component", label, text })
                     }
                   />
                 ) : (
@@ -801,9 +843,12 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         brief={prd}
         docs={docs}
         tasks={tasks}
+        open={chatOpen}
+        onOpenChange={setChatOpen}
+        mentions={mentions}
+        onRemoveMention={removeMention}
+        onMentionsSent={clearMentions}
         onHeightChange={setChatHeight}
-        prefill={chatPrefill}
-        onPrefillSent={() => setChatPrefill(null)}
       />
     </div>
   );
@@ -940,12 +985,14 @@ function TaskDetailPanel({
   onMove,
   onDelete,
   onClose,
+  onQuote,
 }: {
   task: Task;
   onPatch: (patch: Partial<Pick<Task, "title" | "notes">>) => void;
   onMove: (next: TaskStatus) => void;
   onDelete: () => void;
   onClose: () => void;
+  onQuote: () => void;
 }) {
   const meta = COLUMNS.find((column) => column.status === task.status) ?? COLUMNS[0];
   return (
@@ -1025,7 +1072,27 @@ function TaskDetailPanel({
           />
         </div>
 
-        <div className="mt-auto pt-2">
+        <div className="mt-auto flex flex-col gap-2 pt-2">
+          <button
+            type="button"
+            onClick={onQuote}
+            className="flex h-9 w-full items-center justify-center gap-1.5 rounded-xl border border-white/15 bg-white/5 px-3 text-[13px] font-medium text-[#e8ebf0] hover:border-white/30 hover:text-white"
+          >
+            <svg
+              aria-hidden
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+            Add to chat
+          </button>
           <button
             type="button"
             onClick={onDelete}

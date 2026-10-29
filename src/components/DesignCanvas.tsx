@@ -41,8 +41,8 @@ interface DesignCanvasProps {
   /** Current prototype.html content; the frame iframe follows it directly. */
   html: string;
   onShapes: (shapesJson: string) => void;
-  /** A picked component plus a short message, sent straight to the chat. */
-  onQuoteToChat: (text: string) => void;
+  /** Queue a picked component as a chat mention instead of sending it. */
+  onMention: (label: string, text: string) => void;
 }
 
 type Gesture =
@@ -68,7 +68,7 @@ export default function DesignCanvas({
   initialShapes,
   html,
   onShapes,
-  onQuoteToChat,
+  onMention,
 }: DesignCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [shapes, setShapes] = useState<CanvasShape[]>(() =>
@@ -466,7 +466,7 @@ export default function DesignCanvas({
         setSelectedId(null);
       }
     },
-    [editingId, eraseAt, toScene, tool, clearInspected],
+    [editingId, eraseAt, toScene, tool, clearInspected, selectedId],
   );
 
   const onPointerMove = useCallback(
@@ -925,8 +925,8 @@ export default function DesignCanvas({
           key={inspected.tag + inspected.text}
           node={inspected}
           onCancel={clearInspected}
-          onAdd={(message) => {
-            onQuoteToChat(`[${nodeLabel(inspected)}] ${message}`);
+          onAdd={() => {
+            onMention(nodeLabel(inspected), inspected.text || nodeLabel(inspected));
             clearInspected();
           }}
         />

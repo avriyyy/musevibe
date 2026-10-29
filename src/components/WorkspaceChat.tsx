@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import Markdown from "./Markdown";
 import { blobToWav } from "@/lib/audio";
-import { buildChatPrompt, type ChatMessage } from "@/lib/chat";
+import { buildChatPrompt, type ChatMessage, type Mention } from "@/lib/chat";
 import { formatModelLabel } from "@/lib/models";
 import type { Project, ProjectDoc, Task } from "@/lib/types";
 
@@ -19,9 +19,12 @@ interface WorkspaceChatProps {
   brief: string;
   docs: ProjectDoc[];
   tasks: Task[];
+  mentions: Mention[];
+  onRemoveMention: (id: string) => void;
+  onMentionsSent?: () => void;
   onHeightChange?: (height: number) => void;
-  prefill?: { id: number; text: string } | null;
-  onPrefillSent?: () => void;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 interface ChatTurn extends ChatMessage {
@@ -35,11 +38,13 @@ export default function WorkspaceChat({
   brief,
   docs,
   tasks,
+  mentions,
+  onRemoveMention,
+  onMentionsSent,
   onHeightChange,
-  prefill,
-  onPrefillSent,
+  open,
+  onOpenChange,
 }: WorkspaceChatProps) {
-  const [open, setOpen] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -51,18 +56,23 @@ export default function WorkspaceChat({
   const busyRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const heightRef = useRef(onHeightChange);
-  const sentPrefillRef = useRef<number | null>(null);
-  const sendRef = useRef<(text?: string) => Promise<void>>(() => Promise.resolve());
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const stateRef = useRef({ project, brief, docs, tasks });
+  const stateRef = useRef({ project, brief, docs, tasks, mentions, onMentionsSent });
 
   // Thread state resets via the keyed remount in the parent.
 
   // Latest project snapshot for in-flight requests.
   useEffect(() => {
-    stateRef.current = { project, brief, docs, tasks };
+    stateRef.current = {
+      project,
+      brief,
+      docs,
+      tasks,
+      mentions,
+      onMentionsSent,
+    };
     heightRef.current = onHeightChange;
   });
 
@@ -104,7 +114,14 @@ export default function WorkspaceChat({
     setTurns(next);
     setInput("");
     try {
-      const { project: currentProject, brief: currentBrief, docs: currentDocs, tasks: currentTasks } = stateRef.current;
+      const {
+        project: currentProject,
+        brief: currentBrief,
+        docs: currentDocs,
+        tasks: currentTasks,
+        mentions: currentMentions,
+        onMentionsSent: clearMentions,
+      } = stateRef.current;
       const response = await fetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -117,6 +134,7 @@ export default function WorkspaceChat({
             currentTasks,
             next,
             message,
+            currentMentions,
           ),
           ...(currentProject.model ? { model: currentProject.model } : {}),
         }),
@@ -134,6 +152,7 @@ export default function WorkspaceChat({
         ...prev,
         { role: "assistant", content: text, offline: data.source !== "ai" },
       ]);
+      if (currentMentions.length) clearMentions?.();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "The chat request failed.",
@@ -146,26 +165,9 @@ export default function WorkspaceChat({
     }
   };
 
-  // Latest send for outside triggers (component comments).
-  useEffect(() => {
-    sendRef.current = send;
-  });
+  // Mention chips queued from canvas, document, or task selections are
+  // sent with the next prompt; the input row renders them below.
 
-  // A component comment arrives as a ready-to-send chat message.
-  useEffect(() => {
-    if (!prefill || sentPrefillRef.current === prefill.id) return;
-    sentPrefillRef.current = prefill.id;
-    setOpen(true);
-    if (busyRef.current) {
-      setInput((prev) => (prev.trim() ? `${prev.trim()}\n${prefill.text}` : prefill.text));
-      onPrefillSent?.();
-      return;
-    }
-    void sendRef
-      .current(prefill.text)
-      .finally(() => onPrefillSent?.());
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prefill]);
 
   const transcribeClip = async (mimeType: string) => {
     const blob = new Blob(chunksRef.current, { type: mimeType || "audio/webm" });
@@ -250,7 +252,7 @@ export default function WorkspaceChat({
       <div ref={shellRef} className="absolute bottom-0 left-1/2 z-40 -translate-x-1/2">
         <button
           type="button"
-          onClick={() => setOpen(true)}
+          onClick={() => onOpenChange(true)}
           aria-label="Open Muse chat"
           title="Ask Muse about this project"
           className="flex h-9 items-center gap-2 rounded-b-none rounded-t-2xl border border-b-0 border-white/10 bg-[#17181d]/95 px-5 text-[13px] font-medium text-[#c9cdd6] shadow-xl hover:border-white/25 hover:text-white"
@@ -346,7 +348,7 @@ export default function WorkspaceChat({
           <div className="flex items-center justify-end">
             <button
               type="button"
-              onClick={() => setOpen(false)}
+              onClick={() => onOpenChange(false)}
               aria-label="Hide chat"
               title="Hide chat"
               className="flex h-7 w-7 items-center justify-center rounded-lg text-[#9aa0ae] hover:bg-white/10 hover:text-white"
@@ -373,6 +375,40 @@ export default function WorkspaceChat({
               void send();
             }}
           >
+            {mentions.length > 0 && (
+              <div className="mb-1.5 flex flex-wrap gap-1.5" aria-label="Attached context">
+                {mentions.map((mention) => (
+                  <span
+                    key={mention.id}
+                    className="flex max-w-full items-center gap-1 rounded-lg border border-white/15 bg-white/10 py-1 pl-2.5 pr-1 text-[12px] font-medium text-[#f5f6f8]"
+                  >
+                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-wide text-[#9aa0ae]">
+                      {mention.kind === "component" ? "UI" : mention.kind === "doc" ? "Doc" : "Task"}
+                    </span>
+                    <span className="truncate">{mention.label}</span>
+                    <button
+                      type="button"
+                      onClick={() => onRemoveMention(mention.id)}
+                      aria-label={`Remove ${mention.label} from chat context`}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+                    >
+                      <svg
+                        aria-hidden
+                        width="10"
+                        height="10"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      >
+                        <path d="M6 6l12 12M18 6L6 18" />
+                      </svg>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <input
               ref={inputRef}
               value={input}
