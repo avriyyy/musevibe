@@ -73,6 +73,21 @@ body {
   background-color: rgba(255, 255, 255, 0.3);
 }
 
+/* Workspace chat sheet: slides up from the bottom edge when opened. */
+@keyframes musevibe-sheet-in {
+  from {
+    transform: translateY(16px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+.musevibe-sheet {
+  animation: musevibe-sheet-in 0.22s ease-out;
+}
+
 /* Firefox gets the standard properties instead, because setting them
    disables the custom pseudo-element styling. */
 @supports (-moz-appearance: none) {

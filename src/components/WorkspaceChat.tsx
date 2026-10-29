@@ -1,14 +1,15 @@
 "use client";
 
 /**
- * Floating workspace chat: a bottom-center pill that expands upward into
- * a wide composer bar with the project as an attached context chip,
- * quick prompts, and a send button. Collapses back to the pill to hide.
+ * Floating workspace chat: a bottom-edge drawer tab that slides upward
+ * into a wide composer bar grounded in the live project (idea, brief,
+ * documents, task board). Collapses back into the bottom edge to hide.
  * Dark pills and white accents match the workspace chrome.
  */
 
 import { useEffect, useRef, useState } from "react";
 import Markdown from "./Markdown";
+import { blobToWav } from "@/lib/audio";
 import { buildChatPrompt, type ChatMessage } from "@/lib/chat";
 import { formatModelLabel } from "@/lib/models";
 import type { Project, ProjectDoc, Task } from "@/lib/types";
@@ -24,11 +25,7 @@ interface ChatTurn extends ChatMessage {
   offline?: boolean;
 }
 
-const QUICK_PROMPTS = [
-  { id: "summarize", label: "Summarize", prompt: "Summarize this project: the idea, the brief, and current task progress in a few bullets." },
-  { id: "next", label: "Next tasks", prompt: "What should I work on next based on the task board?" },
-  { id: "ideas", label: "Ideas", prompt: "Suggest 3 concrete improvements for this project." },
-] as const;
+type MicState = "idle" | "recording" | "transcribing";
 
 export default function WorkspaceChat({
   project,
@@ -41,17 +38,31 @@ export default function WorkspaceChat({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [micState, setMicState] = useState<MicState>("idle");
+  const [micError, setMicError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
   const stateRef = useRef({ project, brief, docs, tasks });
+
+  // Thread state resets via the keyed remount in the parent.
 
   // Latest project snapshot for in-flight requests.
   useEffect(() => {
     stateRef.current = { project, brief, docs, tasks };
   });
 
-  // Thread state resets via the keyed remount in the parent.
+  // Release the microphone when the chat unmounts mid-recording.
+  useEffect(() => {
+    return () => {
+      const recorder = recorderRef.current;
+      if (recorder && recorder.state !== "inactive") recorder.stop();
+      streamRef.current?.getTracks().forEach((track) => track.stop());
+    };
+  }, []);
 
   // Keep the latest reply in view, and focus the box when opened.
   useEffect(() => {
@@ -112,20 +123,98 @@ export default function WorkspaceChat({
     }
   };
 
+  const transcribeClip = async (mimeType: string) => {
+    const blob = new Blob(chunksRef.current, { type: mimeType || "audio/webm" });
+    chunksRef.current = [];
+    if (blob.size < 8000) {
+      setMicError("Too short. Hold the mic and speak.");
+      setMicState("idle");
+      return;
+    }
+    setMicError("");
+    setMicState("transcribing");
+    try {
+      const wav = await blobToWav(blob);
+      const body = new FormData();
+      body.append("audio", wav, "prompt.wav");
+      const response = await fetch("/api/ai/transcribe", { method: "POST", body });
+      const data = (await response.json()) as {
+        text?: unknown;
+        error?: unknown;
+      };
+      if (!response.ok) {
+        throw new Error(
+          typeof data.error === "string" ? data.error : "Transcription failed.",
+        );
+      }
+      const text = typeof data.text === "string" ? data.text.trim() : "";
+      if (!text) {
+        setMicError("Nothing heard. Try again.");
+      } else {
+        setInput((prev) => (prev.trim() ? `${prev.trim()} ${text}` : text));
+        inputRef.current?.focus();
+      }
+    } catch (err) {
+      setMicError(
+        err instanceof Error && err.message
+          ? err.message
+          : "Could not transcribe. Try again.",
+      );
+    } finally {
+      setMicState("idle");
+    }
+  };
+
+  const toggleMic = async () => {
+    if (micState === "recording") {
+      recorderRef.current?.stop();
+      return;
+    }
+    if (micState === "transcribing") return;
+    setMicError("");
+    try {
+      if (
+        typeof MediaRecorder === "undefined" ||
+        !navigator.mediaDevices?.getUserMedia
+      ) {
+        setMicError("This browser cannot record audio.");
+        return;
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const recorder = new MediaRecorder(stream);
+      chunksRef.current = [];
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) chunksRef.current.push(event.data);
+      };
+      recorder.onstop = () => {
+        stream.getTracks().forEach((track) => track.stop());
+        streamRef.current = null;
+        recorderRef.current = null;
+        void transcribeClip(recorder.mimeType);
+      };
+      recorder.start();
+      recorderRef.current = recorder;
+      streamRef.current = stream;
+      setMicState("recording");
+    } catch {
+      setMicError("Microphone blocked. Allow access in the browser.");
+    }
+  };
+
   if (!open) {
     return (
-      <div className="absolute bottom-4 left-1/2 z-40 -translate-x-1/2">
+      <div className="absolute bottom-0 left-1/2 z-40 -translate-x-1/2">
         <button
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Open AI chat"
           title="Ask AI about this project"
-          className="flex h-10 items-center gap-2 rounded-full border border-white/10 bg-[#17181d]/95 px-4 text-[13px] font-medium text-[#c9cdd6] shadow-xl hover:border-white/25 hover:text-white"
+          className="flex h-9 items-center gap-2 rounded-b-none rounded-t-2xl border border-b-0 border-white/10 bg-[#17181d]/95 px-5 text-[13px] font-medium text-[#c9cdd6] shadow-xl hover:border-white/25 hover:text-white"
         >
           <svg
             aria-hidden
-            width="15"
-            height="15"
+            width="14"
+            height="14"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -137,6 +226,19 @@ export default function WorkspaceChat({
             <path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15z" />
           </svg>
           Ask AI
+          <svg
+            aria-hidden
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          >
+            <path d="M18 15l-6-6-6 6" />
+          </svg>
         </button>
       </div>
     );
@@ -144,7 +246,7 @@ export default function WorkspaceChat({
 
   return (
     <div className="absolute bottom-4 left-1/2 z-40 w-[min(720px,calc(100vw-2rem))] -translate-x-1/2">
-      <div className="flex max-h-[min(560px,calc(100dvh-8rem))] flex-col gap-2">
+      <div className="musevibe-sheet flex max-h-[min(560px,calc(100dvh-8rem))] flex-col gap-2">
         {/* Messages, only once the thread starts. */}
         {turns.length > 0 && (
           <div className="min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#17181d]/95 shadow-2xl backdrop-blur">
@@ -197,57 +299,13 @@ export default function WorkspaceChat({
 
         {/* Wide composer bar. */}
         <div className="rounded-2xl border border-white/10 bg-[#17181d]/95 px-4 pb-3 pt-2.5 shadow-2xl backdrop-blur">
-          <div className="flex items-center gap-2">
-            <span className="flex min-w-0 items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 py-1 pl-2.5 pr-1.5 text-[12px] font-medium text-[#e8ebf0]">
-              <svg
-                aria-hidden
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="shrink-0 text-[#9aa0ae]"
-              >
-                <path d="M6 3h12l4 6-4 6H6l-4-6 4-6z" />
-              </svg>
-              <span className="truncate">{project.name}</span>
-              <button
-                type="button"
-                onClick={() => {
-                  setTurns([]);
-                  setInput("");
-                  setError("");
-                }}
-                aria-label="Start new conversation"
-                title="Start new conversation"
-                className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[#9aa0ae] hover:bg-white/10 hover:text-white"
-              >
-                <svg
-                  aria-hidden
-                  width="10"
-                  height="10"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                >
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-            </span>
-            <span className="hidden shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-[#5b6472] sm:block">
-              {project.model ? formatModelLabel(project.model) : "Muse"}
-            </span>
+          <div className="flex items-center justify-end">
             <button
               type="button"
               onClick={() => setOpen(false)}
               aria-label="Hide chat"
               title="Hide chat"
-              className="ml-auto flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+              className="flex h-7 w-7 items-center justify-center rounded-lg text-[#9aa0ae] hover:bg-white/10 hover:text-white"
             >
               <svg
                 aria-hidden
@@ -281,17 +339,40 @@ export default function WorkspaceChat({
               className="mt-1 h-9 w-full bg-transparent text-[14px] text-[#f5f6f8] placeholder:text-[#5b6472] focus:outline-none disabled:opacity-50"
             />
             <div className="mt-1 flex items-center gap-1.5">
-              {QUICK_PROMPTS.map((quick) => (
-                <button
-                  key={quick.id}
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void send(quick.prompt)}
-                  className="flex h-8 shrink-0 items-center rounded-full border border-white/10 bg-white/5 px-3 text-[12px] font-medium text-[#c9cdd6] hover:border-white/25 hover:text-white disabled:opacity-40"
-                >
-                  {quick.label}
-                </button>
-              ))}
+              <span className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-[#5b6472]">
+                {project.model ? formatModelLabel(project.model) : "Muse"}
+              </span>
+              <button
+                type="button"
+                onClick={() => void toggleMic()}
+                disabled={busy || micState === "transcribing"}
+                aria-label={micState === "recording" ? "Stop recording" : "Dictate with microphone"}
+                title={micState === "recording" ? "Stop recording" : "Dictate with microphone"}
+                className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors disabled:opacity-40 ${
+                  micState === "recording"
+                    ? "border-[#f0a6a6]/50 bg-[#f0a6a6]/15 text-[#f0a6a6]"
+                    : "border-white/10 bg-white/5 text-[#c9cdd6] hover:border-white/25 hover:text-white"
+                }`}
+              >
+                {micState === "transcribing" ? (
+                  <span className="size-3 animate-pulse rounded-full bg-current" />
+                ) : (
+                  <svg
+                    aria-hidden
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <rect x="9" y="3" width="6" height="11" rx="3" />
+                    <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+                  </svg>
+                )}
+              </button>
               <button
                 type="submit"
                 disabled={busy || !input.trim()}
@@ -313,6 +394,17 @@ export default function WorkspaceChat({
                 </svg>
               </button>
             </div>
+            {micError && (
+              <p role="alert" className="mt-1.5 text-[12px] text-[#f0a6a6]">
+                {micError}
+              </p>
+            )}
+            {micState === "recording" && (
+              <p role="status" className="mt-1.5 flex items-center gap-1.5 text-[12px] text-[#f0a6a6]">
+                <span className="size-2 animate-pulse rounded-full bg-current" />
+                Listening… tap the mic to stop.
+              </p>
+            )}
           </form>
         </div>
       </div>
