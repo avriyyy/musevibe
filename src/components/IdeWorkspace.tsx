@@ -628,10 +628,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
 
   /**
    * First-run preparation behind a blur overlay: seed the six plan docs
-   * and generate all of them, then tasks, then the page plan and the
-   * first recommended page. Everything lands before the blur lifts, so
-   * the project opens complete instead of half-empty. Later mounts skip
-   * this; the manual buttons cover any gaps.
+   * and generate all of them, then tasks, then the auto-suggested page
+   * plan. Nothing is generated beyond that, so the first workspace view
+   * shows only the design system plus the suggested pages. Later mounts
+   * skip this; the manual buttons cover any gaps.
    */
   const prepareProject = useCallback(async () => {
     const state0 = useVibe.getState();
@@ -736,38 +736,30 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       }
       setPrepDoneIds(["documents", "tasks"]);
       setPrepActive("design");
-      // Page plan, suggested automatically, then the first page.
+      // Page plan, suggested automatically. No page is generated here:
+      // the first workspace view shows only the design system plus the
+      // suggested page list, and each page waits for its own Generate.
       st = useVibe.getState();
-      let plan =
-        st.projects.find((entry) => entry.id === projectId)?.pagePlan ?? null;
-      if (!plan) {
+      if (!st.projects.find((entry) => entry.id === projectId)?.pagePlan) {
         try {
           const reply = await requestAi(
             "pages",
             buildPagePlanPrompt(current0.name, current0.idea, brief),
             current0.model,
           );
-          plan = parsePagePlan(reply.text) ?? fallbackPagePlan();
+          const plan = parsePagePlan(reply.text) ?? fallbackPagePlan();
+          useVibe.getState().updateProject(projectId, { pagePlan: plan });
         } catch {
-          plan = fallbackPagePlan();
+          useVibe
+            .getState()
+            .updateProject(projectId, { pagePlan: fallbackPagePlan() });
         }
-        useVibe.getState().updateProject(projectId, { pagePlan: plan });
-      }
-      const first = plan[0];
-      st = useVibe.getState();
-      if (
-        first &&
-        !(st.filesByProject[projectId] ?? []).some(
-          (file) => file.path === pageFilePath(first.slug),
-        )
-      ) {
-        await generatePage(first.slug);
       }
       setPrepDoneIds(["documents", "tasks", "design"]);
     } finally {
       setPrepActive(null);
     }
-  }, [projectId, saveDocMarkdown, generatePage]);
+  }, [projectId, saveDocMarkdown]);
 
   // Fresh projects prepare once behind the blur overlay. Anything already
   // seeded keeps the old lazy path: the effects below fill the gaps.
