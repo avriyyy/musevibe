@@ -19,6 +19,7 @@ interface WorkspaceChatProps {
   brief: string;
   docs: ProjectDoc[];
   tasks: Task[];
+  onHeightChange?: (height: number) => void;
 }
 
 interface ChatTurn extends ChatMessage {
@@ -32,6 +33,7 @@ export default function WorkspaceChat({
   brief,
   docs,
   tasks,
+  onHeightChange,
 }: WorkspaceChatProps) {
   const [open, setOpen] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -43,6 +45,8 @@ export default function WorkspaceChat({
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const busyRef = useRef(false);
+  const shellRef = useRef<HTMLDivElement>(null);
+  const heightRef = useRef(onHeightChange);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -53,6 +57,7 @@ export default function WorkspaceChat({
   // Latest project snapshot for in-flight requests.
   useEffect(() => {
     stateRef.current = { project, brief, docs, tasks };
+    heightRef.current = onHeightChange;
   });
 
   // Release the microphone when the chat unmounts mid-recording.
@@ -63,6 +68,18 @@ export default function WorkspaceChat({
       streamRef.current?.getTracks().forEach((track) => track.stop());
     };
   }, []);
+
+  // Report the visible height so scrollable views can pad their
+  // bottom edge and no content ends up hidden behind the chat.
+  useEffect(() => {
+    const el = shellRef.current;
+    if (!el) return;
+    const report = () => heightRef.current?.(el.getBoundingClientRect().height);
+    report();
+    const observer = new ResizeObserver(report);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [open]);
 
   // Keep the latest reply in view, and focus the box when opened.
   useEffect(() => {
@@ -203,7 +220,7 @@ export default function WorkspaceChat({
 
   if (!open) {
     return (
-      <div className="absolute bottom-0 left-1/2 z-40 -translate-x-1/2">
+      <div ref={shellRef} className="absolute bottom-0 left-1/2 z-40 -translate-x-1/2">
         <button
           type="button"
           onClick={() => setOpen(true)}
@@ -245,7 +262,7 @@ export default function WorkspaceChat({
   }
 
   return (
-    <div className="absolute bottom-4 left-1/2 z-40 w-[min(720px,calc(100vw-2rem))] -translate-x-1/2">
+    <div ref={shellRef} className="absolute bottom-4 left-1/2 z-40 w-[min(720px,calc(100vw-2rem))] -translate-x-1/2">
       <div className="musevibe-sheet flex max-h-[min(560px,calc(100dvh-8rem))] flex-col gap-2">
         {/* Messages, only once the thread starts. */}
         {turns.length > 0 && (

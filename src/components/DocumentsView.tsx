@@ -22,6 +22,7 @@ interface DocumentsViewProps {
   canGenerate: boolean;
   generating: boolean;
   modelLabel: string;
+  bottomPad?: number;
   onMarkdown: (markdown: string) => void;
   onGenerate: () => void;
 }
@@ -34,6 +35,7 @@ export default function DocumentsView({
   canGenerate,
   generating,
   modelLabel,
+  bottomPad = 0,
   onMarkdown,
   onGenerate,
 }: DocumentsViewProps) {
@@ -144,8 +146,13 @@ export default function DocumentsView({
           })}
         </aside>
 
-        {/* Preview. Only this column scrolls. */}
-        <div ref={centerRef} className="min-h-0 min-w-0 overflow-y-auto">
+        {/* Preview. Only this column scrolls; it pads its bottom edge
+            by the chat height so the last lines clear the chat. */}
+        <div
+          ref={centerRef}
+          className="min-h-0 min-w-0 overflow-y-auto"
+          style={bottomPad > 0 ? { paddingBottom: bottomPad + 16 } : undefined}
+        >
           {activeDoc ? (
             <DocView
               doc={activeDoc}

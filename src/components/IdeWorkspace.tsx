@@ -195,6 +195,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [view, setView] = useState<View>({ kind: "documents" });
   const [selectedDocKey, setSelectedDocKey] = useState<string>("doc-prd");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [chatHeight, setChatHeight] = useState(0);
   const [phase, setPhase] = useState<Phase>(null);
   const [docBusy, setDocBusy] = useState<string | null>(null);
   const [protoBusy, setProtoBusy] = useState(false);
@@ -689,6 +690,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               selectedKey={selectedDocKey}
               onSelect={setSelectedDocKey}
               activeDoc={activeDoc}
+              bottomPad={chatHeight}
               canGenerate={!!activeDoc && activeDoc.kind !== "note"}
               generating={!!activeDoc && docBusy === activeDoc.id}
               modelLabel={
@@ -703,7 +705,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
 
           {view.kind === "tasks" && (
             <div className="relative flex min-h-0 flex-1 overflow-hidden">
-              <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-4">
+              <div
+                className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pt-4"
+                style={{ paddingBottom: 16 + chatHeight }}
+              >
                 {tasksLocal && (
                   <p className="mb-3 shrink-0 text-[11px] text-[#9aa0ae]">
                     Tasks were drafted locally, without the model.
@@ -795,6 +800,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         brief={prd}
         docs={docs}
         tasks={tasks}
+        onHeightChange={setChatHeight}
       />
     </div>
   );
