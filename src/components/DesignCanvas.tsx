@@ -392,13 +392,39 @@ export default function DesignCanvas({
         };
         // Forms never navigate away either; inline handlers still run.
         const blockSubmit = (event: Event) => event.preventDefault();
-        // Two-finger swipe over a frame pans the canvas instead of
-        // triggering the browser's back gesture.
+        // At the scroll edge the canvas takes the wheel, so the
+        // browser's back gesture never triggers over a frame.
         const noOverscroll = doc.createElement("style");
         noOverscroll.textContent =
           "html,body{overscroll-behavior:none !important;}";
         doc.head.appendChild(noOverscroll);
         const forwardWheel = (event: WheelEvent) => {
+          // Pinch always zooms the canvas.
+          if (event.ctrlKey || event.metaKey) {
+            event.preventDefault();
+            event.stopPropagation();
+            applyWheel(event);
+            return;
+          }
+          // The page scrolls first; only at its scroll edge does the wheel
+          // pan the canvas. preventDefault keeps the browser's back
+          // gesture from ever triggering over a frame.
+          const scroller = doc.scrollingElement;
+          if (scroller) {
+            const unit = event.deltaMode === 1 ? 16 : 1;
+            const dx = event.deltaX * unit;
+            const dy = event.deltaY * unit;
+            const maxTop = scroller.scrollHeight - scroller.clientHeight;
+            const maxLeft = scroller.scrollWidth - scroller.clientWidth;
+            const top = scroller.scrollTop;
+            const left = scroller.scrollLeft;
+            const wantsY =
+              maxTop > 1 && (dy > 0 ? top < maxTop - 1 : dy < 0 ? top > 1 : false);
+            const wantsX =
+              maxLeft > 1 &&
+              (dx > 0 ? left < maxLeft - 1 : dx < 0 ? left > 1 : false);
+            if (wantsY || wantsX) return;
+          }
           event.preventDefault();
           event.stopPropagation();
           applyWheel(event);
@@ -1361,6 +1387,62 @@ export default function DesignCanvas({
           }}
           onClose={() => setPicked(null)}
         />
+      )}
+
+      {/* Picking indicator: picking turns the cursor into a crosshair
+          and swallows clicks, so the mode must be obvious and one click
+          away from off. */}
+      {picking && (
+        <div className="absolute left-3 top-3 z-10">
+          <div
+            className="flex items-center gap-2 rounded-2xl border border-[#8ab4ff]/40 bg-[#17181d]/95 py-1.5 pl-3 pr-1.5 shadow-xl"
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerUp={(event) => event.stopPropagation()}
+          >
+            <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#c9cdd6]">
+              <svg
+                aria-hidden
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-[#8ab4ff]"
+              >
+                <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+                <circle cx="12" cy="12" r="4" />
+              </svg>
+              Picking a component
+            </span>
+            <kbd className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-[#9aa0ae]">
+              Esc
+            </kbd>
+            <button
+              type="button"
+              onClick={() => onPickingChange(false)}
+              onPointerDown={(event) => event.stopPropagation()}
+              aria-label="Stop picking"
+              title="Stop picking"
+              className="flex h-6 w-6 items-center justify-center rounded-full text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+            >
+              <svg
+                aria-hidden
+                width="11"
+                height="11"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+              >
+                <path d="M6 6l12 12M18 6L6 18" />
+              </svg>
+            </button>
+          </div>
+        </div>
       )}
 
       <CanvasChrome
