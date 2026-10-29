@@ -339,7 +339,7 @@ export default function WorkspaceChat({
               className="mt-1 h-9 w-full bg-transparent text-[14px] text-[#f5f6f8] placeholder:text-[#5b6472] focus:outline-none disabled:opacity-50"
             />
             <div className="mt-1 flex items-center gap-1.5">
-              <span className="shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-[#5b6472]">
+              <span className="ml-auto shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-[#5b6472]">
                 {project.model ? formatModelLabel(project.model) : "Muse"}
               </span>
               <button
@@ -377,7 +377,7 @@ export default function WorkspaceChat({
                 type="submit"
                 disabled={busy || !input.trim()}
                 aria-label="Send message"
-                className="ml-auto flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[#0b0c10] hover:bg-white/90 disabled:opacity-40"
+                className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[#0b0c10] hover:bg-white/90 disabled:opacity-40"
               >
                 <svg
                   aria-hidden
