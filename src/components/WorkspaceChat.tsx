@@ -11,7 +11,12 @@ import { useEffect, useRef, useState } from "react";
 import Markdown from "./Markdown";
 import { blobToWav } from "@/lib/audio";
 import { buildChatPrompt, type ChatMessage, type Mention } from "@/lib/chat";
-import { formatModelLabel } from "@/lib/models";
+import {
+  FALLBACK_MODELS,
+  formatModelLabel,
+  type AiModelOption,
+} from "@/lib/models";
+import { useVibe } from "@/lib/store";
 import type { Project, ProjectDoc, Task } from "@/lib/types";
 
 interface WorkspaceChatProps {
@@ -56,6 +61,9 @@ export default function WorkspaceChat({
   const busyRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const heightRef = useRef(onHeightChange);
+  const pickerRef = useRef<HTMLDivElement>(null);
+  const [models, setModels] = useState<AiModelOption[]>(FALLBACK_MODELS);
+  const [modelOpen, setModelOpen] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -75,6 +83,59 @@ export default function WorkspaceChat({
     };
     heightRef.current = onHeightChange;
   });
+
+  // Discover chat models once; the curated list covers offline runs.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const response = await fetch("/api/ai/models", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as {
+          models?: Array<{ id?: unknown; label?: unknown; hint?: unknown }>;
+        };
+        if (!Array.isArray(data.models)) return;
+        const list = data.models
+          .filter((entry) => typeof entry?.id === "string")
+          .map((entry) => ({
+            id: entry.id as string,
+            label:
+              typeof entry.label === "string"
+                ? entry.label
+                : formatModelLabel(entry.id as string),
+            hint: typeof entry.hint === "string" ? entry.hint : "",
+          }));
+        if (!cancelled && list.length) setModels(list);
+      } catch {
+        // Offline: the curated fallback list stays.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Close the model menu on outside click or Escape.
+  useEffect(() => {
+    if (!modelOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      if (!pickerRef.current?.contains(event.target as Node)) setModelOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setModelOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [modelOpen]);
+
+  const pickModel = (id: string) => {
+    useVibe.getState().updateProject(project.id, { model: id });
+    setModelOpen(false);
+  };
 
   // Release the microphone when the chat unmounts mid-recording.
   useEffect(() => {
@@ -419,9 +480,82 @@ export default function WorkspaceChat({
               className="mt-1 h-9 w-full bg-transparent text-[14px] text-[#f5f6f8] placeholder:text-[#5b6472] focus:outline-none disabled:opacity-50"
             />
             <div className="mt-1 flex items-center gap-1.5">
-              <span className="ml-auto shrink-0 rounded-full bg-white/5 px-2 py-0.5 text-[11px] text-[#5b6472]">
-                {project.model ? formatModelLabel(project.model) : "Muse"}
-              </span>
+              <div ref={pickerRef} className="relative ml-auto shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setModelOpen((open) => !open)}
+                  aria-haspopup="menu"
+                  aria-expanded={modelOpen}
+                  aria-label={`AI model: ${project.model ? formatModelLabel(project.model) : "Muse"}`}
+                  title="Choose the model for this chat"
+                  className="flex h-7 items-center gap-1 rounded-full bg-white/5 px-2 text-[11px] text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+                >
+                  <span className="max-w-[120px] truncate">
+                    {project.model ? formatModelLabel(project.model) : "Muse"}
+                  </span>
+                  <svg
+                    aria-hidden
+                    width="10"
+                    height="10"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className={`shrink-0 transition-transform ${modelOpen ? "rotate-180" : ""}`}
+                  >
+                    <path d="M6 15l6-6 6 6" />
+                  </svg>
+                </button>
+                {modelOpen && (
+                  <div
+                    role="menu"
+                    aria-label="AI model"
+                    className="absolute bottom-full right-0 z-50 mb-2 w-64 max-w-[calc(100vw-2rem)] rounded-2xl border border-white/10 bg-[#17181d] p-1.5 shadow-2xl"
+                  >
+                    {models.map((entry) => (
+                      <button
+                        key={entry.id}
+                        type="button"
+                        role="menuitemradio"
+                        aria-checked={entry.id === project.model}
+                        onClick={() => pickModel(entry.id)}
+                        className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left hover:bg-white/5 ${
+                          entry.id === project.model ? "bg-white/5" : ""
+                        }`}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium text-[#f5f6f8]">
+                            {entry.label}
+                          </span>
+                          {!!entry.hint && (
+                            <span className="block truncate text-[11px] text-[#9aa0ae]">
+                              {entry.hint}
+                            </span>
+                          )}
+                        </span>
+                        {entry.id === project.model && (
+                          <svg
+                            aria-hidden
+                            width="14"
+                            height="14"
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            className="shrink-0"
+                          >
+                            <path d="M5 12l5 5L19 7" />
+                          </svg>
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
               <button
                 type="button"
                 onClick={() => void toggleMic()}
