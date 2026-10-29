@@ -27,6 +27,66 @@ import {
 import { initials, type LogoOrigin, type LogoStatus } from "@/lib/logo";
 
 const fileCache = new Map<string, { designMd: string; tokensCss: string }>();
+const swatchCache = new Map<string, string[] | null>();
+
+/** First three paint colors out of a tokens.css file, for card dots. */
+function extractSwatches(tokensCss: string): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const pattern = /--(?:accent|bg|surface|fg|primary|background)\s*:\s*([^;\n]+)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(tokensCss)) !== null && found.length < 4) {
+    const value = match[1].trim();
+    if (!/^(#[0-9a-f]{3,8}|rgba?\(|hsla?\()|(white|black)/i.test(value)) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push(value);
+  }
+  return found;
+}
+
+/** Palette dots for one template card, loaded once then cached. */
+function TemplateSwatches({ id }: { id: string }) {
+  const [swatches, setSwatches] = useState<string[] | null | undefined>(() =>
+    swatchCache.has(id) ? (swatchCache.get(id) ?? null) : undefined,
+  );
+  useEffect(() => {
+    // The initializer above already read a warm cache; this only fetches
+    // on a cold one.
+    if (swatchCache.has(id)) return;
+    let live = true;
+    fetch(`/design-systems/${id}/tokens.css`)
+      .then((res) => {
+        if (!res.ok) throw new Error("missing");
+        return res.text();
+      })
+      .then((css) => {
+        const dots = extractSwatches(css);
+        swatchCache.set(id, dots);
+        if (live) setSwatches(dots);
+      })
+      .catch(() => {
+        swatchCache.set(id, null);
+        if (live) setSwatches(null);
+      });
+    return () => {
+      live = false;
+    };
+  }, [id]);
+  if (!swatches || swatches.length === 0) return null;
+  return (
+    <span aria-hidden className="mt-2 flex items-center gap-1">
+      {swatches.slice(0, 4).map((color, index) => (
+        <span
+          key={index}
+          className="size-3.5 rounded-full border border-white/25"
+          style={{ backgroundColor: color }}
+        />
+      ))}
+    </span>
+  );
+}
 
 async function loadTemplateFiles(id: string) {
   const hit = fileCache.get(id);
@@ -275,38 +335,57 @@ export default function DesignSetupStep({
           className="grid max-h-72 grid-cols-2 gap-2 overflow-y-auto pr-1 sm:grid-cols-3">
           {filtered.map((entry) => {
             const selected = design?.id === entry.id && design.source === "template";
+            const busy = loadingId === entry.id;
             return (
               <div
                 key={entry.id}
                 role="option"
+                tabIndex={0}
                 aria-selected={selected}
-                className={`flex flex-col rounded-xl border p-3 text-left transition-colors ${
+                aria-label={`${entry.name}${selected ? ", selected" : ""}. Activate to use this style.`}
+                onClick={() => {
+                  if (!selected && !busy) void applyTemplate(entry);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter" && event.key !== " ") return;
+                  if ((event.target as HTMLElement).closest("button")) return;
+                  event.preventDefault();
+                  if (!selected && !busy) void applyTemplate(entry);
+                }}
+                className={`flex cursor-pointer flex-col rounded-xl border p-3 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8ab4ff] ${
                   selected
                     ? "border-[#8ab4ff]/60 bg-[#8ab4ff]/[0.08]"
-                    : "border-white/10 bg-white/[0.02] hover:border-white/25"
+                    : "border-white/10 bg-white/[0.02] hover:border-white/30 hover:bg-white/[0.04]"
                 }`}>
-                <span className="truncate text-[13px] font-semibold text-[#f5f6f8]">{entry.name}</span>
+                <span className="flex items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate text-[13px] font-semibold text-[#f5f6f8]">
+                    {entry.name}
+                  </span>
+                  {selected && (
+                    <span
+                      aria-hidden
+                      className="flex size-4 shrink-0 items-center justify-center rounded-full bg-[#8ab4ff] text-[10px] font-bold text-[#0b0c10]">
+                      ✓
+                    </span>
+                  )}
+                </span>
                 {!!entry.category && (
-                  <span className="truncate text-[11px] text-[#9aa0ae]">{entry.category}</span>
+                  <span className="mt-0.5 truncate text-[11px] text-[#9aa0ae]">{entry.category}</span>
                 )}
-                <span className="mt-2 flex gap-2">
+                <TemplateSwatches id={entry.id} />
+                <span className="mt-2 flex items-center gap-2 border-t border-white/[0.07] pt-2">
                   <button
                     type="button"
-                    onClick={() => setPreviewId(entry.id)}
-                    className="min-h-11 rounded-lg px-2 text-[12px] font-medium text-[#9aa0ae] underline hover:text-white md:min-h-0">
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setPreviewId(entry.id);
+                    }}
+                    className="min-h-8 rounded-lg px-2 text-[12px] font-medium text-[#9aa0ae] underline hover:text-white md:min-h-0">
                     Preview
                   </button>
-                  <button
-                    type="button"
-                    disabled={loadingId === entry.id || selected}
-                    onClick={() => void applyTemplate(entry)}
-                    className={`min-h-11 rounded-lg px-3 text-[12px] font-medium disabled:opacity-50 md:min-h-0 ${
-                      selected
-                        ? "border border-[#8ab4ff]/50 text-[#8ab4ff]"
-                        : "bg-white text-[#0b0c10] hover:bg-white/90"
-                    }`}>
-                    {loadingId === entry.id ? "Loading…" : selected ? "✓ Selected" : "Use"}
-                  </button>
+                  <span className="ml-auto text-[11px] text-[#5b6472]">
+                    {busy ? "Loading…" : selected ? "In use" : "Click card to use"}
+                  </span>
                 </span>
               </div>
             );
