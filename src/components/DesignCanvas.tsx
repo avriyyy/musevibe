@@ -13,7 +13,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CanvasChrome from "./CanvasChrome";
-import ComponentComment from "./ComponentComment";
 import {
   SHAPE_STROKE,
   SHAPE_WIDTH,
@@ -26,11 +25,8 @@ import {
   type CanvasShape,
   type Transform,
 } from "@/lib/canvas";
-import {
-  injectInspector,
-  nodeLabel,
-  type InspectedNode,
-} from "@/lib/prototypeInspect";
+import { Agentation } from "agentation";
+import type { Annotation } from "agentation";
 
 export const FRAME_W = 960;
 export const FRAME_H = 640;
@@ -41,8 +37,10 @@ interface DesignCanvasProps {
   /** Current prototype.html content; the frame iframe follows it directly. */
   html: string;
   onShapes: (shapesJson: string) => void;
-  /** Queue a picked component as a chat mention instead of sending it. */
-  onMention: (label: string, text: string) => void;
+  /** Quoted annotation text goes into the chat input (never auto-sent). */
+  onQuoteToChat: (text: string) => void;
+  /** Project name shown as the annotated app in the toolbar. */
+  appName: string;
 }
 
 type Gesture =
@@ -64,11 +62,67 @@ type Gesture =
 
 const GRID = 28;
 
+/** One annotation as a compact chat quote: selector plus user comment. */
+function formatAnnotation(annotation: Annotation): string {
+  const inner = resolveInnerElement(annotation);
+  const label = inner?.label || annotation.element || "element";
+  const where = inner?.text
+    ? ` "${inner.text}"`
+    : annotation.selectedText
+      ? ` "${annotation.selectedText.slice(0, 120)}"`
+      : "";
+  const comment = (annotation.comment || "").trim();
+  return `[${label}${where}]${comment ? ` ${comment}` : ""}`;
+}
+
+/**
+ * Agentation reports the top-level element (our iframe), so resolve the
+ * precise element inside the same-origin prototype frame ourselves: map
+ * the annotation box back into frame coordinates and hit test there.
+ */
+function resolveInnerElement(
+  annotation: Annotation,
+): { label: string; text: string } | null {
+  try {
+    const box = annotation.boundingBox;
+    if (!box || box.width <= 0 || box.height <= 0) return null;
+    const frame = document.querySelector(
+      'iframe[title="Prototype"]',
+    ) as HTMLIFrameElement | null;
+    const content = frame?.contentDocument ?? null;
+    if (!frame || !content?.defaultView) return null;
+    const rect = frame.getBoundingClientRect();
+    const sx = frame.offsetWidth ? rect.width / frame.offsetWidth : 1;
+    const sy = frame.offsetHeight ? rect.height / frame.offsetHeight : 1;
+    const cx = (box.x + box.width / 2 - rect.left) / (sx || 1);
+    const cy = (box.y + box.height / 2 - rect.top) / (sy || 1);
+    const view = content.defaultView;
+    if (cx < 0 || cy < 0 || cx > view.innerWidth || cy > view.innerHeight) {
+      return null;
+    }
+    const el = content.elementFromPoint(cx, cy);
+    if (!el || el === content.body || el === content.documentElement) return null;
+    const tag = el.tagName.toLowerCase();
+    const text = ((el.textContent || "").trim().replace(/\s+/g, " ") || "").slice(0, 120);
+    const id = (el as HTMLElement).id || null;
+    const rawClass = (el as HTMLElement).className;
+    const classes =
+      typeof rawClass === "string"
+        ? rawClass.split(" ").filter(Boolean).slice(0, 2)
+        : [];
+    const label = id ? `${tag}#${id}` : classes.length ? `${tag}.${classes.join(".")}` : tag;
+    return { label, text };
+  } catch {
+    return null;
+  }
+}
+
 export default function DesignCanvas({
   initialShapes,
   html,
   onShapes,
-  onMention,
+  onQuoteToChat,
+  appName,
 }: DesignCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [shapes, setShapes] = useState<CanvasShape[]>(() =>
@@ -81,8 +135,6 @@ export default function DesignCanvas({
   const [draft, setDraft] = useState("");
   const [panning, setPanning] = useState(false);
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
-  const [inspected, setInspected] = useState<InspectedNode | null>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
 
   const shapesRef = useRef(shapes);
   const transformRef = useRef(transform);
@@ -110,51 +162,9 @@ export default function DesignCanvas({
     draftRef.current = draft;
   });
 
-  // Prototype inspector: Select mode picks components inside the frame.
-  const inspectedHtml = useMemo(() => injectInspector(html), [html]);
-
-  useEffect(() => {
-    const onMessage = (event: MessageEvent) => {
-      const data = (event.data ?? {}) as {
-        type?: unknown;
-      } & Partial<InspectedNode>;
-      if (data.type === "musevibe-select" && typeof data.tag === "string") {
-        setInspected({
-          tag: data.tag,
-          text: typeof data.text === "string" ? data.text : "",
-          id: typeof data.id === "string" ? data.id : null,
-          classes: Array.isArray(data.classes)
-            ? data.classes.filter((c): c is string => typeof c === "string")
-            : [],
-        });
-      } else if (data.type === "musevibe-deselect") {
-        setInspected(null);
-      }
-    };
-    window.addEventListener("message", onMessage);
-    return () => window.removeEventListener("message", onMessage);
-  }, []);
-
-  // Leaving Select mode or swapping the prototype clears the pick.
-  // Render-phase update (no effect): adjusting to new props during render
-  // never loops because the guard goes false on the immediate re-render.
-  const [prevHtml, setPrevHtml] = useState(html);
-  if (prevHtml !== html) {
-    setPrevHtml(html);
-    setInspected(null);
-  }
-
-  const clearInspected = useCallback(() => {
-    setInspected(null);
-    try {
-      iframeRef.current?.contentWindow?.postMessage(
-        { type: "musevibe-clear" },
-        "*",
-      );
-    } catch {
-      // A frame that will not clear keeps its outline; harmless.
-    }
-  }, []);
+  // Prototype annotations go through Agentation: its toolbar activates
+  // annotate mode and it reports picks (including inside the frame)
+  // through onAnnotationAdd / onSubmit below.
 
   // Persist edits, debounced. The seed echo is skipped so mounting never
   // dirties the store.
@@ -462,11 +472,10 @@ export default function DesignCanvas({
         };
         (event.target as Element).setPointerCapture?.(event.pointerId);
       } else {
-        clearInspected();
         setSelectedId(null);
       }
     },
-    [editingId, eraseAt, toScene, tool, clearInspected, selectedId],
+    [editingId, eraseAt, toScene, tool, selectedId],
   );
 
   const onPointerMove = useCallback(
@@ -666,13 +675,12 @@ export default function DesignCanvas({
         setShapes((prev) => prev.filter((entry) => entry.id !== selectedId));
         setSelectedId(null);
       } else if (event.key === "Escape") {
-        clearInspected();
         setSelectedId(null);
       }
     };
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [editingId, selectedId, commitDraft, clearInspected]);
+  }, [editingId, selectedId, commitDraft]);
 
   const cursor = useMemo(() => {
     if (panning) return "grabbing";
@@ -744,9 +752,10 @@ export default function DesignCanvas({
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
         }}
       >
-        {/* Prototype frame with a Figma-style label. The iframe is a
-            live-rendered preview, never interactive, so pan, draw, and
-            selection gestures work uniformly across the whole canvas. */}
+        {/* Prototype frame with a Figma-style label. The iframe stays
+            interactive (same-origin) so the annotation toolbar can reach
+            the elements inside it; canvas gestures start from the area
+            around the frame, the minimap, or the wheel. */}
         <div className="absolute" style={{ left: 0, top: 0, width: FRAME_W, height: FRAME_H }}>
           <p className="pointer-events-none absolute -top-8 left-0 flex items-baseline gap-1.5 whitespace-nowrap">
             <span className="text-[13px] font-semibold text-[#f5f6f8]">Prototype</span>
@@ -754,13 +763,11 @@ export default function DesignCanvas({
           </p>
           <div className="h-full w-full overflow-hidden rounded-xl border border-white/15 bg-white shadow-2xl">
             <iframe
-              ref={iframeRef}
               title="Prototype"
-              srcDoc={inspectedHtml}
-              sandbox="allow-scripts"
+              srcDoc={html}
+              sandbox="allow-scripts allow-same-origin"
               tabIndex={-1}
               className="h-full w-full"
-              style={tool === "select" ? undefined : { pointerEvents: "none" }}
             />
           </div>
         </div>
@@ -919,24 +926,21 @@ export default function DesignCanvas({
         />
       )}
 
-      {/* Picked prototype component, above the chat pill. */}
-      {inspected && !editingId && (
-        <ComponentComment
-          key={inspected.tag + inspected.text}
-          node={inspected}
-          onCancel={clearInspected}
-          onAdd={(message) => {
-            onMention(nodeLabel(inspected), message);
-            clearInspected();
-          }}
-        />
-      )}
+      <Agentation
+        appName={appName}
+        enableKeyboardShortcuts={false}
+        onAnnotationAdd={(annotation) => {
+          onQuoteToChat(formatAnnotation(annotation));
+        }}
+        onSubmit={(output) => {
+          if (output.trim()) onQuoteToChat(output.trim());
+        }}
+      />
 
       <CanvasChrome
         tool={tool}
         onTool={(next) => {
           if (editingId) commitDraft();
-          if (next !== "select") clearInspected();
           setTool(next);
         }}
         onZoomIn={() => zoomBy(1.25)}

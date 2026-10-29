@@ -780,9 +780,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                     onShapes={(shapesJson) =>
                       handleShapes(prototypeScreen.id, shapesJson)
                     }
-                    onMention={(label, text) =>
-                      quoteToChat(`[${label}]${text ? ` ${text}` : ""}`)
-                    }
+                    onQuoteToChat={(text) => quoteToChat(text)}
+                    appName={project.name}
                   />
                 ) : (
                   <div className="grid h-full place-items-center px-5">
