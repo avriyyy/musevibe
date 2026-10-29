@@ -30,6 +30,10 @@ interface WorkspaceChatProps {
   /** Quoted selections appended into the input, newest wins. */
   draft: { id: number; text: string } | null;
   onDraftConsumed?: () => void;
+  /** Armed component picker, available while the design canvas is open. */
+  canPick?: boolean;
+  picking?: boolean;
+  onTogglePick?: () => void;
 }
 
 interface ChatTurn extends ChatMessage {
@@ -48,6 +52,9 @@ export default function WorkspaceChat({
   onOpenChange,
   draft,
   onDraftConsumed,
+  canPick = false,
+  picking = false,
+  onTogglePick,
 }: WorkspaceChatProps) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
@@ -56,7 +63,7 @@ export default function WorkspaceChat({
   const [micState, setMicState] = useState<MicState>("idle");
   const [micError, setMicError] = useState("");
   const scrollRef = useRef<HTMLDivElement>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const busyRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const heightRef = useRef(onHeightChange);
@@ -94,6 +101,15 @@ export default function WorkspaceChat({
     onDraftConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [draft]);
+
+  // Grow the composer with the message, up to a few lines, so stacked
+  // quotes keep their own line.
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`;
+  }, [input, open]);
 
   // Discover chat models once; the curated list covers offline runs.
   useEffect(() => {
@@ -439,16 +455,64 @@ export default function WorkspaceChat({
               void send();
             }}
           >
-            <input
+            <textarea
               ref={inputRef}
+              rows={1}
               value={input}
               onChange={(event) => setInput(event.target.value)}
+              onKeyDown={(event) => {
+                if (
+                  event.key === "Enter" &&
+                  !event.shiftKey &&
+                  !event.nativeEvent.isComposing
+                ) {
+                  event.preventDefault();
+                  void send();
+                }
+              }}
               placeholder="Ask or change anything…"
               aria-label="Ask about this project"
               disabled={busy}
-              className="h-9 w-full bg-transparent text-[14px] text-[#f5f6f8] placeholder:text-[#5b6472] focus:outline-none disabled:opacity-50"
+              className="block min-h-9 w-full resize-none overflow-y-auto bg-transparent py-1.5 text-[14px] leading-6 text-[#f5f6f8] placeholder:text-[#5b6472] focus:outline-none disabled:opacity-50"
             />
             <div className="mt-1 flex items-center gap-1.5">
+              {canPick && (
+                <button
+                  type="button"
+                  onClick={onTogglePick}
+                  aria-pressed={picking}
+                  aria-label={
+                    picking
+                      ? "Stop selecting components"
+                      : "Select a component to change"
+                  }
+                  title={
+                    picking
+                      ? "Stop selecting components"
+                      : "Select a component on the canvas"
+                  }
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full border transition-colors ${
+                    picking
+                      ? "border-transparent bg-white text-[#0b0c10]"
+                      : "border-white/10 bg-white/5 text-[#c9cdd6] hover:border-white/25 hover:text-white"
+                  }`}
+                >
+                  <svg
+                    aria-hidden
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
+                    <circle cx="12" cy="12" r="4" />
+                  </svg>
+                </button>
+              )}
               <div ref={pickerRef} className="relative ml-auto shrink-0">
                 <button
                   type="button"
@@ -577,6 +641,11 @@ export default function WorkspaceChat({
                 </svg>
               </button>
             </div>
+            {picking && (
+              <p role="status" className="mt-1.5 text-[12px] text-[#9aa0ae]">
+                Click a component on the canvas, then say what should change.
+              </p>
+            )}
             {micError && (
               <p role="alert" className="mt-1.5 text-[12px] text-[#f0a6a6]">
                 {micError}

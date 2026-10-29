@@ -25,9 +25,6 @@ import {
   type CanvasShape,
   type Transform,
 } from "@/lib/canvas";
-import { Agentation } from "agentation";
-import type { Annotation } from "agentation";
-
 export const FRAME_W = 960;
 export const FRAME_H = 640;
 
@@ -39,8 +36,28 @@ interface DesignCanvasProps {
   onShapes: (shapesJson: string) => void;
   /** Quoted annotation text goes into the chat input (never auto-sent). */
   onQuoteToChat: (text: string) => void;
-  /** Project name shown as the annotated app in the toolbar. */
-  appName: string;
+  /** Whether the chat's component picker is armed. */
+  picking: boolean;
+  /** Bumped on every arm so a previous pick never resurfaces. */
+  pickSession: number;
+  onPickingChange: (picking: boolean) => void;
+  /** Height covered by the chat drawer, kept clear of the comment card. */
+  bottomInset: number;
+}
+
+/** A rectangle in the prototype frame's own CSS pixel space. */
+interface FrameBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface PickedComponent {
+  label: string;
+  text: string;
+  box: FrameBox;
+  session: number;
 }
 
 type Gesture =
@@ -62,82 +79,27 @@ type Gesture =
 
 const GRID = 28;
 
-/** Agentation's toolbar flips its toggle to "Exit" while feedback mode
- *  is on; the body cursor also switches to crosshair. Either signal means
- *  the next click would start an annotation. */
-function isAnnotatingActive(): boolean {
-  if (
-    typeof document !== "undefined" &&
-    getComputedStyle(document.body).cursor === "crosshair"
-  ) {
-    return true;
-  }
-  const hosts = document.querySelectorAll("agentation-toolbar");
-  for (const host of hosts) {
-    const root = (host as HTMLElement).shadowRoot;
-    if (!root) continue;
-    const buttons = root.querySelectorAll('button[aria-label="Exit"]');
-    for (const button of buttons) {
-      const rect = (button as HTMLElement).getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) return true;
-    }
-  }
-  return false;
-}
-
-/** One annotation as a compact chat quote: selector plus user comment. */
-function formatAnnotation(annotation: Annotation): string {
-  const inner = resolveInnerElement(annotation);
-  const label = inner?.label || annotation.element || "element";
-  const where = inner?.text
-    ? ` "${inner.text}"`
-    : annotation.selectedText
-      ? ` "${annotation.selectedText.slice(0, 120)}"`
-      : "";
-  const comment = (annotation.comment || "").trim();
-  return `[${label}${where}]${comment ? ` ${comment}` : ""}`;
-}
-
-/**
- * Agentation reports the top-level element (our iframe), so resolve the
- * precise element inside the same-origin prototype frame ourselves: map
- * the annotation box back into frame coordinates and hit test there.
- */
-function resolveInnerElement(
-  annotation: Annotation,
-): { label: string; text: string } | null {
-  try {
-    const box = annotation.boundingBox;
-    if (!box || box.width <= 0 || box.height <= 0) return null;
-    const frame = document.querySelector(
-      'iframe[title="Prototype"]',
-    ) as HTMLIFrameElement | null;
-    const content = frame?.contentDocument ?? null;
-    if (!frame || !content?.defaultView) return null;
-    const rect = frame.getBoundingClientRect();
-    const sx = frame.offsetWidth ? rect.width / frame.offsetWidth : 1;
-    const sy = frame.offsetHeight ? rect.height / frame.offsetHeight : 1;
-    const cx = (box.x + box.width / 2 - rect.left) / (sx || 1);
-    const cy = (box.y + box.height / 2 - rect.top) / (sy || 1);
-    const view = content.defaultView;
-    if (cx < 0 || cy < 0 || cx > view.innerWidth || cy > view.innerHeight) {
-      return null;
-    }
-    const el = content.elementFromPoint(cx, cy);
-    if (!el || el === content.body || el === content.documentElement) return null;
-    const tag = el.tagName.toLowerCase();
-    const text = ((el.textContent || "").trim().replace(/\s+/g, " ") || "").slice(0, 120);
-    const id = (el as HTMLElement).id || null;
-    const rawClass = (el as HTMLElement).className;
-    const classes =
-      typeof rawClass === "string"
-        ? rawClass.split(" ").filter(Boolean).slice(0, 2)
-        : [];
-    const label = id ? `${tag}#${id}` : classes.length ? `${tag}.${classes.join(".")}` : tag;
-    return { label, text };
-  } catch {
-    return null;
-  }
+/** Describe a prototype element the way a developer would name it. */
+function describeElement(el: Element): { label: string; text: string } {
+  const tag = el.tagName.toLowerCase();
+  const id = (el as HTMLElement).id;
+  const raw = (el as HTMLElement).className;
+  const classes =
+    typeof raw === "string" ? raw.split(/\s+/).filter(Boolean).slice(0, 2) : [];
+  const label = id
+    ? `${tag}#${id}`
+    : classes.length
+      ? `${tag}.${classes.join(".")}`
+      : tag;
+  // Only the element's own text: a wrapper's whole subtree would bury the
+  // actual component in the quote.
+  const own = Array.from(el.childNodes)
+    .filter((node) => node.nodeType === 3)
+    .map((node) => node.textContent || "")
+    .join(" ");
+  const source = own.trim() || (el.children.length === 0 ? el.textContent : "");
+  const text = ((source || "").trim().replace(/\s+/g, " ") || "").slice(0, 120);
+  return { label, text };
 }
 
 export default function DesignCanvas({
@@ -145,9 +107,13 @@ export default function DesignCanvas({
   html,
   onShapes,
   onQuoteToChat,
-  appName,
+  picking,
+  pickSession,
+  onPickingChange,
+  bottomInset,
 }: DesignCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const iframeRef = useRef<HTMLIFrameElement>(null);
   const [shapes, setShapes] = useState<CanvasShape[]>(() =>
     initialShapes ? [...initialShapes] : [],
   );
@@ -158,6 +124,9 @@ export default function DesignCanvas({
   const [draft, setDraft] = useState("");
   const [panning, setPanning] = useState(false);
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
+  const [hoverBox, setHoverBox] = useState<FrameBox | null>(null);
+  const [picked, setPicked] = useState<PickedComponent | null>(null);
+  const [comment, setComment] = useState("");
 
   const shapesRef = useRef(shapes);
   const transformRef = useRef(transform);
@@ -185,42 +154,111 @@ export default function DesignCanvas({
     draftRef.current = draft;
   });
 
-  // Prototype annotations go through Agentation: its toolbar activates
-  // annotate mode and it reports picks (including inside the frame)
-  // through onAnnotationAdd / onSubmit below.
-
-  // While Agentation's feedback mode is on, clicks outside the prototype
-  // frame would annotate MuseVibe's own UI. Window capture runs before the
-  // document listeners, so swallowing the event here keeps the scope on
-  // the canvas: the frame, the marker popups, and our own chrome stay
-  // clickable, everything else is ignored for the duration.
+  // Component picking binds straight into the same-origin prototype
+  // document, so the hover box and the pick line up with the real element
+  // instead of the outer iframe. A click in pick mode describes a change;
+  // it never runs the prototype.
   useEffect(() => {
-    const guard = (event: MouseEvent) => {
-      if (!isAnnotatingActive()) return;
-      const active = document.activeElement;
-      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
-      const path = event.composedPath();
-      for (const node of path) {
-        if (!(node instanceof HTMLElement)) continue;
-        if (node.tagName === "AGENTATION-TOOLBAR") return;
-        if (node.hasAttribute?.("data-canvas-chrome")) return;
-        if (
-          node.tagName === "IFRAME" &&
-          node.getAttribute("title") === "Prototype"
-        ) {
-          return;
-        }
-      }
-      event.stopPropagation();
-      event.preventDefault();
+    const frame = iframeRef.current;
+    if (!frame) return;
+    let unbind: (() => void) | null = null;
+    const bind = () => {
+      unbind?.();
+      unbind = null;
+      const doc = frame.contentDocument;
+      if (!picking || !doc) return;
+      const boxOf = (el: Element): FrameBox => {
+        const rect = el.getBoundingClientRect();
+        return { x: rect.x, y: rect.y, w: rect.width, h: rect.height };
+      };
+      const targetOf = (event: Event) => {
+        // Elements from the iframe belong to another realm, so instanceof
+        // checks against the parent window's Element always fail here.
+        const target = event.target as Node | null;
+        if (!target || target.nodeType !== 1) return null;
+        const el = target as Element;
+        if (el === doc.body || el === doc.documentElement) return null;
+        return el;
+      };
+      const onMove = (event: MouseEvent) => {
+        const target = targetOf(event);
+        setHoverBox(target ? boxOf(target) : null);
+      };
+      const onLeave = () => setHoverBox(null);
+      const onDown = (event: MouseEvent) => {
+        if (!targetOf(event)) return;
+        // Block the prototype's own handlers for the duration of the pick.
+        event.preventDefault();
+        event.stopPropagation();
+      };
+      const onClick = (event: MouseEvent) => {
+        const target = targetOf(event);
+        if (!target) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const { label, text } = describeElement(target);
+        setPicked({ label, text, box: boxOf(target), session: pickSession });
+        setHoverBox(null);
+        setComment("");
+      };
+      const onSubmit = (event: Event) => {
+        event.preventDefault();
+        event.stopPropagation();
+      };
+      // Crosshair everywhere inside the frame while picking, including
+      // elements that set their own pointer cursor.
+      const cursorStyle = doc.createElement("style");
+      cursorStyle.textContent =
+        "*, *::before, *::after { cursor: crosshair !important; }";
+      doc.head.appendChild(cursorStyle);
+      doc.addEventListener("mousemove", onMove, true);
+      doc.addEventListener("mouseleave", onLeave, true);
+      doc.addEventListener("mousedown", onDown, true);
+      doc.addEventListener("click", onClick, true);
+      doc.addEventListener("submit", onSubmit, true);
+      unbind = () => {
+        cursorStyle.remove();
+        doc.removeEventListener("mousemove", onMove, true);
+        doc.removeEventListener("mouseleave", onLeave, true);
+        doc.removeEventListener("mousedown", onDown, true);
+        doc.removeEventListener("click", onClick, true);
+        doc.removeEventListener("submit", onSubmit, true);
+      };
     };
-    window.addEventListener("click", guard, true);
-    window.addEventListener("mousedown", guard, true);
+    if (frame.contentDocument?.readyState === "complete") bind();
+    frame.addEventListener("load", bind);
     return () => {
-      window.removeEventListener("click", guard, true);
-      window.removeEventListener("mousedown", guard, true);
+      frame.removeEventListener("load", bind);
+      unbind?.();
     };
-  }, []);
+  }, [html, picking, pickSession]);
+
+  // Escape backs out one level: the comment card first, then the mode.
+  useEffect(() => {
+    if (!picking) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      if (picked && picked.session === pickSession) {
+        setPicked(null);
+        setComment("");
+        return;
+      }
+      onPickingChange(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [picking, picked, pickSession, onPickingChange]);
+
+  const submitComment = useCallback(() => {
+    if (!picked || picked.session !== pickSession) return;
+    const note = comment.trim();
+    if (!note) return;
+    const where = picked.text ? ` "${picked.text}"` : "";
+    onQuoteToChat(`[${picked.label}${where}] ${note}`);
+    setPicked(null);
+    setComment("");
+  }, [comment, picked, pickSession, onQuoteToChat]);
+
   // Persist edits, debounced. The seed echo is skipped so mounting never
   // dirties the store.
   useEffect(() => {
@@ -738,6 +776,7 @@ export default function DesignCanvas({
   }, [editingId, selectedId, commitDraft]);
 
   const cursor = useMemo(() => {
+    if (picking) return "crosshair";
     if (panning) return "grabbing";
     switch (tool) {
       case "hand":
@@ -751,7 +790,7 @@ export default function DesignCanvas({
       default:
         return "crosshair";
     }
-  }, [tool, panning]);
+  }, [picking, tool, panning]);
 
   const gridSize = transform.k * GRID;
   const gridX = ((transform.x % gridSize) + gridSize) % gridSize;
@@ -774,6 +813,31 @@ export default function DesignCanvas({
           y: selected.y * transform.k + transform.y,
         }
       : null;
+
+  // Picks from an earlier arming never resurface.
+  const activePick = picked && picked.session === pickSession ? picked : null;
+  // The hover box wins until a component is picked.
+  const pickBox = activePick?.box ?? hoverBox;
+  // The comment card sits under the picked element, flipping above it when
+  // the chat drawer would cover it. Kept inside the canvas either way.
+  const card = useMemo(() => {
+    if (!activePick) return null;
+    const width = 320;
+    const height = 172;
+    const gap = 10;
+    const margin = 12;
+    const left = Math.min(
+      Math.max(margin, transform.x + activePick.box.x * transform.k),
+      Math.max(margin, viewport.w - width - margin),
+    );
+    const below =
+      transform.y + (activePick.box.y + activePick.box.h) * transform.k + gap;
+    const above = transform.y + activePick.box.y * transform.k - height - gap;
+    const maxTop = Math.max(margin, viewport.h - bottomInset - height - margin);
+    const top =
+      below <= maxTop ? below : Math.min(Math.max(margin, above), maxTop);
+    return { left, top, width };
+  }, [activePick, transform, viewport, bottomInset]);
 
   return (
     <div
@@ -808,9 +872,9 @@ export default function DesignCanvas({
         }}
       >
         {/* Prototype frame with a Figma-style label. The iframe stays
-            interactive (same-origin) so the annotation toolbar can reach
-            the elements inside it; canvas gestures start from the area
-            around the frame, the minimap, or the wheel. */}
+            interactive (same-origin) so the component picker can read and
+            highlight the elements inside it; canvas gestures start from
+            the area around the frame, the minimap, or the wheel. */}
         <div className="absolute" style={{ left: 0, top: 0, width: FRAME_W, height: FRAME_H }}>
           <p className="pointer-events-none absolute -top-8 left-0 flex items-baseline gap-1.5 whitespace-nowrap">
             <span className="text-[13px] font-semibold text-[#f5f6f8]">Prototype</span>
@@ -818,6 +882,7 @@ export default function DesignCanvas({
           </p>
           <div className="h-full w-full overflow-hidden rounded-xl border border-white/15 bg-white shadow-2xl">
             <iframe
+              ref={iframeRef}
               title="Prototype"
               srcDoc={html}
               sandbox="allow-scripts allow-same-origin"
@@ -826,6 +891,20 @@ export default function DesignCanvas({
             />
           </div>
         </div>
+
+        {/* Pick highlight, drawn in frame space so it tracks pan and zoom. */}
+        {picking && pickBox && (
+          <div
+            aria-hidden
+            className="pointer-events-none absolute rounded-lg border-2 border-[#8ab4ff] bg-[#8ab4ff]/10"
+            style={{
+              left: pickBox.x,
+              top: pickBox.y,
+              width: pickBox.w,
+              height: pickBox.h,
+            }}
+          />
+        )}
 
         {/* Vector overlay. */}
         <svg className="absolute left-0 top-0 overflow-visible" width={1} height={1}>
@@ -981,16 +1060,61 @@ export default function DesignCanvas({
         />
       )}
 
-      <Agentation
-        appName={appName}
-        enableKeyboardShortcuts={false}
-        onAnnotationAdd={(annotation) => {
-          onQuoteToChat(formatAnnotation(annotation));
-        }}
-        onSubmit={(output) => {
-          if (output.trim()) onQuoteToChat(output.trim());
-        }}
-      />
+      {/* Change request for the picked component. The quote lands in the
+          chat input and never sends on its own, so picks stack. */}
+      {picking && activePick && card && (
+        <div
+          role="dialog"
+          aria-label="Describe the change"
+          onPointerDown={(event) => event.stopPropagation()}
+          className="absolute z-30 select-text rounded-2xl border border-white/15 bg-[#17181d] p-2.5 shadow-2xl"
+          style={{ left: card.left, top: card.top, width: card.width }}
+        >
+          <p className="truncate px-1 font-mono text-[11px] text-[#8ab4ff]">
+            {activePick.label}
+          </p>
+          {!!activePick.text && (
+            <p className="mt-0.5 truncate px-1 text-[11px] text-[#9aa0ae]">
+              {activePick.text}
+            </p>
+          )}
+          <textarea
+            autoFocus
+            rows={2}
+            value={comment}
+            onChange={(event) => setComment(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
+                event.preventDefault();
+                submitComment();
+              }
+            }}
+            placeholder="What should change here?"
+            aria-label="Change request"
+            className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-[#0b0c10] px-2.5 py-2 text-[13px] leading-5 text-[#f5f6f8] placeholder:text-[#5b6472] focus:border-white/25 focus:outline-none"
+          />
+          <div className="mt-2 flex items-center justify-end gap-1.5">
+            <button
+              type="button"
+              onClick={() => {
+                setPicked(null);
+                setComment("");
+              }}
+              className="h-7 rounded-full px-2.5 text-[12px] text-[#9aa0ae] hover:bg-white/5 hover:text-white"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={submitComment}
+              disabled={!comment.trim()}
+              className="h-7 rounded-full bg-white px-3 text-[12px] font-medium text-[#0b0c10] hover:bg-white/90 disabled:opacity-40"
+            >
+              Add
+            </button>
+          </div>
+        </div>
+      )}
 
       <CanvasChrome
         tool={tool}

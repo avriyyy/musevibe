@@ -198,6 +198,19 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [chatHeight, setChatHeight] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatDraft, setChatDraft] = useState<{ id: number; text: string } | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [pickSession, setPickSession] = useState(0);
+
+  // The component picker only lives on the design canvas and needs the
+  // composer open, so leaving either one disarms it.
+  const changeView = useCallback((next: View) => {
+    setPicking(false);
+    setView(next);
+  }, []);
+  const changeChatOpen = useCallback((next: boolean) => {
+    if (!next) setPicking(false);
+    setChatOpen(next);
+  }, []);
 
   // Quote something into the chat input (appended, never auto-sent) and
   // reveal the composer so the user sees it land.
@@ -638,9 +651,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 key={tab}
                 type="button"
                 onClick={() => {
-                  if (tab === "documents") setView({ kind: "documents" });
-                  else if (tab === "tasks") setView({ kind: "tasks" });
-                  else setView({ kind: "design" });
+                  if (tab === "documents") changeView({ kind: "documents" });
+                  else if (tab === "tasks") changeView({ kind: "tasks" });
+                  else changeView({ kind: "design" });
                 }}
                 aria-current={selected || undefined}
                 className={`h-7 rounded-full px-4 text-[13px] font-medium capitalize transition-colors ${
@@ -662,9 +675,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             label="Workspace view"
             value={activeTab}
             onChange={(next) => {
-              if (next === "documents") setView({ kind: "documents" });
-              else if (next === "design") setView({ kind: "design" });
-              else if (next === "tasks") setView({ kind: "tasks" });
+              if (next === "documents") changeView({ kind: "documents" });
+              else if (next === "design") changeView({ kind: "design" });
+              else if (next === "tasks") changeView({ kind: "tasks" });
             }}
             size="sm"
             layout="fill"
@@ -781,7 +794,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                       handleShapes(prototypeScreen.id, shapesJson)
                     }
                     onQuoteToChat={(text) => quoteToChat(text)}
-                    appName={project.name}
+                    picking={picking}
+                    pickSession={pickSession}
+                    onPickingChange={setPicking}
+                    bottomInset={chatHeight}
                   />
                 ) : (
                   <div className="grid h-full place-items-center px-5">
@@ -819,10 +835,16 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         docs={docs}
         tasks={tasks}
         open={chatOpen}
-        onOpenChange={setChatOpen}
+        onOpenChange={changeChatOpen}
         draft={chatDraft}
         onDraftConsumed={() => setChatDraft(null)}
         onHeightChange={setChatHeight}
+        canPick={view.kind === "design" && !!prototypeFile}
+        picking={picking}
+        onTogglePick={() => {
+          setPicking((prev) => !prev);
+          setPickSession((n) => n + 1);
+        }}
       />
     </div>
   );
