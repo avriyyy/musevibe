@@ -925,8 +925,8 @@ export default function DesignCanvas({
           key={inspected.tag + inspected.text}
           node={inspected}
           onCancel={clearInspected}
-          onAdd={() => {
-            onMention(nodeLabel(inspected), inspected.text || nodeLabel(inspected));
+          onAdd={(message) => {
+            onMention(nodeLabel(inspected), message);
             clearInspected();
           }}
         />

@@ -33,7 +33,6 @@ import {
 } from "@heroicons/react/24/outline";
 import DocumentsView from "@/components/DocumentsView";
 import WorkspaceChat from "@/components/WorkspaceChat";
-import type { Mention } from "@/lib/chat";
 import { parseCanvasShapes, type CanvasShape } from "@/lib/canvas";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
@@ -198,37 +197,16 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [chatHeight, setChatHeight] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
-  const [mentions, setMentions] = useState<Mention[]>([]);
+  const [chatDraft, setChatDraft] = useState<{ id: number; text: string } | null>(null);
 
-  const addMention = useCallback(
-    (mention: Omit<Mention, "id">) => {
-      const id =
-        typeof crypto !== "undefined" && "randomUUID" in crypto
-          ? `mention-${crypto.randomUUID()}`
-          : `mention-${Date.now()}`;
-      setMentions((prev) =>
-        prev.length >= 8 ? prev : [...prev, { ...mention, id }],
-      );
-      setChatOpen(true);
-    },
-    [],
-  );
-
-  const removeMention = useCallback((id: string) => {
-    setMentions((prev) => prev.filter((entry) => entry.id !== id));
+  // Quote something into the chat input (appended, never auto-sent) and
+  // reveal the composer so the user sees it land.
+  const quoteToChat = useCallback((text: string) => {
+    const piece = text.trim();
+    if (!piece) return;
+    setChatDraft({ id: Date.now(), text: piece });
+    setChatOpen(true);
   }, []);
-
-  const clearMentions = useCallback(() => {
-    setMentions([]);
-  }, []);
-
-  // Mentions belong to one project; drop them when switching projects.
-  // Render-phase reset (no effect): the guard flips false immediately.
-  const [mentionProject, setMentionProject] = useState(projectId);
-  if (mentionProject !== projectId) {
-    setMentionProject(projectId);
-    setMentions([]);
-  }
   const [phase, setPhase] = useState<Phase>(null);
   const [docBusy, setDocBusy] = useState<string | null>(null);
   const [protoBusy, setProtoBusy] = useState(false);
@@ -725,7 +703,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               activeDoc={activeDoc}
               bottomPad={chatHeight}
               onQuote={(label, text) =>
-                addMention({ kind: "doc", label, text })
+                quoteToChat(`> "${text}" — ${label}`)
               }
               canGenerate={!!activeDoc && activeDoc.kind !== "note"}
               generating={!!activeDoc && docBusy === activeDoc.id}
@@ -781,11 +759,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                     }}
                     onClose={() => setSelectedTaskId(null)}
                     onQuote={() =>
-                      addMention({
-                        kind: "task",
-                        label: selectedTask.title || "Untitled task",
-                        text: `Status: ${selectedTask.status}${selectedTask.notes ? ` Notes: ${selectedTask.notes}` : ""}`,
-                      })
+                      quoteToChat(
+                        `[Task: ${selectedTask.title || "Untitled task"} (${selectedTask.status})]${selectedTask.notes ? ` ${selectedTask.notes.slice(0, 200)}` : ""}`,
+                      )
                     }
                   />
                 </>
@@ -805,7 +781,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                       handleShapes(prototypeScreen.id, shapesJson)
                     }
                     onMention={(label, text) =>
-                      addMention({ kind: "component", label, text })
+                      quoteToChat(`[${label}]${text ? ` ${text}` : ""}`)
                     }
                   />
                 ) : (
@@ -845,9 +821,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         tasks={tasks}
         open={chatOpen}
         onOpenChange={setChatOpen}
-        mentions={mentions}
-        onRemoveMention={removeMention}
-        onMentionsSent={clearMentions}
+        draft={chatDraft}
+        onDraftConsumed={() => setChatDraft(null)}
         onHeightChange={setChatHeight}
       />
     </div>

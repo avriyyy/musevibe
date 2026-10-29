@@ -10,7 +10,7 @@
 import { useEffect, useRef, useState } from "react";
 import Markdown from "./Markdown";
 import { blobToWav } from "@/lib/audio";
-import { buildChatPrompt, type ChatMessage, type Mention } from "@/lib/chat";
+import { buildChatPrompt, type ChatMessage } from "@/lib/chat";
 import {
   FALLBACK_MODELS,
   formatModelLabel,
@@ -24,12 +24,12 @@ interface WorkspaceChatProps {
   brief: string;
   docs: ProjectDoc[];
   tasks: Task[];
-  mentions: Mention[];
-  onRemoveMention: (id: string) => void;
-  onMentionsSent?: () => void;
   onHeightChange?: (height: number) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Quoted selections appended into the input, newest wins. */
+  draft: { id: number; text: string } | null;
+  onDraftConsumed?: () => void;
 }
 
 interface ChatTurn extends ChatMessage {
@@ -43,12 +43,11 @@ export default function WorkspaceChat({
   brief,
   docs,
   tasks,
-  mentions,
-  onRemoveMention,
-  onMentionsSent,
   onHeightChange,
   open,
   onOpenChange,
+  draft,
+  onDraftConsumed,
 }: WorkspaceChatProps) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
@@ -67,22 +66,34 @@ export default function WorkspaceChat({
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const stateRef = useRef({ project, brief, docs, tasks, mentions, onMentionsSent });
+  const stateRef = useRef({ project, brief, docs, tasks });
+  const draftSeenRef = useRef<number | null>(null);
 
   // Thread state resets via the keyed remount in the parent.
 
   // Latest project snapshot for in-flight requests.
   useEffect(() => {
-    stateRef.current = {
-      project,
-      brief,
-      docs,
-      tasks,
-      mentions,
-      onMentionsSent,
-    };
+    stateRef.current = { project, brief, docs, tasks };
     heightRef.current = onHeightChange;
   });
+
+  // A quoted selection lands in the input (appended, never sent
+  // automatically) so several picks can stack before sending.
+  useEffect(() => {
+    if (!draft || draftSeenRef.current === draft.id) return;
+    draftSeenRef.current = draft.id;
+    onOpenChange(true);
+    setInput((prev) => {
+      const trimmed = prev.trim();
+      const piece = draft.text.trim();
+      if (!piece) return prev;
+      if (trimmed.endsWith(piece)) return prev;
+      return trimmed ? `${trimmed}\n${piece}` : piece;
+    });
+    inputRef.current?.focus();
+    onDraftConsumed?.();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft]);
 
   // Discover chat models once; the curated list covers offline runs.
   useEffect(() => {
@@ -180,8 +191,6 @@ export default function WorkspaceChat({
         brief: currentBrief,
         docs: currentDocs,
         tasks: currentTasks,
-        mentions: currentMentions,
-        onMentionsSent: clearMentions,
       } = stateRef.current;
       const response = await fetch("/api/ai/generate", {
         method: "POST",
@@ -195,7 +204,6 @@ export default function WorkspaceChat({
             currentTasks,
             next,
             message,
-            currentMentions,
           ),
           ...(currentProject.model ? { model: currentProject.model } : {}),
         }),
@@ -213,7 +221,6 @@ export default function WorkspaceChat({
         ...prev,
         { role: "assistant", content: text, offline: data.source !== "ai" },
       ]);
-      if (currentMentions.length) clearMentions?.();
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "The chat request failed.",
@@ -225,10 +232,6 @@ export default function WorkspaceChat({
       setBusy(false);
     }
   };
-
-  // Mention chips queued from canvas, document, or task selections are
-  // sent with the next prompt; the input row renders them below.
-
 
   const transcribeClip = async (mimeType: string) => {
     const blob = new Blob(chunksRef.current, { type: mimeType || "audio/webm" });
@@ -436,40 +439,6 @@ export default function WorkspaceChat({
               void send();
             }}
           >
-            {mentions.length > 0 && (
-              <div className="mb-1.5 flex flex-wrap gap-1.5" aria-label="Attached context">
-                {mentions.map((mention) => (
-                  <span
-                    key={mention.id}
-                    className="flex max-w-full items-center gap-1 rounded-lg border border-white/15 bg-white/10 py-1 pl-2.5 pr-1 text-[12px] font-medium text-[#f5f6f8]"
-                  >
-                    <span className="shrink-0 font-mono text-[10px] uppercase tracking-wide text-[#9aa0ae]">
-                      {mention.kind === "component" ? "UI" : mention.kind === "doc" ? "Doc" : "Task"}
-                    </span>
-                    <span className="truncate">{mention.label}</span>
-                    <button
-                      type="button"
-                      onClick={() => onRemoveMention(mention.id)}
-                      aria-label={`Remove ${mention.label} from chat context`}
-                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md text-[#9aa0ae] hover:bg-white/10 hover:text-white"
-                    >
-                      <svg
-                        aria-hidden
-                        width="10"
-                        height="10"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="currentColor"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                      >
-                        <path d="M6 6l12 12M18 6L6 18" />
-                      </svg>
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
             <input
               ref={inputRef}
               value={input}
@@ -477,7 +446,7 @@ export default function WorkspaceChat({
               placeholder="Ask or change anything…"
               aria-label="Ask about this project"
               disabled={busy}
-              className="mt-1 h-9 w-full bg-transparent text-[14px] text-[#f5f6f8] placeholder:text-[#5b6472] focus:outline-none disabled:opacity-50"
+              className="h-9 w-full bg-transparent text-[14px] text-[#f5f6f8] placeholder:text-[#5b6472] focus:outline-none disabled:opacity-50"
             />
             <div className="mt-1 flex items-center gap-1.5">
               <div ref={pickerRef} className="relative ml-auto shrink-0">
