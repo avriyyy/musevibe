@@ -475,12 +475,9 @@ export default function DesignCanvas({
           event.preventDefault();
           event.stopPropagation();
         };
-        // Crosshair everywhere inside the frame while picking, including
-        // elements that set their own pointer cursor.
-        const cursorStyle = doc.createElement("style");
-        cursorStyle.textContent =
-          "*, *::before, *::after { cursor: crosshair !important; }";
-        doc.head.appendChild(cursorStyle);
+        // No cursor override inside frames: the page keeps its own cursors
+        // and pick mode already shows through the blue highlight, the
+        // composer state, and the picking pill.
         if (picking) {
           doc.addEventListener("mousemove", onMove, true);
           doc.addEventListener("mouseleave", onLeave, true);
@@ -490,7 +487,6 @@ export default function DesignCanvas({
         }
         unbind = () => {
           baseUnbind();
-          cursorStyle.remove();
           doc.removeEventListener("mousemove", onMove, true);
           doc.removeEventListener("mouseleave", onLeave, true);
           doc.removeEventListener("mousedown", onDown, true);
