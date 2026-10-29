@@ -314,6 +314,51 @@ export default function DesignCanvas({
     draftRef.current = draft;
   });
 
+  const zoomBy = useCallback((factor: number, cx?: number, cy?: number) => {
+    const el = containerRef.current;
+    const rect = el?.getBoundingClientRect();
+    const px = cx ?? (rect?.width ?? 0) / 2;
+    const py = cy ?? (rect?.height ?? 0) / 2;
+    setTransform((prev) => {
+      const k = Math.min(3, Math.max(0.1, prev.k * factor));
+      const s = k / prev.k;
+      return { k, x: px - (px - prev.x) * s, y: py - (py - prev.y) * s };
+    });
+  }, []);
+
+  // One wheel implementation for the canvas and every frame: plain
+  // scroll pans (two-finger swipe on a touchpad), pinch-to-zoom arrives
+  // as ctrl+wheel and zooms to the cursor.
+  const applyWheel = useCallback(
+    (event: {
+      deltaX: number;
+      deltaY: number;
+      deltaMode: number;
+      ctrlKey: boolean;
+      metaKey: boolean;
+      clientX: number;
+      clientY: number;
+    }) => {
+      const el = containerRef.current;
+      if (!el) return;
+      const rect = el.getBoundingClientRect();
+      if (event.ctrlKey || event.metaKey) {
+        const unit = event.deltaMode === 1 ? 16 : 1;
+        zoomBy(
+          Math.exp(-event.deltaY * unit * 0.004),
+          event.clientX - rect.left,
+          event.clientY - rect.top,
+        );
+        return;
+      }
+      const unit = event.deltaMode === 1 ? 16 : 1;
+      const dx = event.deltaX * unit;
+      const dy = event.deltaY * unit;
+      setTransform((prev) => ({ ...prev, x: prev.x - dx, y: prev.y - dy }));
+    },
+    [zoomBy],
+  );
+
   // Component picking binds straight into each same-origin frame
   // document, so the hover box and the pick line up with the real element
   // instead of the outer iframe. A click in pick mode describes a change;
@@ -323,7 +368,6 @@ export default function DesignCanvas({
     .map((frame) => `${frame.id}:${frame.html?.length ?? 0}`)
     .join("|");
   useEffect(() => {
-    if (!picking) return;
     const cleanups: Array<() => void> = [];
     frames.forEach((frame, index) => {
       if (!frame.html) return;
@@ -336,6 +380,41 @@ export default function DesignCanvas({
         unbind = null;
         const doc = el.contentDocument;
         if (!doc) return;
+        // A frame shows exactly one generated page: links never leave it.
+        // Hash jumps stay, everything else is swallowed. Prototype scripts
+        // still run because this never stops propagation.
+        const blockLink = (event: Event) => {
+          const target = event.target as Element | null;
+          const anchor = target?.closest?.("a[href]");
+          if (!anchor) return;
+          const href = anchor.getAttribute("href") || "";
+          if (!href.startsWith("#")) event.preventDefault();
+        };
+        // Forms never navigate away either; inline handlers still run.
+        const blockSubmit = (event: Event) => event.preventDefault();
+        // Two-finger swipe over a frame pans the canvas instead of
+        // triggering the browser's back gesture.
+        const noOverscroll = doc.createElement("style");
+        noOverscroll.textContent =
+          "html,body{overscroll-behavior:none !important;}";
+        doc.head.appendChild(noOverscroll);
+        const forwardWheel = (event: WheelEvent) => {
+          event.preventDefault();
+          event.stopPropagation();
+          applyWheel(event);
+        };
+        doc.addEventListener("click", blockLink, true);
+        doc.addEventListener("submit", blockSubmit, true);
+        doc.addEventListener("wheel", forwardWheel, {
+          passive: false,
+          capture: true,
+        });
+        const baseUnbind = () => {
+          noOverscroll.remove();
+          doc.removeEventListener("click", blockLink, true);
+          doc.removeEventListener("submit", blockSubmit, true);
+          doc.removeEventListener("wheel", forwardWheel, { capture: true });
+        };
         const targetOf = (event: Event) => {
           // Elements from the iframe belong to another realm, so instanceof
           // checks against the parent window's Element always fail here.
@@ -376,12 +455,15 @@ export default function DesignCanvas({
         cursorStyle.textContent =
           "*, *::before, *::after { cursor: crosshair !important; }";
         doc.head.appendChild(cursorStyle);
-        doc.addEventListener("mousemove", onMove, true);
-        doc.addEventListener("mouseleave", onLeave, true);
-        doc.addEventListener("mousedown", onDown, true);
-        doc.addEventListener("click", onClick, true);
-        doc.addEventListener("submit", onSubmit, true);
+        if (picking) {
+          doc.addEventListener("mousemove", onMove, true);
+          doc.addEventListener("mouseleave", onLeave, true);
+          doc.addEventListener("mousedown", onDown, true);
+          doc.addEventListener("click", onClick, true);
+          doc.addEventListener("submit", onSubmit, true);
+        }
         unbind = () => {
+          baseUnbind();
           cursorStyle.remove();
           doc.removeEventListener("mousemove", onMove, true);
           doc.removeEventListener("mouseleave", onLeave, true);
@@ -401,8 +483,9 @@ export default function DesignCanvas({
       for (const cleanup of cleanups) cleanup();
     };
     // Rebind when frame HTML swaps; origins come from the same order.
+    // applyWheel is stable, so it never rebuilds the bindings on its own.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [framesKey, picking, pickSession]);
+  }, [framesKey, picking, pickSession, applyWheel]);
 
   // Escape backs out one level: the comment card first, then the mode.
   useEffect(() => {
@@ -507,18 +590,6 @@ export default function DesignCanvas({
     return () => observer.disconnect();
   }, []);
 
-  const zoomBy = useCallback((factor: number, cx?: number, cy?: number) => {
-    const el = containerRef.current;
-    const rect = el?.getBoundingClientRect();
-    const px = cx ?? (rect?.width ?? 0) / 2;
-    const py = cy ?? (rect?.height ?? 0) / 2;
-    setTransform((prev) => {
-      const k = Math.min(3, Math.max(0.1, prev.k * factor));
-      const s = k / prev.k;
-      return { k, x: px - (px - prev.x) * s, y: py - (py - prev.y) * s };
-    });
-  }, []);
-
   const resetZoom = useCallback(() => {
     const el = containerRef.current;
     const rect = el?.getBoundingClientRect();
@@ -530,33 +601,18 @@ export default function DesignCanvas({
     });
   }, []);
 
-  // Wheel: plain scroll pans the canvas (two-finger swipe on a
-  // touchpad), while pinch-to-zoom arrives as ctrl+wheel and zooms to
-  // the cursor. React attaches wheel as passive, so this needs a
-  // non-passive listener to preventDefault.
+  // React attaches wheel as passive, so this needs a non-passive listener
+  // to preventDefault.
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const handler = (event: WheelEvent) => {
       event.preventDefault();
-      const rect = el.getBoundingClientRect();
-      if (event.ctrlKey || event.metaKey) {
-        const unit = event.deltaMode === 1 ? 16 : 1;
-        zoomBy(
-          Math.exp(-event.deltaY * unit * 0.004),
-          event.clientX - rect.left,
-          event.clientY - rect.top,
-        );
-        return;
-      }
-      const unit = event.deltaMode === 1 ? 16 : 1;
-      const dx = event.deltaX * unit;
-      const dy = event.deltaY * unit;
-      setTransform((prev) => ({ ...prev, x: prev.x - dx, y: prev.y - dy }));
+      applyWheel(event);
     };
     el.addEventListener("wheel", handler, { passive: false });
     return () => el.removeEventListener("wheel", handler);
-  }, [zoomBy]);
+  }, [applyWheel]);
 
   const eraseAt = useCallback((sx: number, sy: number) => {
     const hit = shapeAt(shapesRef.current, sx, sy, 8 / transformRef.current.k);
