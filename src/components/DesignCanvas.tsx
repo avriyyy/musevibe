@@ -49,6 +49,8 @@ export interface CanvasFrame {
   subtitle: string;
   /** Null while the page has no HTML yet. */
   html: string | null;
+  /** Same-origin URL rendered instead of srcDoc (template preview pages). */
+  src?: string;
   kind: "page" | "suggest";
   /** One-line content note for pending pages. */
   brief?: string;
@@ -365,12 +367,12 @@ export default function DesignCanvas({
   // it never runs the prototype. Boxes are offset by the frame's origin so
   // the shared overlay lines up across frames.
   const framesKey = frames
-    .map((frame) => `${frame.id}:${frame.html?.length ?? 0}`)
+    .map((frame) => `${frame.id}:${frame.src ?? ""}:${frame.html?.length ?? 0}`)
     .join("|");
   useEffect(() => {
     const cleanups: Array<() => void> = [];
     frames.forEach((frame, index) => {
-      if (!frame.html) return;
+      if (!frame.html && !frame.src) return;
       const el = iframeRefs.current.get(frame.id);
       if (!el) return;
       const originX = frameLeft(index);
@@ -1139,7 +1141,7 @@ export default function DesignCanvas({
               onSuggestPages={onSuggestPages}
               onGenerateAll={onGenerateAll}
             />
-          ) : frame.html ? (
+          ) : frame.html || frame.src ? (
             <div
               key={frame.id}
               className="absolute"
@@ -1176,7 +1178,9 @@ export default function DesignCanvas({
                     else iframeRefs.current.delete(frame.id);
                   }}
                   title={frame.title}
-                  srcDoc={frame.html}
+                  {...(frame.src
+                    ? { src: frame.src }
+                    : { srcDoc: frame.html ?? "" })}
                   sandbox="allow-scripts allow-same-origin"
                   tabIndex={-1}
                   className="h-full w-full"

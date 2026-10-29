@@ -61,6 +61,7 @@ import {
   fallbackTasks,
   parseTasks,
 } from "@/lib/plan";
+import { DESIGN_SYSTEMS } from "@/lib/design-systems-catalog";
 import {
   SHOWCASE_PATH,
   buildPagePlanPrompt,
@@ -251,6 +252,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [suggesting, setSuggesting] = useState(false);
   const [generatingSlugs, setGeneratingSlugs] = useState<ReadonlySet<string>>(new Set());
   const showcaseRequestedRef = useRef("");
+  type PrepStepId = "documents" | "tasks" | "design";
+  const [prepActive, setPrepActive] = useState<PrepStepId | null>(null);
+  const [prepDoneIds, setPrepDoneIds] = useState<PrepStepId[]>([]);
+  const preparedRef = useRef(false);
   const [tasksLocal, setTasksLocal] = useState(false);
   const [error, setError] = useState("");
   const runningRef = useRef(false);
@@ -347,42 +352,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     [projectId],
   );
 
-  useEffect(() => {
-    if (!hydrated || !project || startedRef.current) return;
-    if (project.status === "draft") return;
-    startedRef.current = true;
-    // Start after this effect finishes; the first state update belongs to the
-    // request, not to the render that mounted the page.
-    queueMicrotask(() => {
-      void runPlan(false);
-    });
-  }, [hydrated, project, runPlan]);
-
-  // The Plan documents seed once per project: the six engineering docs.
-  // The PRD inherits whatever the brief holds at seed time; the brief
-  // generator writes back to it afterwards, so they never drift apart.
-  useEffect(() => {
-    if (!project || project.status === "draft") return;
-    const state = useVibe.getState();
-    if (state.docsByProject[projectId] !== undefined) return;
-    const now = new Date().toISOString();
-    state.seedDocs(projectId, [
-      {
-        id: "doc-prd",
-        kind: "prd",
-        title: "PRD",
-        markdown: state.prdByProject[projectId] ?? "",
-        updatedAt: now,
-      },
-      ...DOC_TYPES.filter((entry) => entry.kind !== "prd").map((entry) => ({
-        id: `doc-${entry.kind}`,
-        kind: entry.kind,
-        title: entry.label,
-        markdown: "",
-        updatedAt: now,
-      })),
-    ]);
-  }, [project, projectId]);
 
   // Design keeps exactly one canvas, named Prototype. An older multi-canvas
   // project adopts its first non-plan canvas; the rest stay orphaned in
@@ -489,6 +458,22 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     [projectId],
   );
 
+  const dsEntry = useMemo(() => {
+    const dsId =
+      project?.designSystem?.source === "template"
+        ? project.designSystem.id
+        : "minimal";
+    return (
+      DESIGN_SYSTEMS.find((entry) => entry.id === dsId) ??
+      DESIGN_SYSTEMS.find((entry) => entry.id === "minimal")
+    );
+  }, [project?.designSystem]);
+  // Template systems show their real preview pages; custom ones (upload /
+  // link) keep one generated showcase frame.
+  const useTemplatePreviews =
+    (!project?.designSystem ||
+      project.designSystem.source === "template") &&
+    (dsEntry?.previews.length ?? 0) > 0;
   /** First frame on the canvas: the chosen design system as a gallery page. */
   const generateShowcase = useCallback(async () => {
     const state = useVibe.getState();
@@ -527,9 +512,11 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   }, [projectId, showcaseBusy, saveHtmlFile]);
 
   // Draw the showcase once per project, so the design tab opens on the
-  // system instead of an empty canvas.
+  // system instead of an empty canvas. Template systems show their real
+  // preview pages, so only custom systems need a generated showcase.
   useEffect(() => {
     if (!project || project.status === "draft") return;
+    if (useTemplatePreviews) return;
     const state = useVibe.getState();
     // Files load lazily; an unseeded project has no entry yet.
     if (state.filesByProject[projectId] === undefined) return;
@@ -623,6 +610,164 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       await generatePage(page.slug);
     }
   }, [projectId, generatePage]);
+
+  /**
+   * First-run preparation behind a blur overlay: seed the six plan docs
+   * and generate all of them, then tasks, then the page plan and the
+   * first recommended page. Everything lands before the blur lifts, so
+   * the project opens complete instead of half-empty. Later mounts skip
+   * this; the manual buttons cover any gaps.
+   */
+  const prepareProject = useCallback(async () => {
+    const state0 = useVibe.getState();
+    const current0 = state0.projects.find((entry) => entry.id === projectId);
+    if (!current0) return;
+    const localDraft = (doc: ProjectDoc) =>
+      `# ${doc.title} (local draft)\n\n> The model is unavailable, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${current0.idea}\n`;
+    setPrepDoneIds([]);
+    setPrepActive("documents");
+    try {
+      // Seed the six plan documents once.
+      let st = useVibe.getState();
+      if (st.docsByProject[projectId] === undefined) {
+        const now = new Date().toISOString();
+        st.seedDocs(projectId, [
+          {
+            id: "doc-prd",
+            kind: "prd",
+            title: "PRD",
+            markdown: "",
+            updatedAt: now,
+          },
+          ...DOC_TYPES.filter((entry) => entry.kind !== "prd").map(
+            (entry) => ({
+              id: `doc-${entry.kind}`,
+              kind: entry.kind,
+              title: entry.label,
+              markdown: "",
+              updatedAt: now,
+            }),
+          ),
+        ]);
+      }
+      // Product brief (PRD), then the other five documents in parallel.
+      let brief = useVibe.getState().prdByProject[projectId] ?? "";
+      if (!brief.trim()) {
+        try {
+          const reply = await requestAi(
+            "prd",
+            buildPrdPrompt(current0),
+            current0.model,
+          );
+          brief =
+            reply.source === "ai" && reply.text.trim()
+              ? reply.text.trim()
+              : fallbackPrd(current0);
+        } catch {
+          brief = fallbackPrd(current0);
+          setError(
+            "The model did not answer, so this brief was drafted from your setup answers.",
+          );
+        }
+        useVibe.getState().setPrd(projectId, brief);
+      }
+      saveDocMarkdown("doc-prd", brief);
+      const rest = (
+        useVibe.getState().docsByProject[projectId] ?? []
+      ).filter((doc) => doc.kind !== "prd" && doc.kind !== "note");
+      await Promise.all(
+        rest.map(async (doc) => {
+          try {
+            const reply = await requestAi(
+              "doc",
+              buildDocPrompt(doc.kind as DocKind, current0, brief),
+              current0.model,
+            );
+            const markdown = parseDocMarkdown(reply.text);
+            saveDocMarkdown(
+              doc.id,
+              markdown.trim() ? markdown : localDraft(doc),
+            );
+          } catch {
+            saveDocMarkdown(doc.id, localDraft(doc));
+          }
+        }),
+      );
+      setPrepDoneIds(["documents"]);
+      setPrepActive("tasks");
+      // Task board.
+      st = useVibe.getState();
+      if (!(st.tasksByProject[projectId] ?? []).length) {
+        try {
+          const reply = await requestAi(
+            "tasks",
+            buildTasksPrompt(current0, brief),
+            current0.model,
+          );
+          const parsed =
+            reply.source === "ai"
+              ? parseTasks(reply.text, `task-${projectId.slice(0, 8)}`)
+              : null;
+          if (parsed) {
+            useVibe.getState().setTasks(projectId, parsed);
+          } else {
+            useVibe.getState().setTasks(projectId, fallbackTasks(current0));
+            setTasksLocal(true);
+          }
+        } catch {
+          useVibe.getState().setTasks(projectId, fallbackTasks(current0));
+          setTasksLocal(true);
+        }
+      }
+      setPrepDoneIds(["documents", "tasks"]);
+      setPrepActive("design");
+      // Page plan, suggested automatically, then the first page.
+      st = useVibe.getState();
+      let plan =
+        st.projects.find((entry) => entry.id === projectId)?.pagePlan ?? null;
+      if (!plan) {
+        try {
+          const reply = await requestAi(
+            "pages",
+            buildPagePlanPrompt(current0.name, current0.idea, brief),
+            current0.model,
+          );
+          plan = parsePagePlan(reply.text) ?? fallbackPagePlan();
+        } catch {
+          plan = fallbackPagePlan();
+        }
+        useVibe.getState().updateProject(projectId, { pagePlan: plan });
+      }
+      const first = plan[0];
+      st = useVibe.getState();
+      if (
+        first &&
+        !(st.filesByProject[projectId] ?? []).some(
+          (file) => file.path === pageFilePath(first.slug),
+        )
+      ) {
+        await generatePage(first.slug);
+      }
+      setPrepDoneIds(["documents", "tasks", "design"]);
+    } finally {
+      setPrepActive(null);
+    }
+  }, [projectId, saveDocMarkdown, generatePage]);
+
+  // Fresh projects prepare once behind the blur overlay. Anything already
+  // seeded keeps the old lazy path: the effects below fill the gaps.
+  useEffect(() => {
+    if (!hydrated || !project || project.status === "draft") return;
+    if (preparedRef.current) return;
+    const st = useVibe.getState();
+    if (st.docsByProject[projectId] !== undefined) return;
+    preparedRef.current = true;
+    // Start after this effect finishes; the first state update belongs to
+    // the request, not to the render that mounted the page.
+    queueMicrotask(() => {
+      void prepareProject();
+    });
+  }, [hydrated, project, projectId, prepareProject]);
 
   const handleShapes = useCallback(
     (screenId: string, shapesJson: string) => {
@@ -726,20 +871,36 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const planDone = pagePlan !== null && pendingPageCount === 0;
   const designFrames: CanvasFrame[] = useMemo(() => {
     const list: CanvasFrame[] = [];
-    const showcase =
-      files.find((file) => file.path === SHOWCASE_PATH) ?? null;
-    list.push({
-      id: SHOWCASE_PATH,
-      title: "Design system",
-      subtitle: showcase
-        ? `${project?.designSystem?.name ?? "Minimal"} · ${FRAME_W} × ${FRAME_H}`
-        : showcaseBusy
-          ? "drawing…"
-          : "not yet drawn",
-      html: showcase?.content ?? null,
-      kind: "page",
-      busy: showcaseBusy && !showcase,
-    });
+    // Template systems show their real preview pages first: actual colors,
+    // type, and spacing instead of a generated stand-in. Custom systems
+    // (upload/link) keep one generated showcase frame below.
+    if (useTemplatePreviews && dsEntry) {
+      for (const preview of dsEntry.previews) {
+        list.push({
+          id: `ds-${preview.role}`,
+          title: `Design system · ${preview.title}`,
+          subtitle: dsEntry.name,
+          html: null,
+          src: `/design-systems/${dsEntry.id}/${preview.path}`,
+          kind: "page",
+        });
+      }
+    } else {
+      const showcase =
+        files.find((file) => file.path === SHOWCASE_PATH) ?? null;
+      list.push({
+        id: SHOWCASE_PATH,
+        title: "Design system",
+        subtitle: showcase
+          ? `${project?.designSystem?.name ?? "Minimal"} · ${FRAME_W} × ${FRAME_H}`
+          : showcaseBusy
+            ? "drawing…"
+            : "not yet drawn",
+        html: showcase?.content ?? null,
+        kind: "page",
+        busy: showcaseBusy && !showcase,
+      });
+    }
     for (const page of pagePlan ?? []) {
       const file = files.find((entry) => entry.path === pageFilePath(page.slug));
       // Already generated, or the single next recommendation: everything
@@ -781,7 +942,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     pagePlan,
     nextPage?.slug,
     pendingPageCount,
-    project?.designSystem,
+    useTemplatePreviews,
+    dsEntry,
     showcaseBusy,
     generatingSlugs,
   ]);
@@ -1172,6 +1334,75 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           setPickSession((n) => n + 1);
         }}
       />
+      {prepActive && (
+        <div
+          role="status"
+          aria-live="polite"
+          aria-label="Preparing your project"
+          className="fixed inset-0 z-50 grid place-items-center bg-[#0b0c10]/70 px-5 backdrop-blur-md"
+        >
+          <div className="w-[min(360px,calc(100vw-3rem))] rounded-2xl border border-white/10 bg-[#17181d] p-5 shadow-2xl">
+            <p className="text-[15px] font-semibold text-[#f5f6f8]">
+              Preparing your project
+            </p>
+            <p className="mt-1 text-[12px] leading-5 text-[#9aa0ae]">
+              Generating the plan documents, tasks, and design frames.
+            </p>
+            <ul className="mt-4 space-y-2.5">
+              {(
+                [
+                  { id: "documents", label: "Plan documents" },
+                  { id: "tasks", label: "Tasks" },
+                  { id: "design", label: "Design canvas" },
+                ] as const
+              ).map((step) => {
+                const done = prepDoneIds.includes(step.id);
+                const active = prepActive === step.id;
+                return (
+                  <li key={step.id} className="flex items-center gap-2.5">
+                    {done ? (
+                      <svg
+                        aria-hidden
+                        width="16"
+                        height="16"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="#7ee2a8"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      >
+                        <path d="M20 6L9 17l-5-5" />
+                      </svg>
+                    ) : (
+                      <span
+                        aria-hidden
+                        className={`size-4 rounded-full border ${
+                          active
+                            ? "animate-pulse border-[#8ab4ff] bg-[#8ab4ff]/30"
+                            : "border-white/15"
+                        }`}
+                      />
+                    )}
+                    <span
+                      className={`text-[13px] ${
+                        done || active ? "text-[#f5f6f8]" : "text-[#5b6472]"
+                      }`}
+                    >
+                      {step.label}
+                    </span>
+                    {active && (
+                      <span className="ml-auto text-[11px] text-[#9aa0ae]">
+                        Generating…
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        </div>
+      )}
       {logoPickerOpen && (
         <LogoModal
           projectName={project.name}
