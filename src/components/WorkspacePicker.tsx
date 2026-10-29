@@ -44,6 +44,13 @@ export default function WorkspacePicker({
   const [hover, setHover] = useState<PickBox | null>(null);
   const [picked, setPicked] = useState<Picked | null>(null);
   const pickedElRef = useRef<Element | null>(null);
+  // The listeners read the scope instead of closing over it, so switching
+  // tabs does not rebuild them and the effect keeps one dependency list.
+  const scopeRef = useRef(scope);
+
+  useEffect(() => {
+    scopeRef.current = scope;
+  }, [scope]);
 
   useEffect(() => {
     const root = rootRef.current;
@@ -55,7 +62,7 @@ export default function WorkspacePicker({
       if (!node || node.nodeType !== 1) return null;
       const el = node as Element;
       if (!root.contains(el)) return null;
-      if (scope === "tasks") {
+      if (scopeRef.current === "tasks") {
         return el.closest("[data-pick-card]");
       }
       const doc = el.closest("[data-pick-scope]");
@@ -94,7 +101,7 @@ export default function WorkspacePicker({
       root.removeEventListener("mousedown", block, true);
       root.removeEventListener("click", onClick, true);
     };
-  }, [picking, pickSession, scope, rootRef]);
+  }, [picking, pickSession, rootRef]);
 
   // The picked element can move under its card (document scroll, resize);
   // keep the box attached to it instead of letting it drift.

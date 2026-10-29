@@ -203,8 +203,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [pickSession, setPickSession] = useState(0);
   const mainRef = useRef<HTMLElement>(null);
 
-  // The component picker only lives on the design canvas and needs the
-  // composer open, so leaving either one disarms it.
+  // Picking needs the composer open, so leaving a view or closing the chat
+  // always disarms it.
   const changeView = useCallback((next: View) => {
     setPicking(false);
     setView(next);
