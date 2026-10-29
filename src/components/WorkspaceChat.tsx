@@ -20,6 +20,8 @@ interface WorkspaceChatProps {
   docs: ProjectDoc[];
   tasks: Task[];
   onHeightChange?: (height: number) => void;
+  prefill?: { id: number; text: string } | null;
+  onPrefillSent?: () => void;
 }
 
 interface ChatTurn extends ChatMessage {
@@ -34,6 +36,8 @@ export default function WorkspaceChat({
   docs,
   tasks,
   onHeightChange,
+  prefill,
+  onPrefillSent,
 }: WorkspaceChatProps) {
   const [open, setOpen] = useState(false);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -47,6 +51,8 @@ export default function WorkspaceChat({
   const busyRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const heightRef = useRef(onHeightChange);
+  const sentPrefillRef = useRef<number | null>(null);
+  const sendRef = useRef<(text?: string) => Promise<void>>(() => Promise.resolve());
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -139,6 +145,27 @@ export default function WorkspaceChat({
       setBusy(false);
     }
   };
+
+  // Latest send for outside triggers (component comments).
+  useEffect(() => {
+    sendRef.current = send;
+  });
+
+  // A component comment arrives as a ready-to-send chat message.
+  useEffect(() => {
+    if (!prefill || sentPrefillRef.current === prefill.id) return;
+    sentPrefillRef.current = prefill.id;
+    setOpen(true);
+    if (busyRef.current) {
+      setInput((prev) => (prev.trim() ? `${prev.trim()}\n${prefill.text}` : prefill.text));
+      onPrefillSent?.();
+      return;
+    }
+    void sendRef
+      .current(prefill.text)
+      .finally(() => onPrefillSent?.());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefill]);
 
   const transcribeClip = async (mimeType: string) => {
     const blob = new Blob(chunksRef.current, { type: mimeType || "audio/webm" });

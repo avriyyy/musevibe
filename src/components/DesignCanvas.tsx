@@ -13,6 +13,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CanvasChrome from "./CanvasChrome";
+import ComponentComment from "./ComponentComment";
 import {
   SHAPE_STROKE,
   SHAPE_WIDTH,
@@ -40,6 +41,8 @@ interface DesignCanvasProps {
   /** Current prototype.html content; the frame iframe follows it directly. */
   html: string;
   onShapes: (shapesJson: string) => void;
+  /** A picked component plus a short message, sent straight to the chat. */
+  onQuoteToChat: (text: string) => void;
 }
 
 type Gesture =
@@ -65,6 +68,7 @@ export default function DesignCanvas({
   initialShapes,
   html,
   onShapes,
+  onQuoteToChat,
 }: DesignCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [shapes, setShapes] = useState<CanvasShape[]>(() =>
@@ -917,30 +921,15 @@ export default function DesignCanvas({
 
       {/* Picked prototype component, above the chat pill. */}
       {inspected && !editingId && (
-        <div className="absolute bottom-20 left-1/2 z-10 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-[#17181d]/95 py-1.5 pl-4 pr-1.5 shadow-xl">
-          <span className="truncate text-[12px] font-medium text-[#f5f6f8]">
-            {nodeLabel(inspected)}
-          </span>
-          <button
-            type="button"
-            onClick={clearInspected}
-            aria-label="Clear selected component"
-            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#9aa0ae] hover:bg-white/10 hover:text-white"
-          >
-            <svg
-              aria-hidden
-              width="11"
-              height="11"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-            >
-              <path d="M6 6l12 12M18 6L6 18" />
-            </svg>
-          </button>
-        </div>
+        <ComponentComment
+          key={inspected.tag + inspected.text}
+          node={inspected}
+          onCancel={clearInspected}
+          onAdd={(message) => {
+            onQuoteToChat(`[${nodeLabel(inspected)}] ${message}`);
+            clearInspected();
+          }}
+        />
       )}
 
       <CanvasChrome

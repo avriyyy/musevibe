@@ -196,6 +196,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [selectedDocKey, setSelectedDocKey] = useState<string>("doc-prd");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [chatHeight, setChatHeight] = useState(0);
+  const [chatPrefill, setChatPrefill] = useState<{ id: number; text: string } | null>(null);
   const [phase, setPhase] = useState<Phase>(null);
   const [docBusy, setDocBusy] = useState<string | null>(null);
   const [protoBusy, setProtoBusy] = useState(false);
@@ -761,6 +762,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                     onShapes={(shapesJson) =>
                       handleShapes(prototypeScreen.id, shapesJson)
                     }
+                    onQuoteToChat={(text) =>
+                      setChatPrefill({ id: Date.now(), text })
+                    }
                   />
                 ) : (
                   <div className="grid h-full place-items-center px-5">
@@ -798,6 +802,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         docs={docs}
         tasks={tasks}
         onHeightChange={setChatHeight}
+        prefill={chatPrefill}
+        onPrefillSent={() => setChatPrefill(null)}
       />
     </div>
   );
