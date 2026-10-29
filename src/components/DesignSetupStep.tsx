@@ -18,6 +18,7 @@ import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Banner } from "@astryxdesign/core/Banner";
 import { DESIGN_SYSTEMS, type DesignSystemEntry } from "@/lib/design-systems-catalog";
+import Markdown from "@/components/Markdown";
 import {
   DEFAULT_DESIGN_MD,
   DEFAULT_TOKENS_CSS,
@@ -315,9 +316,9 @@ export default function DesignSetupStep({
           </HStack>
         )}
         {design && showMd && (
-          <pre className="max-h-56 overflow-auto rounded-xl border border-white/10 bg-white/[0.03] p-3 font-mono text-[12px] leading-5 text-[#c9cdd6] whitespace-pre-wrap">
-            {design.designMd.slice(0, 4000)}
-          </pre>
+          <div className="max-h-80 overflow-auto rounded-xl border border-white/10 bg-white/[0.03] p-4">
+            <Markdown text={design.designMd} />
+          </div>
         )}
       </VStack>
 
