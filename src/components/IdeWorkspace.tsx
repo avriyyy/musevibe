@@ -33,6 +33,7 @@ import {
 } from "@heroicons/react/24/outline";
 import DocumentsView from "@/components/DocumentsView";
 import WorkspaceChat from "@/components/WorkspaceChat";
+import WorkspacePicker from "@/components/WorkspacePicker";
 import { parseCanvasShapes, type CanvasShape } from "@/lib/canvas";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
@@ -200,6 +201,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [chatDraft, setChatDraft] = useState<{ id: number; text: string } | null>(null);
   const [picking, setPicking] = useState(false);
   const [pickSession, setPickSession] = useState(0);
+  const mainRef = useRef<HTMLElement>(null);
 
   // The component picker only lives on the design canvas and needs the
   // composer open, so leaving either one disarms it.
@@ -707,7 +709,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <main className="flex min-w-0 flex-1 flex-col bg-[#0b0c10]">
+        <main ref={mainRef} className="flex min-w-0 flex-1 flex-col bg-[#0b0c10]">
           {view.kind === "documents" && (
             <DocumentsView
               docs={docs}
@@ -828,6 +830,17 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         </main>
       </div>
 
+      {view.kind !== "design" && (
+        <WorkspacePicker
+          rootRef={mainRef}
+          picking={picking}
+          pickSession={pickSession}
+          bottomInset={chatHeight}
+          onQuoteToChat={quoteToChat}
+          onPickingChange={setPicking}
+        />
+      )}
+
       <WorkspaceChat
         key={projectId}
         project={project}
@@ -839,7 +852,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         draft={chatDraft}
         onDraftConsumed={() => setChatDraft(null)}
         onHeightChange={setChatHeight}
-        canPick={view.kind === "design" && !!prototypeFile}
+        canPick={view.kind !== "design" || !!prototypeFile}
         picking={picking}
         onTogglePick={() => {
           setPicking((prev) => !prev);

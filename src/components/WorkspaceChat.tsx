@@ -424,31 +424,11 @@ export default function WorkspaceChat({
         )}
 
         {/* Wide composer bar. */}
-        <div className="rounded-2xl border border-white/10 bg-[#17181d]/95 px-4 pb-2.5 pt-1.5 shadow-2xl backdrop-blur">
-          <div className="flex items-center justify-end">
-            <button
-              type="button"
-              onClick={() => onOpenChange(false)}
-              aria-label="Hide chat"
-              title="Hide chat"
-              className="flex h-6 w-6 items-center justify-center rounded-lg text-[#9aa0ae] hover:bg-white/10 hover:text-white"
-            >
-              <svg
-                aria-hidden
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-          </div>
-
+        <div
+          className={`rounded-2xl border bg-[#17181d]/95 px-3 pb-2 pt-2 shadow-2xl backdrop-blur transition-colors ${
+            picking ? "border-[#8ab4ff]/35" : "border-white/10"
+          }`}
+        >
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -470,7 +450,11 @@ export default function WorkspaceChat({
                   void send();
                 }
               }}
-              placeholder="Ask or change anything…"
+              placeholder={
+                picking
+                  ? "Pick a component, then say what should change…"
+                  : "Ask or change anything…"
+              }
               aria-label="Ask about this project"
               disabled={busy}
               className="block min-h-9 w-full resize-none overflow-y-auto bg-transparent py-1.5 text-[14px] leading-6 text-[#f5f6f8] placeholder:text-[#5b6472] focus:outline-none disabled:opacity-50"
@@ -640,12 +624,29 @@ export default function WorkspaceChat({
                   <path d="M12 19V5M5 12l7-7 7 7" />
                 </svg>
               </button>
+              <span aria-hidden className="mx-0.5 h-4 w-px bg-white/10" />
+              <button
+                type="button"
+                onClick={() => onOpenChange(false)}
+                aria-label="Hide chat"
+                title="Hide chat"
+                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+              >
+                <svg
+                  aria-hidden
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M6 9l6 6 6-6" />
+                </svg>
+              </button>
             </div>
-            {picking && (
-              <p role="status" className="mt-1.5 text-[12px] text-[#9aa0ae]">
-                Click a component on the canvas, then say what should change.
-              </p>
-            )}
             {micError && (
               <p role="alert" className="mt-1.5 text-[12px] text-[#f0a6a6]">
                 {micError}

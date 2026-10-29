@@ -13,6 +13,13 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CanvasChrome from "./CanvasChrome";
+import ChangeCard from "./ChangeCard";
+import {
+  boxOf,
+  describeElement,
+  quoteFor,
+  type PickBox,
+} from "@/lib/pick";
 import {
   SHAPE_STROKE,
   SHAPE_WIDTH,
@@ -45,18 +52,10 @@ interface DesignCanvasProps {
   bottomInset: number;
 }
 
-/** A rectangle in the prototype frame's own CSS pixel space. */
-interface FrameBox {
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-}
-
 interface PickedComponent {
   label: string;
   text: string;
-  box: FrameBox;
+  box: PickBox;
   session: number;
 }
 
@@ -78,29 +77,6 @@ type Gesture =
   | null;
 
 const GRID = 28;
-
-/** Describe a prototype element the way a developer would name it. */
-function describeElement(el: Element): { label: string; text: string } {
-  const tag = el.tagName.toLowerCase();
-  const id = (el as HTMLElement).id;
-  const raw = (el as HTMLElement).className;
-  const classes =
-    typeof raw === "string" ? raw.split(/\s+/).filter(Boolean).slice(0, 2) : [];
-  const label = id
-    ? `${tag}#${id}`
-    : classes.length
-      ? `${tag}.${classes.join(".")}`
-      : tag;
-  // Only the element's own text: a wrapper's whole subtree would bury the
-  // actual component in the quote.
-  const own = Array.from(el.childNodes)
-    .filter((node) => node.nodeType === 3)
-    .map((node) => node.textContent || "")
-    .join(" ");
-  const source = own.trim() || (el.children.length === 0 ? el.textContent : "");
-  const text = ((source || "").trim().replace(/\s+/g, " ") || "").slice(0, 120);
-  return { label, text };
-}
 
 export default function DesignCanvas({
   initialShapes,
@@ -124,9 +100,8 @@ export default function DesignCanvas({
   const [draft, setDraft] = useState("");
   const [panning, setPanning] = useState(false);
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
-  const [hoverBox, setHoverBox] = useState<FrameBox | null>(null);
+  const [hoverBox, setHoverBox] = useState<PickBox | null>(null);
   const [picked, setPicked] = useState<PickedComponent | null>(null);
-  const [comment, setComment] = useState("");
 
   const shapesRef = useRef(shapes);
   const transformRef = useRef(transform);
@@ -167,10 +142,6 @@ export default function DesignCanvas({
       unbind = null;
       const doc = frame.contentDocument;
       if (!picking || !doc) return;
-      const boxOf = (el: Element): FrameBox => {
-        const rect = el.getBoundingClientRect();
-        return { x: rect.x, y: rect.y, w: rect.width, h: rect.height };
-      };
       const targetOf = (event: Event) => {
         // Elements from the iframe belong to another realm, so instanceof
         // checks against the parent window's Element always fail here.
@@ -199,7 +170,6 @@ export default function DesignCanvas({
         const { label, text } = describeElement(target);
         setPicked({ label, text, box: boxOf(target), session: pickSession });
         setHoverBox(null);
-        setComment("");
       };
       const onSubmit = (event: Event) => {
         event.preventDefault();
@@ -240,7 +210,6 @@ export default function DesignCanvas({
       if (event.key !== "Escape") return;
       if (picked && picked.session === pickSession) {
         setPicked(null);
-        setComment("");
         return;
       }
       onPickingChange(false);
@@ -248,16 +217,6 @@ export default function DesignCanvas({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [picking, picked, pickSession, onPickingChange]);
-
-  const submitComment = useCallback(() => {
-    if (!picked || picked.session !== pickSession) return;
-    const note = comment.trim();
-    if (!note) return;
-    const where = picked.text ? ` "${picked.text}"` : "";
-    onQuoteToChat(`[${picked.label}${where}] ${note}`);
-    setPicked(null);
-    setComment("");
-  }, [comment, picked, pickSession, onQuoteToChat]);
 
   // Persist edits, debounced. The seed echo is skipped so mounting never
   // dirties the store.
@@ -822,10 +781,10 @@ export default function DesignCanvas({
   // the chat drawer would cover it. Kept inside the canvas either way.
   const card = useMemo(() => {
     if (!activePick) return null;
-    const width = 320;
     const height = 172;
     const gap = 10;
     const margin = 12;
+    const width = Math.min(320, Math.max(220, viewport.w - margin * 2));
     const left = Math.min(
       Math.max(margin, transform.x + activePick.box.x * transform.k),
       Math.max(margin, viewport.w - width - margin),
@@ -1063,57 +1022,19 @@ export default function DesignCanvas({
       {/* Change request for the picked component. The quote lands in the
           chat input and never sends on its own, so picks stack. */}
       {picking && activePick && card && (
-        <div
-          role="dialog"
-          aria-label="Describe the change"
-          onPointerDown={(event) => event.stopPropagation()}
-          className="absolute z-30 select-text rounded-2xl border border-white/15 bg-[#17181d] p-2.5 shadow-2xl"
-          style={{ left: card.left, top: card.top, width: card.width }}
-        >
-          <p className="truncate px-1 font-mono text-[11px] text-[#8ab4ff]">
-            {activePick.label}
-          </p>
-          {!!activePick.text && (
-            <p className="mt-0.5 truncate px-1 text-[11px] text-[#9aa0ae]">
-              {activePick.text}
-            </p>
-          )}
-          <textarea
-            autoFocus
-            rows={2}
-            value={comment}
-            onChange={(event) => setComment(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) {
-                event.preventDefault();
-                submitComment();
-              }
-            }}
-            placeholder="What should change here?"
-            aria-label="Change request"
-            className="mt-2 w-full resize-none rounded-xl border border-white/10 bg-[#0b0c10] px-2.5 py-2 text-[13px] leading-5 text-[#f5f6f8] placeholder:text-[#5b6472] focus:border-white/25 focus:outline-none"
-          />
-          <div className="mt-2 flex items-center justify-end gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                setPicked(null);
-                setComment("");
-              }}
-              className="h-7 rounded-full px-2.5 text-[12px] text-[#9aa0ae] hover:bg-white/5 hover:text-white"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={submitComment}
-              disabled={!comment.trim()}
-              className="h-7 rounded-full bg-white px-3 text-[12px] font-medium text-[#0b0c10] hover:bg-white/90 disabled:opacity-40"
-            >
-              Add
-            </button>
-          </div>
-        </div>
+        <ChangeCard
+          key={`${activePick.session}:${activePick.label}:${activePick.box.x}:${activePick.box.y}`}
+          label={activePick.label}
+          text={activePick.text}
+          left={card.left}
+          top={card.top}
+          width={card.width}
+          onAdd={(note) => {
+            onQuoteToChat(quoteFor(activePick.label, activePick.text, note));
+            setPicked(null);
+          }}
+          onClose={() => setPicked(null)}
+        />
       )}
 
       <CanvasChrome
