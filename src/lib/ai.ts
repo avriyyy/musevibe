@@ -5,7 +5,7 @@ import { docFullName } from "./docs";
 // Abstraction AI agar bisa swap provider Meta (Muse Spark).
 // Kalau AI_API_URL / AI_API_KEY kosong -> mock lokal, demo tetap jalan.
 
-export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo" | "stack" | "name" | "doc" | "prototype" | "chat";
+export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo" | "stack" | "name" | "doc" | "prototype" | "chat" | "design-system" | "pages";
 
 export interface AiGenerateResult {
   text: string;
@@ -183,6 +183,20 @@ function mockGenerate(kind: AiGenerateKind, prompt: string): string {
   if (kind === "doc") {
     const label = docFullName("prd");
     return `# ${label} (local draft)\n\n> The model is unavailable, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${idea}\n\n## Overview\nFill in the product context from the brief.\n\n## Details\nExpand each required section with concrete, product-specific content.\n\n## Open questions\nList what still needs a decision before building.`;
+  }
+  if (kind === "design-system") {
+    return `Design system (local)\n\nThe model is unavailable, so the reference could not be converted. Pick a bundled template instead, or paste DESIGN.md content directly.\n\nIdea: ${idea}`;
+  }
+  if (kind === "pages") {
+    return JSON.stringify(
+      { pages: [
+        { slug: "home", title: "Home", brief: "The main screen with the core content and primary action." },
+        { slug: "details", title: "Details", brief: "A detail view for one item with actions to keep or change it." },
+        { slug: "settings", title: "Settings", brief: "Preferences and account controls in one quiet form." },
+      ] },
+      null,
+      2,
+    );
   }
   if (kind === "prototype") {
     return `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8" />\n<meta name="viewport" content="width=device-width, initial-scale=1" />\n<title>Prototype (local draft)</title>\n<style>\nbody { font-family: system-ui, sans-serif; margin: 0; padding: 32px; background: #0b0c10; color: #f5f6f8; }\nmain { max-width: 640px; margin: 0 auto; }\n</style>\n</head>\n<body>\n<main>\n<h1>Prototype (local draft)</h1>\n<p>${idea}</p>\n<p>The model is unavailable, so this is a placeholder. Generate again with the model for the full prototype.</p>\n</main>\n</body>\n</html>`;

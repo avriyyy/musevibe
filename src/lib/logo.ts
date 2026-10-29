@@ -54,8 +54,7 @@ export function buildLogoPrompt(
 }
 
 /** Read an image file, downscale it to a square, and return a PNG data URL. */
-export async function fileToLogoDataUrl(file: File): Promise<string> {
-  if (!file.type.startsWith("image/")) {
+export async function fileToLogoDataUrl(file: File): Promise<string> {  if (!file.type.startsWith("image/")) {
     throw new Error("That file is not an image. Pick a PNG, JPG, SVG, or WebP file.");
   }
   if (file.size > MAX_UPLOAD_BYTES) {
@@ -81,4 +80,85 @@ export async function fileToLogoDataUrl(file: File): Promise<string> {
   );
   bitmap.close();
   return canvas.toDataURL("image/png");
+}
+
+/**
+ * Remove a near-solid backdrop from a logo image, in the browser.
+ * Image models cannot emit transparency, so generated marks arrive on a
+ * solid field. This flood-fills from every edge with the corner color and a
+ * small tolerance, then feathers the cut by one pixel. Photos and
+ * multi-color scenes are left mostly intact because the fill only spreads
+ * through connected near-background pixels; callers keep the original when
+ * too little (under 4%) or almost everything (over 92%) would go.
+ */
+export async function removeLogoBackground(
+  dataUrl: string,
+  tolerance = 30,
+): Promise<{ image: string; removedRatio: number }> {
+  const bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+  const canvas = document.createElement("canvas");
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    bitmap.close();
+    return { image: dataUrl, removedRatio: 0 };
+  }
+  ctx.drawImage(bitmap, 0, 0);
+  bitmap.close();
+
+  const frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const data = frame.data;
+  const width = canvas.width;
+  const height = canvas.height;
+  const corner = (x: number, y: number) => {
+    const i = (y * width + x) * 4;
+    return [data[i], data[i + 1], data[i + 2]];
+  };
+  // The backdrop is whatever the corners agree on; a split vote means the
+  // image likely has no clean backdrop to cut.
+  const votes = [corner(0, 0), corner(width - 1, 0), corner(0, height - 1), corner(width - 1, height - 1)];
+  const near = (a: number[], b: number[]) =>
+    Math.abs(a[0] - b[0]) + Math.abs(a[1] - b[1]) + Math.abs(a[2] - b[2]) <= tolerance * 2;
+  const agreeing = votes.filter((vote) => near(vote, votes[0])).length;
+  const bg: number[] = agreeing >= 3 ? votes[0] : [255, 255, 255];
+
+  const visited = new Uint8Array(width * height);
+  const stack: number[] = [];
+  const push = (x: number, y: number) => {
+    if (x < 0 || y < 0 || x >= width || y >= height) return;
+    const index = y * width + x;
+    if (visited[index]) return;
+    const i = index * 4;
+    const distance =
+      Math.abs(data[i] - bg[0]) + Math.abs(data[i + 1] - bg[1]) + Math.abs(data[i + 2] - bg[2]);
+    if (distance > tolerance * 2.4) return;
+    visited[index] = 1;
+    stack.push(index);
+  };
+  for (let x = 0; x < width; x += 1) {
+    push(x, 0);
+    push(x, height - 1);
+  }
+  for (let y = 0; y < height; y += 1) {
+    push(0, y);
+    push(width - 1, y);
+  }
+  let removed = 0;
+  while (stack.length) {
+    const index = stack.pop() as number;
+    const i = index * 4;
+    data[i + 3] = 0;
+    removed += 1;
+    const x = index % width;
+    const y = Math.floor(index / width);
+    push(x + 1, y);
+    push(x - 1, y);
+    push(x, y + 1);
+    push(x, y - 1);
+  }
+  const removedRatio = removed / (width * height);
+  if (removedRatio < 0.04 || removedRatio > 0.92) return { image: dataUrl, removedRatio };
+  ctx.putImageData(frame, 0, 0);
+  return { image: canvas.toDataURL("image/png"), removedRatio };
 }

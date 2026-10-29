@@ -36,11 +36,48 @@ import {
 } from "@/lib/canvas";
 export { FRAME_H, FRAME_W };
 
+/** Gap between frames on the shared canvas. */
+export const FRAME_GAP = 120;
+
+/** One frame on the shared canvas: a generated page, a pending page, or the suggestion card. */
+export interface CanvasFrame {
+  /** File path for pages, "suggest" for the suggestion card. */
+  id: string;
+  /** Page slug for pending pages, so the parent can generate them. */
+  slug?: string;
+  title: string;
+  subtitle: string;
+  /** Null while the page has no HTML yet. */
+  html: string | null;
+  kind: "page" | "suggest";
+  /** One-line content note for pending pages. */
+  brief?: string;
+  /** True while this frame's HTML is being generated. */
+  busy?: boolean;
+}
+
+/** Left edge of a frame in canvas space. */
+export function frameLeft(index: number): number {
+  return index * (FRAME_W + FRAME_GAP);
+}
+
 interface DesignCanvasProps {
   /** Shapes used only to seed the first paint, never re-fed afterwards. */
   initialShapes: readonly CanvasShape[] | null;
-  /** Current prototype.html content; the frame iframe follows it directly. */
-  html: string;
+  /** Every frame on the shared canvas, left to right. */
+  frames: CanvasFrame[];
+  /** Generate one pending page. */
+  onGeneratePage?: (slug: string) => void;
+  /** Draft the page list from the PRD. */
+  onSuggestPages?: () => void;
+  /** Generate every pending page in plan order. */
+  onGenerateAll?: () => void;
+  /** True while the page list is being drafted. */
+  suggesting?: boolean;
+  /** Pending pages without HTML; hides the generate-all control at zero. */
+  pendingCount?: number;
+  /** Label for generate buttons, e.g. "Muse". */
+  modelLabel?: string;
   onShapes: (shapesJson: string) => void;
   /** Quoted annotation text goes into the chat input (never auto-sent). */
   onQuoteToChat: (text: string) => void;
@@ -79,9 +116,144 @@ type Gesture =
 
 const GRID = 28;
 
+/** Stop canvas gestures from starting on interactive card controls. */
+function halt(event: React.SyntheticEvent) {
+  event.stopPropagation();
+}
+
+/** Dashed placeholder for a page that has no HTML yet. */
+function PendingCard({
+  left,
+  title,
+  brief,
+  busy,
+  modelLabel,
+  onGenerate,
+}: {
+  left: number;
+  title: string;
+  brief?: string;
+  busy: boolean;
+  modelLabel: string;
+  onGenerate?: () => void;
+}) {
+  return (
+    <div className="absolute" style={{ left, top: 0, width: FRAME_W, height: FRAME_H }}>
+      <div className="pointer-events-none absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap">
+        <span className="text-[12px] font-medium text-[#c9cdd6]">{title}</span>
+        <span aria-hidden className="h-3 w-px bg-white/15" />
+        <span className="font-mono text-[11px] tabular-nums text-[#5b6472]">
+          {busy ? "generating" : "not yet generated"}
+        </span>
+      </div>
+      <div className="grid h-full w-full place-items-center rounded-2xl border-2 border-dashed border-white/20 bg-white/[0.02]">
+        <div
+          className="max-w-xs px-6 text-center"
+          onPointerDown={halt}
+          onPointerUp={halt}
+        >
+          <p className="text-[14px] font-semibold text-[#f5f6f8]">{title}</p>
+          {!!brief && (
+            <p className="mt-1.5 text-[12px] leading-5 text-[#9aa0ae]">{brief}</p>
+          )}
+          {onGenerate && (
+            <button
+              type="button"
+              disabled={busy}
+              onClick={onGenerate}
+              onPointerDown={halt}
+              className="mt-4 inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90 disabled:opacity-50"
+            >
+              {busy ? "Generating…" : `Generate with ${modelLabel}`}
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** The card at the end of the row: suggest pages, then generate them all. */
+function SuggestCard({
+  left,
+  suggesting,
+  pendingCount,
+  modelLabel,
+  onSuggestPages,
+  onGenerateAll,
+}: {
+  left: number;
+  suggesting: boolean;
+  pendingCount: number;
+  modelLabel: string;
+  onSuggestPages?: () => void;
+  onGenerateAll?: () => void;
+}) {
+  return (
+    <div className="absolute" style={{ left, top: 0, width: FRAME_W, height: FRAME_H }}>
+      <div className="pointer-events-none absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap">
+        <span className="text-[12px] font-medium text-[#c9cdd6]">Next pages</span>
+        <span aria-hidden className="h-3 w-px bg-white/15" />
+        <span className="font-mono text-[11px] tabular-nums text-[#5b6472]">
+          {pendingCount > 0 ? `${pendingCount} to go` : "from the PRD"}
+        </span>
+      </div>
+      <div className="grid h-full w-full place-items-center rounded-2xl border-2 border-dashed border-[#8ab4ff]/40 bg-[#8ab4ff]/[0.04]">
+        <div
+          className="max-w-xs px-6 text-center"
+          onPointerDown={halt}
+          onPointerUp={halt}
+        >
+          <p className="text-[14px] font-semibold text-[#f5f6f8]">
+            {pendingCount > 0 ? "Pages still need frames" : "What should this app show?"}
+          </p>
+          <p className="mt-1.5 text-[12px] leading-5 text-[#9aa0ae]">
+            {pendingCount > 0
+              ? "Generate them one by one on their own frames, or draw every remaining page at once."
+              : "Draft the page list from the PRD, then generate each page on its own frame."}
+          </p>
+          <div className="mt-4 flex flex-col items-center gap-2">
+            {pendingCount > 0 && onGenerateAll && (
+              <button
+                type="button"
+                onClick={onGenerateAll}
+                onPointerDown={halt}
+                className="inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90"
+              >
+                {`Generate all ${pendingCount} with ${modelLabel}`}
+              </button>
+            )}
+            {onSuggestPages && (
+              <button
+                type="button"
+                disabled={suggesting}
+                onClick={onSuggestPages}
+                onPointerDown={halt}
+                className="inline-flex h-9 items-center rounded-full border border-white/15 px-4 text-[13px] font-medium text-[#c9cdd6] hover:bg-white/10 hover:text-white disabled:opacity-50"
+              >
+                {suggesting
+                  ? "Suggesting…"
+                  : pendingCount > 0
+                    ? "Refresh suggestions"
+                    : "Suggest pages"}
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DesignCanvas({
   initialShapes,
-  html,
+  frames,
+  onGeneratePage,
+  onSuggestPages,
+  onGenerateAll,
+  suggesting,
+  pendingCount,
+  modelLabel,
   onShapes,
   onQuoteToChat,
   picking,
@@ -90,7 +262,7 @@ export default function DesignCanvas({
   bottomInset,
 }: DesignCanvasProps) {
   const containerRef = useRef<HTMLDivElement>(null);
-  const iframeRef = useRef<HTMLIFrameElement>(null);
+  const iframeRefs = useRef(new Map<string, HTMLIFrameElement>());
   const [shapes, setShapes] = useState<CanvasShape[]>(() =>
     initialShapes ? [...initialShapes] : [],
   );
@@ -130,79 +302,95 @@ export default function DesignCanvas({
     draftRef.current = draft;
   });
 
-  // Component picking binds straight into the same-origin prototype
+  // Component picking binds straight into each same-origin frame
   // document, so the hover box and the pick line up with the real element
   // instead of the outer iframe. A click in pick mode describes a change;
-  // it never runs the prototype.
+  // it never runs the prototype. Boxes are offset by the frame's origin so
+  // the shared overlay lines up across frames.
+  const framesKey = frames
+    .map((frame) => `${frame.id}:${frame.html?.length ?? 0}`)
+    .join("|");
   useEffect(() => {
-    const frame = iframeRef.current;
-    if (!frame) return;
-    let unbind: (() => void) | null = null;
-    const bind = () => {
-      unbind?.();
-      unbind = null;
-      const doc = frame.contentDocument;
-      if (!picking || !doc) return;
-      const targetOf = (event: Event) => {
-        // Elements from the iframe belong to another realm, so instanceof
-        // checks against the parent window's Element always fail here.
-        const target = event.target as Node | null;
-        if (!target || target.nodeType !== 1) return null;
-        const el = target as Element;
-        if (el === doc.body || el === doc.documentElement) return null;
-        return el;
+    if (!picking) return;
+    const cleanups: Array<() => void> = [];
+    frames.forEach((frame, index) => {
+      if (!frame.html) return;
+      const el = iframeRefs.current.get(frame.id);
+      if (!el) return;
+      const originX = frameLeft(index);
+      let unbind: (() => void) | null = null;
+      const bind = () => {
+        unbind?.();
+        unbind = null;
+        const doc = el.contentDocument;
+        if (!doc) return;
+        const targetOf = (event: Event) => {
+          // Elements from the iframe belong to another realm, so instanceof
+          // checks against the parent window's Element always fail here.
+          const target = event.target as Node | null;
+          if (!target || target.nodeType !== 1) return null;
+          const node = target as Element;
+          if (node === doc.body || node === doc.documentElement) return null;
+          return node;
+        };
+        const shift = (box: PickBox): PickBox => ({ ...box, x: box.x + originX });
+        const onMove = (event: MouseEvent) => {
+          const target = targetOf(event);
+          setHoverBox(target ? shift(boxOf(target)) : null);
+        };
+        const onLeave = () => setHoverBox(null);
+        const onDown = (event: MouseEvent) => {
+          if (!targetOf(event)) return;
+          // Block the prototype's own handlers for the duration of the pick.
+          event.preventDefault();
+          event.stopPropagation();
+        };
+        const onClick = (event: MouseEvent) => {
+          const target = targetOf(event);
+          if (!target) return;
+          event.preventDefault();
+          event.stopPropagation();
+          const { label, text } = describeElement(target);
+          setPicked({ label, text, box: shift(boxOf(target)), session: pickSession });
+          setHoverBox(null);
+        };
+        const onSubmit = (event: Event) => {
+          event.preventDefault();
+          event.stopPropagation();
+        };
+        // Crosshair everywhere inside the frame while picking, including
+        // elements that set their own pointer cursor.
+        const cursorStyle = doc.createElement("style");
+        cursorStyle.textContent =
+          "*, *::before, *::after { cursor: crosshair !important; }";
+        doc.head.appendChild(cursorStyle);
+        doc.addEventListener("mousemove", onMove, true);
+        doc.addEventListener("mouseleave", onLeave, true);
+        doc.addEventListener("mousedown", onDown, true);
+        doc.addEventListener("click", onClick, true);
+        doc.addEventListener("submit", onSubmit, true);
+        unbind = () => {
+          cursorStyle.remove();
+          doc.removeEventListener("mousemove", onMove, true);
+          doc.removeEventListener("mouseleave", onLeave, true);
+          doc.removeEventListener("mousedown", onDown, true);
+          doc.removeEventListener("click", onClick, true);
+          doc.removeEventListener("submit", onSubmit, true);
+        };
       };
-      const onMove = (event: MouseEvent) => {
-        const target = targetOf(event);
-        setHoverBox(target ? boxOf(target) : null);
-      };
-      const onLeave = () => setHoverBox(null);
-      const onDown = (event: MouseEvent) => {
-        if (!targetOf(event)) return;
-        // Block the prototype's own handlers for the duration of the pick.
-        event.preventDefault();
-        event.stopPropagation();
-      };
-      const onClick = (event: MouseEvent) => {
-        const target = targetOf(event);
-        if (!target) return;
-        event.preventDefault();
-        event.stopPropagation();
-        const { label, text } = describeElement(target);
-        setPicked({ label, text, box: boxOf(target), session: pickSession });
-        setHoverBox(null);
-      };
-      const onSubmit = (event: Event) => {
-        event.preventDefault();
-        event.stopPropagation();
-      };
-      // Crosshair everywhere inside the frame while picking, including
-      // elements that set their own pointer cursor.
-      const cursorStyle = doc.createElement("style");
-      cursorStyle.textContent =
-        "*, *::before, *::after { cursor: crosshair !important; }";
-      doc.head.appendChild(cursorStyle);
-      doc.addEventListener("mousemove", onMove, true);
-      doc.addEventListener("mouseleave", onLeave, true);
-      doc.addEventListener("mousedown", onDown, true);
-      doc.addEventListener("click", onClick, true);
-      doc.addEventListener("submit", onSubmit, true);
-      unbind = () => {
-        cursorStyle.remove();
-        doc.removeEventListener("mousemove", onMove, true);
-        doc.removeEventListener("mouseleave", onLeave, true);
-        doc.removeEventListener("mousedown", onDown, true);
-        doc.removeEventListener("click", onClick, true);
-        doc.removeEventListener("submit", onSubmit, true);
-      };
-    };
-    if (frame.contentDocument?.readyState === "complete") bind();
-    frame.addEventListener("load", bind);
+      if (el.contentDocument?.readyState === "complete") bind();
+      el.addEventListener("load", bind);
+      cleanups.push(() => {
+        el.removeEventListener("load", bind);
+        unbind?.();
+      });
+    });
     return () => {
-      frame.removeEventListener("load", bind);
-      unbind?.();
+      for (const cleanup of cleanups) cleanup();
     };
-  }, [html, picking, pickSession]);
+    // Rebind when frame HTML swaps; origins come from the same order.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [framesKey, picking, pickSession]);
 
   // Escape backs out one level: the comment card first, then the mode.
   useEffect(() => {
@@ -248,6 +436,14 @@ export default function DesignCanvas({
     [],
   );
 
+  // Right edge of the frame row, mirrored for fit without re-centering
+  // on every generation.
+  const framesEnd =
+    frames.length > 0 ? frameLeft(frames.length - 1) + FRAME_W : FRAME_W;
+  const framesEndRef = useRef(framesEnd);
+  useEffect(() => {
+    framesEndRef.current = framesEnd;
+  }, [framesEnd]);
   const fitToScreen = useCallback(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -255,7 +451,7 @@ export default function DesignCanvas({
     if (rect.width < 10 || rect.height < 10) return;
     let minX = 0;
     let minY = 0;
-    let maxX = FRAME_W;
+    let maxX = framesEndRef.current;
     let maxY = FRAME_H;
     for (const shape of shapesRef.current) {
       const box = bboxOf(shape);
@@ -275,7 +471,7 @@ export default function DesignCanvas({
     });
   }, []);
 
-  // First paint only: center the prototype frame.
+  // First paint only: center the frame row.
   useEffect(() => {
     fitToScreen();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -836,46 +1032,82 @@ export default function DesignCanvas({
           transform: `translate(${transform.x}px, ${transform.y}px) scale(${transform.k})`,
         }}
       >
-        {/* Prototype frame with a Figma-style label. The iframe stays
-            interactive (same-origin) so the component picker can read and
-            highlight the elements inside it; canvas gestures start from
-            the area around the frame, the minimap, or the wheel. */}
-        <div className="absolute" style={{ left: 0, top: 0, width: FRAME_W, height: FRAME_H }}>
-          <div className="pointer-events-none absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap">
-            <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#c9cdd6]">
-              <svg
-                aria-hidden
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.8"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                className="text-[#8ab4ff]"
-              >
-                <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
-                <path d="M3.5 9h17" />
-              </svg>
-              Prototype
-            </span>
-            <span aria-hidden className="h-3 w-px bg-white/15" />
-            <span className="font-mono text-[11px] tabular-nums text-[#5b6472]">
-              {FRAME_W} × {FRAME_H}
-            </span>
-          </div>
-          <div className="h-full w-full overflow-hidden rounded-2xl bg-white shadow-[0_1px_2px_rgba(0,0,0,0.45),0_20px_50px_-12px_rgba(0,0,0,0.75)] ring-1 ring-white/15">
-            <iframe
-              ref={iframeRef}
-              title="Prototype"
-              srcDoc={html}
-              sandbox="allow-scripts allow-same-origin"
-              tabIndex={-1}
-              className="h-full w-full"
+        {/* Frames share one canvas, Figma-style: the design system first,
+            then a frame per planned page, then the suggestion card. Iframes
+            stay interactive (same-origin) so the component picker can read
+            and highlight the elements inside them; canvas gestures start
+            from the gaps around the frames or the wheel. */}
+        {frames.map((frame, index) =>
+          frame.kind === "suggest" ? (
+            <SuggestCard
+              key={frame.id}
+              left={frameLeft(index)}
+              suggesting={!!suggesting}
+              pendingCount={pendingCount ?? 0}
+              modelLabel={modelLabel ?? "Muse"}
+              onSuggestPages={onSuggestPages}
+              onGenerateAll={onGenerateAll}
             />
-          </div>
-        </div>
+          ) : frame.html ? (
+            <div
+              key={frame.id}
+              className="absolute"
+              style={{ left: frameLeft(index), top: 0, width: FRAME_W, height: FRAME_H }}
+            >
+              <div className="pointer-events-none absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap">
+                <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#c9cdd6]">
+                  <svg
+                    aria-hidden
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="1.8"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="text-[#8ab4ff]"
+                  >
+                    <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+                    <path d="M3.5 9h17" />
+                  </svg>
+                  {frame.title}
+                </span>
+                <span aria-hidden className="h-3 w-px bg-white/15" />
+                <span className="font-mono text-[11px] tabular-nums text-[#5b6472]">
+                  {frame.subtitle}
+                </span>
+              </div>
+              <div className="h-full w-full overflow-hidden rounded-2xl bg-white shadow-[0_1px_2px_rgba(0,0,0,0.45),0_20px_50px_-12px_rgba(0,0,0,0.75)] ring-1 ring-white/15">
+                <iframe
+                  ref={(el) => {
+                    if (el) iframeRefs.current.set(frame.id, el);
+                    else iframeRefs.current.delete(frame.id);
+                  }}
+                  title={frame.title}
+                  srcDoc={frame.html}
+                  sandbox="allow-scripts allow-same-origin"
+                  tabIndex={-1}
+                  className="h-full w-full"
+                />
+              </div>
+            </div>
+          ) : (
+            <PendingCard
+              key={frame.id}
+              left={frameLeft(index)}
+              title={frame.title}
+              brief={frame.brief}
+              busy={!!frame.busy}
+              modelLabel={modelLabel ?? "Muse"}
+              onGenerate={
+                frame.slug && onGeneratePage
+                  ? () => onGeneratePage(frame.slug as string)
+                  : undefined
+              }
+            />
+          ),
+        )}
 
         {/* Pick highlight, drawn in frame space so it tracks pan and zoom. */}
         {picking && pickBox && (

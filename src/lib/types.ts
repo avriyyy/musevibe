@@ -1,4 +1,5 @@
 import type { Platform, Timeline } from "./project-options";
+import type { DesignSystemRef, PlannedPage } from "./design-system";
 import type { WizardAnswerValue, WizardQuestion } from "./wizard";
 
 export type TaskStatus = "todo" | "doing" | "review" | "blocked" | "done" | "cancelled";
@@ -41,6 +42,12 @@ export interface Project {
   questionSource?: "ai" | "local";
   /** Image URL or data URL for the project logo. Absent means initials. */
   logoUrl?: string;
+  /** Strip the image background after generation or upload. Defaults to on. */
+  logoRemoveBg?: boolean;
+  /** Chosen design system: template, uploaded design.md, or converted link. */
+  designSystem?: DesignSystemRef;
+  /** Planned prototype pages in build order; files hold the generated HTML. */
+  pagePlan?: PlannedPage[];
 }
 
 export interface Prd {

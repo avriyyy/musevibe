@@ -32,16 +32,16 @@ import {
   InboxIcon,
 } from "@heroicons/react/24/outline";
 import DocumentsView from "@/components/DocumentsView";
+import type { CanvasFrame } from "@/components/DesignCanvas";
 import WorkspaceChat from "@/components/WorkspaceChat";
 import WorkspacePicker from "@/components/WorkspacePicker";
-import { parseCanvasShapes } from "@/lib/canvas";
+import { FRAME_H, FRAME_W, parseCanvasShapes } from "@/lib/canvas";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
 import { formatModelLabel } from "@/lib/models";
 import {
   DOC_TYPES,
   buildDocPrompt,
-  buildPrototypePrompt,
   parseDocMarkdown,
   parsePrototypeHtml,
   type DocKind,
@@ -53,6 +53,18 @@ import {
   fallbackTasks,
   parseTasks,
 } from "@/lib/plan";
+import {
+  SHOWCASE_PATH,
+  buildPagePlanPrompt,
+  buildPagePrompt,
+  buildSamplePreviewHtmlFallback,
+  buildShowcasePrompt,
+  fallbackPagePlan,
+  pageFilePath,
+  parsePagePlan,
+  resolveProjectDesignSystem,
+  type PlannedPage,
+} from "@/lib/design-system";
 import type { CodeFile, ProjectDoc, Screen, Task, TaskStatus } from "@/lib/types";
 
 const DesignCanvas = dynamic(() => import("@/components/DesignCanvas"), {
@@ -156,7 +168,7 @@ interface AiReply {
 }
 
 async function requestAi(
-  kind: "prd" | "tasks" | "doc" | "prototype",
+  kind: "prd" | "tasks" | "doc" | "prototype" | "pages",
   prompt: string,
   model?: string,
 ): Promise<AiReply> {
@@ -224,7 +236,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   }, []);
   const [phase, setPhase] = useState<Phase>(null);
   const [docBusy, setDocBusy] = useState<string | null>(null);
-  const [protoBusy, setProtoBusy] = useState(false);
+  const [showcaseBusy, setShowcaseBusy] = useState(false);
+  const [suggesting, setSuggesting] = useState(false);
+  const [generatingSlugs, setGeneratingSlugs] = useState<ReadonlySet<string>>(new Set());
+  const showcaseRequestedRef = useRef("");
   const [tasksLocal, setTasksLocal] = useState(false);
   const [error, setError] = useState("");
   const runningRef = useRef(false);
@@ -436,43 +451,167 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     [projectId, docBusy, saveDocMarkdown],
   );
 
-  const generatePrototype = useCallback(async () => {
+  /** Write one HTML file into the project files, replacing any same path. */
+  const saveHtmlFile = useCallback(
+    (path: string, html: string) => {
+      const state = useVibe.getState();
+      const existing = (state.filesByProject[projectId] ?? EMPTY_FILES).find(
+        (file) => file.path === path,
+      );
+      if (existing) {
+        state.updateFile(projectId, existing.id, html);
+        return;
+      }
+      state.setFiles(projectId, [
+        ...(state.filesByProject[projectId] ?? []),
+        {
+          id:
+            typeof crypto !== "undefined" && "randomUUID" in crypto
+              ? crypto.randomUUID()
+              : `file-${Date.now()}`,
+          path,
+          content: html,
+          language: "html",
+        },
+      ]);
+    },
+    [projectId],
+  );
+
+  /** First frame on the canvas: the chosen design system as a gallery page. */
+  const generateShowcase = useCallback(async () => {
     const state = useVibe.getState();
     const current = state.projects.find((entry) => entry.id === projectId);
-    if (!current || protoBusy) return;
-    setProtoBusy(true);
+    if (!current || showcaseBusy) return;
+    setShowcaseBusy(true);
     try {
+      const system = await resolveProjectDesignSystem(current);
       const reply = await requestAi(
         "prototype",
-        buildPrototypePrompt(current, state.prdByProject[projectId] ?? ""),
+        buildShowcasePrompt(
+          current.name,
+          current.idea,
+          system.designMd,
+          system.tokensCss,
+        ),
         current.model,
       );
       const html =
         parsePrototypeHtml(reply.text) ||
-        `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8" />\n<title>${current.name}</title>\n</head>\n<body>\n<h1>${current.name}</h1>\n<p>${current.idea}</p>\n</body>\n</html>`;
-      const existing = (state.filesByProject[projectId] ?? EMPTY_FILES).find(
-        (file) => file.path === "prototype.html",
-      );
-      if (existing) {
-        state.updateFile(projectId, existing.id, html);
-      } else {
-        state.setFiles(projectId, [
-          ...(state.filesByProject[projectId] ?? []),
-          {
-            id:
-              typeof crypto !== "undefined" && "randomUUID" in crypto
-                ? crypto.randomUUID()
-                : `file-${Date.now()}`,
-            path: "prototype.html",
-            content: html,
-            language: "html",
-          },
-        ]);
+        buildSamplePreviewHtmlFallback(current, system);
+      saveHtmlFile(SHOWCASE_PATH, html);
+    } catch {
+      const stateNow = useVibe.getState();
+      const currentNow = stateNow.projects.find((entry) => entry.id === projectId);
+      if (currentNow) {
+        const system = await resolveProjectDesignSystem(currentNow);
+        saveHtmlFile(
+          SHOWCASE_PATH,
+          buildSamplePreviewHtmlFallback(currentNow, system),
+        );
       }
     } finally {
-      setProtoBusy(false);
+      setShowcaseBusy(false);
     }
-  }, [projectId, protoBusy]);
+  }, [projectId, showcaseBusy, saveHtmlFile]);
+
+  // Draw the showcase once per project, so the design tab opens on the
+  // system instead of an empty canvas.
+  useEffect(() => {
+    if (!project || project.status === "draft") return;
+    const state = useVibe.getState();
+    // Files load lazily; an unseeded project has no entry yet.
+    if (state.filesByProject[projectId] === undefined) return;
+    const has = (state.filesByProject[projectId] ?? []).some(
+      (file) => file.path === SHOWCASE_PATH,
+    );
+    if (has || showcaseRequestedRef.current === projectId) return;
+    showcaseRequestedRef.current = projectId;
+    void generateShowcase();
+    // The request guard keeps this to one run per project.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [project, projectId]);
+
+  /** Draft the page list from the PRD; the local plan keeps it usable offline. */
+  const suggestPages = useCallback(async () => {
+    const state = useVibe.getState();
+    const current = state.projects.find((entry) => entry.id === projectId);
+    if (!current || suggesting) return;
+    setSuggesting(true);
+    try {
+      const reply = await requestAi(
+        "pages",
+        buildPagePlanPrompt(
+          current.name,
+          current.idea,
+          state.prdByProject[projectId] ?? "",
+        ),
+        current.model,
+      );
+      const pages = parsePagePlan(reply.text) ?? fallbackPagePlan();
+      state.updateProject(projectId, { pagePlan: pages });
+    } catch {
+      const stateNow = useVibe.getState();
+      stateNow.updateProject(projectId, { pagePlan: fallbackPagePlan() });
+    } finally {
+      setSuggesting(false);
+    }
+  }, [projectId, suggesting]);
+
+  /** Generate one planned page in the chosen design system. */
+  const generatePage = useCallback(
+    async (slug: string) => {
+      const state = useVibe.getState();
+      const current = state.projects.find((entry) => entry.id === projectId);
+      const plan: PlannedPage[] = current?.pagePlan ?? [];
+      const page = plan.find((entry) => entry.slug === slug);
+      if (!current || !page || generatingSlugs.has(slug)) return;
+      setGeneratingSlugs((prev) => new Set(prev).add(slug));
+      try {
+        const system = await resolveProjectDesignSystem(current);
+        const reply = await requestAi(
+          "prototype",
+          buildPagePrompt(
+            current.name,
+            current.idea,
+            state.prdByProject[projectId] ?? "",
+            page,
+            system.designMd,
+            system.tokensCss,
+          ),
+          current.model,
+        );
+        const html =
+          parsePrototypeHtml(reply.text) ||
+          `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8" />\n<title>${page.title}</title>\n</head>\n<body>\n<h1>${page.title}</h1>\n<p>${page.brief}</p>\n</body>\n</html>`;
+        saveHtmlFile(pageFilePath(slug), html);
+      } finally {
+        setGeneratingSlugs((prev) => {
+          const next = new Set(prev);
+          next.delete(slug);
+          return next;
+        });
+      }
+    },
+    [projectId, generatingSlugs, saveHtmlFile],
+  );
+
+  /** Generate every planned page that still lacks a frame, in plan order. */
+  const generateAllPages = useCallback(async () => {
+    const state = useVibe.getState();
+    const current = state.projects.find((entry) => entry.id === projectId);
+    const plan: PlannedPage[] = current?.pagePlan ?? [];
+    const files = state.filesByProject[projectId] ?? EMPTY_FILES;
+    const missing = plan.filter(
+      (page) => !files.some((file) => file.path === pageFilePath(page.slug)),
+    );
+    for (const page of missing) {
+      // Sequential on purpose: one model call at a time keeps long
+      // reasoning generations from colliding.
+      // eslint-disable-next-line no-await-in-loop
+      await generatePage(page.slug);
+    }
+  }, [projectId, generatePage]);
 
   const handleShapes = useCallback(
     (screenId: string, shapesJson: string) => {
@@ -501,10 +640,70 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     null;
   const activeDoc =
     docs.find((entry) => entry.id === selectedDocKey) ?? docs[0] ?? null;
-  const prototypeFile =
-    files.find((file) => file.path === "prototype.html") ?? null;
   const selectedTask =
     selectedTaskId ? (tasks.find((task) => task.id === selectedTaskId) ?? null) : null;
+
+  const pagePlan = project?.pagePlan ?? null;
+  const pendingPageCount = (pagePlan ?? []).filter(
+    (page) => !files.some((file) => file.path === pageFilePath(page.slug)),
+  ).length;
+  const designFrames: CanvasFrame[] = useMemo(() => {
+    const list: CanvasFrame[] = [];
+    const showcase =
+      files.find((file) => file.path === SHOWCASE_PATH) ?? null;
+    list.push({
+      id: SHOWCASE_PATH,
+      title: "Design system",
+      subtitle: showcase
+        ? `${project?.designSystem?.name ?? "Minimal"} · ${FRAME_W} × ${FRAME_H}`
+        : showcaseBusy
+          ? "drawing…"
+          : "not yet drawn",
+      html: showcase?.content ?? null,
+      kind: "page",
+      busy: showcaseBusy && !showcase,
+    });
+    for (const page of pagePlan ?? []) {
+      const file = files.find((entry) => entry.path === pageFilePath(page.slug));
+      list.push({
+        id: pageFilePath(page.slug),
+        slug: page.slug,
+        title: page.title,
+        subtitle: file ? `${FRAME_W} × ${FRAME_H}` : "not yet generated",
+        html: file?.content ?? null,
+        kind: "page",
+        brief: page.brief,
+        busy: generatingSlugs.has(page.slug),
+      });
+    }
+    const legacy = files.find((file) => file.path === "prototype.html");
+    if (legacy) {
+      list.push({
+        id: "prototype.html",
+        title: "Prototype",
+        subtitle: "Earlier draft",
+        html: legacy.content,
+        kind: "page",
+      });
+    }
+    if (pagePlan === null || pendingPageCount > 0) {
+      list.push({
+        id: "suggest",
+        title: "Next pages",
+        subtitle: "from the PRD",
+        html: null,
+        kind: "suggest",
+      });
+    }
+    return list;
+  }, [
+    files,
+    pagePlan,
+    pendingPageCount,
+    project?.designSystem,
+    showcaseBusy,
+    generatingSlugs,
+  ]);
 
   const patchTask = useCallback(
     (id: string, patch: Partial<Pick<Task, "title" | "notes">>) => {
@@ -784,43 +983,28 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           {view.kind === "design" && (
             <div className="relative min-h-0 flex-1">
               <div className="h-full min-h-0">
-                {prototypeFile && prototypeScreen ? (
-                  <DesignCanvas
-                    key={prototypeScreen.id}
-                    initialShapes={designShapes}
-                    html={prototypeFile.content}
-                    onShapes={(shapesJson) =>
-                      handleShapes(prototypeScreen.id, shapesJson)
-                    }
-                    onQuoteToChat={(text) => quoteToChat(text)}
-                    picking={picking}
-                    pickSession={pickSession}
-                    onPickingChange={setPicking}
-                    bottomInset={chatHeight}
-                  />
-                ) : (
-                  <div className="grid h-full place-items-center px-5">
-                    <div className="max-w-sm text-center">
-                      <p className="text-[15px] font-semibold">
-                        No prototype yet
-                      </p>
-                      <p className="mt-2 text-[13px] text-[#9aa0ae]">
-                        Generate a single-file page from the idea and brief.
-                        It renders live on the canvas as an HTML prototype.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => void generatePrototype()}
-                        disabled={protoBusy}
-                        className="mt-4 inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90 disabled:opacity-50"
-                      >
-                        {protoBusy
-                          ? "Generating…"
-                          : `Generate with ${project.model ? formatModelLabel(project.model) : "Muse"}`}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                <DesignCanvas
+                  key={prototypeScreen?.id ?? "canvas"}
+                  initialShapes={designShapes}
+                  frames={designFrames}
+                  onGeneratePage={(slug) => void generatePage(slug)}
+                  onSuggestPages={() => void suggestPages()}
+                  onGenerateAll={() => void generateAllPages()}
+                  suggesting={suggesting}
+                  pendingCount={pendingPageCount}
+                  modelLabel={
+                    project.model ? formatModelLabel(project.model) : "Muse"
+                  }
+                  onShapes={(shapesJson) =>
+                    prototypeScreen &&
+                    handleShapes(prototypeScreen.id, shapesJson)
+                  }
+                  onQuoteToChat={(text) => quoteToChat(text)}
+                  picking={picking}
+                  pickSession={pickSession}
+                  onPickingChange={setPicking}
+                  bottomInset={chatHeight}
+                />
               </div>
             </div>
           )}
@@ -850,7 +1034,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         draft={chatDraft}
         onDraftConsumed={() => setChatDraft(null)}
         onHeightChange={setChatHeight}
-        canPick={view.kind !== "design" || !!prototypeFile}
+        canPick
         picking={picking}
         onTogglePick={() => {
           setPicking((prev) => !prev);

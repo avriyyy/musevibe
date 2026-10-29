@@ -59,10 +59,16 @@ import {
 import {
   buildLogoPrompt,
   fileToLogoDataUrl,
-  initials,
+  removeLogoBackground,
   type LogoOrigin,
   type LogoStatus,
 } from "@/lib/logo";
+import {
+  DEFAULT_DESIGN_MD,
+  DEFAULT_TOKENS_CSS,
+  type DesignSystemRef,
+} from "@/lib/design-system";
+import DesignSetupStep from "@/components/DesignSetupStep";
 import {
   FRAMEWORKS,
   buildStackPrompt,
@@ -77,7 +83,7 @@ import { createDraftProject } from "@/lib/draft";
 const STEPS = [
   { label: "Stack" },
   { label: "Questions" },
-  { label: "Logo", isOptional: true },
+  { label: "Design", isOptional: true },
   { label: "Review" },
 ];
 
@@ -192,7 +198,10 @@ function Wizard() {
   const [logoPrompt, setLogoPrompt] = useState("");
   const [logoStatus, setLogoStatus] = useState<LogoStatus>("idle");
   const [logoError, setLogoError] = useState("");
-  const logoFileRef = useRef<HTMLInputElement>(null);
+  const [logoRemoveBg, setLogoRemoveBg] = useState(true);
+  const [logoBgNote, setLogoBgNote] = useState("");
+  const [design, setDesign] = useState<DesignSystemRef | null>(null);
+  const designLoadedRef = useRef("");
   const logoRequestRef = useRef(0);
   const stackTouchedRef = useRef(false);
 
@@ -325,6 +334,47 @@ function Wizard() {
     setLogoUrl(project.logoUrl ?? null);
     setLogoOrigin(project.logoUrl ? "upload" : null);
     setLogoStatus("idle");
+    setLogoRemoveBg(project.logoRemoveBg ?? true);
+    setLogoBgNote("");
+    // Unconditional so the effect keeps one straight hydration pass.
+    const savedDesign = project.designSystem ?? null;
+    setDesign(savedDesign);
+    if (savedDesign) {
+      designLoadedRef.current = savedDesign.id + savedDesign.source;
+    } else if (!designLoadedRef.current) {
+      // No saved choice yet: start from the quiet minimal template so the
+      // review step and the canvas always have a system to render.
+      designLoadedRef.current = "minimal:template";
+      void (async () => {
+        try {
+          const [designMd, tokensCss] = await Promise.all([
+            fetch("/design-systems/minimal/DESIGN.md").then((res) => res.text()),
+            fetch("/design-systems/minimal/tokens.css").then((res) => res.text()),
+          ]);
+          if (projectIdRef.current !== project.id) return;
+          setDesign((current) =>
+            current ?? {
+              id: "minimal",
+              name: "Minimal",
+              designMd,
+              tokensCss,
+              source: "template",
+            },
+          );
+        } catch {
+          if (projectIdRef.current !== project.id) return;
+          setDesign((current) =>
+            current ?? {
+              id: "minimal",
+              name: "Minimal",
+              designMd: DEFAULT_DESIGN_MD,
+              tokensCss: DEFAULT_TOKENS_CSS,
+              source: "template",
+            },
+          );
+        }
+      })();
+    }
     // Reuse the cached questionnaire when it exists; the generator effect
     // above already skips the AI call in that case.
     if (project.questions?.length) {
@@ -408,6 +458,31 @@ function Wizard() {
     void recommendStack();
   }, [idea, stackStatus, recommendStack]);
 
+  /** Cut the solid field behind a fresh mark, unless the user opted out. */
+  const maybeRemoveBg = async (image: string): Promise<string> => {
+    if (!logoRemoveBg) {
+      setLogoBgNote("");
+      return image;
+    }
+    setLogoBgNote("Removing the background…");
+    try {
+      const { image: cut, removedRatio } = await removeLogoBackground(image);
+      if (cut === image) {
+        setLogoBgNote(
+          "No clean backdrop found, so the original is kept. Toggle the option off if you prefer it untouched.",
+        );
+        return image;
+      }
+      setLogoBgNote(
+        `Background removed (${Math.round(removedRatio * 100)}% cleared). Turn the option off to keep the original.`,
+      );
+      return cut;
+    } catch {
+      setLogoBgNote("Background removal failed, so the original is kept.");
+      return image;
+    }
+  };
+
   const generateLogo = async () => {
     const description = logoPrompt.trim();
     if (!description || logoStatus === "loading") return;
@@ -432,7 +507,7 @@ function Wizard() {
       if (requestId !== logoRequestRef.current) return;
 
       if (typeof data.image === "string" && data.image) {
-        setLogoUrl(data.image);
+        setLogoUrl(await maybeRemoveBg(data.image));
         setLogoOrigin("ai");
         setLogoStatus("ready");
         return;
@@ -455,7 +530,7 @@ function Wizard() {
     setLogoError("");
     try {
       const dataUrl = await fileToLogoDataUrl(file);
-      setLogoUrl(dataUrl);
+      setLogoUrl(await maybeRemoveBg(dataUrl));
       setLogoOrigin("upload");
       setLogoStatus("ready");
     } catch (error) {
@@ -529,6 +604,8 @@ function Wizard() {
       timeline,
       framework,
       ...(logoUrl ? { logoUrl } : {}),
+      logoRemoveBg,
+      ...(design ? { designSystem: design } : {}),
       wizardStep: nextStep,
     });
   };
@@ -938,106 +1015,23 @@ function Wizard() {
           )}
 
           {step === 2 && (
-            <VStack gap={5}>
-              <VStack gap={1}>
-                <Heading level={2}>Give it a mark</Heading>
-                <Text type="supporting" color="secondary">
-                  Describe the logo you want and let the image model draw it,
-                  or upload your own. Skip to keep your initials as the mark.
-                </Text>
-              </VStack>
-
-              <HStack gap={4} vAlign="center">
-                {logoUrl ? (
-                  <img
-                    src={logoUrl}
-                    alt={`Logo for ${name.trim() || "the new project"}`}
-                    width={72}
-                    height={72}
-                    className="h-[72px] w-[72px] shrink-0 rounded-2xl object-cover"
-                  />
-                ) : (
-                  <div
-                    aria-hidden
-                    className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-2xl bg-white/10 text-[24px] font-semibold text-[#c9cdd6]">
-                    {initials(name.trim() || "?")}
-                  </div>
-                )}
-                <VStack gap={1}>
-                  <Text type="label">
-                    {logoUrl
-                      ? logoOrigin === "ai"
-                        ? "Drawn from your description"
-                        : "Uploaded by you"
-                      : "Initials for now"}
-                  </Text>
-                  <Text type="supporting" color="secondary">
-                    {logoUrl
-                      ? "This is the mark stored on the project."
-                      : "Generate or upload to replace it. Skipping is fine."}
-                  </Text>
-                </VStack>
-              </HStack>
-
-              <FormLayout defaultOptionality="optional">
-                <TextArea
-                  label="Describe the logo"
-                  rows={3}
-                  value={logoPrompt}
-                  onChange={setLogoPrompt}
-                  placeholder="A calm circle with a small sprout, deep green on transparent"
-                  description="One or two sentences: motif, colors, mood."
-                />
-              </FormLayout>
-
-              <HStack gap={3} vAlign="center">
-                <Button
-                  label={logoStatus === "loading" ? "Drawing…" : "Generate logo"}
-                  variant="primary"
-                  className="min-h-11 md:min-h-0"
-                  isDisabled={!logoPrompt.trim() || logoStatus === "loading"}
-                  onClick={() => void generateLogo()}
-                />
-                <Button
-                  label="Upload"
-                  variant="secondary"
-                  className="min-h-11 md:min-h-0"
-                  onClick={() => logoFileRef.current?.click()}
-                />
-                <input
-                  ref={logoFileRef}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/svg+xml"
-                  className="hidden"
-                  aria-label="Upload your own logo"
-                  onChange={(event) => {
-                    void uploadLogo(event.target.files?.[0]);
-                    event.target.value = "";
-                  }}
-                />
-              </HStack>
-
-              {logoStatus === "loading" && (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className="flex items-center gap-3">
-                  <Spinner size="md" />
-                  <Text type="supporting" color="secondary">
-                    Drawing your logo…
-                  </Text>
-                </div>
-              )}
-
-              {logoError && (
-                <Banner
-                  status="error"
-                  title="Logo unavailable"
-                  description={logoError}
-                  collapsible={false}
-                />
-              )}
-            </VStack>
+            <DesignSetupStep
+              projectName={name}
+              idea={idea}
+              design={design}
+              onDesign={setDesign}
+              logoUrl={logoUrl}
+              logoOrigin={logoOrigin}
+              logoPrompt={logoPrompt}
+              onLogoPrompt={setLogoPrompt}
+              logoStatus={logoStatus}
+              logoError={logoError}
+              logoBgNote={logoBgNote}
+              logoRemoveBg={logoRemoveBg}
+              onLogoRemoveBg={setLogoRemoveBg}
+              onGenerateLogo={() => void generateLogo()}
+              onUploadLogo={(file) => void uploadLogo(file)}
+            />
           )}
 
           {step === REVIEW_STEP && (
@@ -1096,6 +1090,11 @@ function Wizard() {
                 <MetadataListItem label="Framework">
                   {frameworkLabel(platform, framework)}
                 </MetadataListItem>
+                <MetadataListItem label="Design system">
+                  {design
+                    ? `${design.name} (${design.source === "template" ? "template" : design.source === "link" ? `from link${design.refUrl ? `: ${design.refUrl}` : ""}` : "uploaded"})`
+                    : "Minimal (default)"}
+                </MetadataListItem>
                 <MetadataListItem label="Logo">
                   {logoUrl ? (
                     <HStack gap={2} vAlign="center">
@@ -1106,7 +1105,7 @@ function Wizard() {
                         height={28}
                         className="h-7 w-7 rounded-full object-cover"
                       />
-                      <span>{logoOrigin === "ai" ? "Drawn by the image model" : "Uploaded"}</span>
+                      <span>{logoOrigin === "ai" ? "Drawn by the image model" : "Uploaded"}{logoRemoveBg ? ", background removed" : ""}</span>
                     </HStack>
                   ) : (
                     "Initials"
