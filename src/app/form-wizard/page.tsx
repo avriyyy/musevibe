@@ -57,11 +57,18 @@ import {
   type WizardQuestion,
 } from "@/lib/wizard";
 import {
+  MAX_LOGO_HISTORY,
   buildLogoPrompt,
+  buildLogoSvgPrompt,
   fileToLogoDataUrl,
+  parseLogoSvgVariants,
   removeLogoBackground,
+  sanitizeLogoSvg,
+  svgToDataUrl,
+  type LogoFormat,
   type LogoOrigin,
   type LogoStatus,
+  type LogoSvgVariant,
 } from "@/lib/logo";
 import {
   DEFAULT_DESIGN_MD,
@@ -200,6 +207,9 @@ function Wizard() {
   const [logoError, setLogoError] = useState("");
   const [logoRemoveBg, setLogoRemoveBg] = useState(true);
   const [logoBgNote, setLogoBgNote] = useState("");
+  const [logoFormat, setLogoFormat] = useState<LogoFormat>("svg");
+  const [svgVariants, setSvgVariants] = useState<LogoSvgVariant[]>([]);
+  const [svgStatus, setSvgStatus] = useState<"idle" | "loading">("idle");
   const [design, setDesign] = useState<DesignSystemRef | null>(null);
   const designLoadedRef = useRef("");
   const logoRequestRef = useRef(0);
@@ -335,6 +345,7 @@ function Wizard() {
     setLogoOrigin(project.logoUrl ? "upload" : null);
     setLogoStatus("idle");
     setLogoRemoveBg(project.logoRemoveBg ?? true);
+    setLogoFormat(project.logoFormat ?? "svg");
     setLogoBgNote("");
     // Unconditional so the effect keeps one straight hydration pass.
     const savedDesign = project.designSystem ?? null;
@@ -458,6 +469,17 @@ function Wizard() {
     void recommendStack();
   }, [idea, stackStatus, recommendStack]);
 
+  const logoHistory = project?.logoHistory ?? [];
+
+  /** Stash the current mark before replacing it, so nothing is ever lost. */
+  const stashLogo = (current: string | null) => {
+    if (!current || !projectId) return;
+    const next = [...logoHistory.filter((entry) => entry !== current), current].slice(
+      -MAX_LOGO_HISTORY,
+    );
+    useVibe.getState().updateProject(projectId, { logoHistory: next });
+  };
+
   /** Cut the solid field behind a fresh mark, unless the user opted out. */
   const maybeRemoveBg = async (image: string): Promise<string> => {
     if (!logoRemoveBg) {
@@ -507,6 +529,7 @@ function Wizard() {
       if (requestId !== logoRequestRef.current) return;
 
       if (typeof data.image === "string" && data.image) {
+        stashLogo(logoUrl);
         setLogoUrl(await maybeRemoveBg(data.image));
         setLogoOrigin("ai");
         setLogoStatus("ready");
@@ -525,11 +548,82 @@ function Wizard() {
     }
   };
 
+  /** Draw three vector variants with the text model; SVG has no backdrop. */
+  const generateLogoSvg = async () => {
+    const description = logoPrompt.trim();
+    if (!description || svgStatus === "loading") return;
+
+    const requestId = logoRequestRef.current + 1;
+    logoRequestRef.current = requestId;
+    setSvgStatus("loading");
+    setLogoError("");
+
+    try {
+      const response = await fetch("/api/ai/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          kind: "logo-svg",
+          prompt: buildLogoSvgPrompt(description, name.trim() || "Untitled project", idea),
+          ...(projectModel ? { model: projectModel } : {}),
+        }),
+      });
+      if (!response.ok) throw new Error(`Logo request failed: ${response.status}`);
+
+      const data = (await response.json()) as { text?: unknown };
+      if (requestId !== logoRequestRef.current) return;
+
+      const variants = parseLogoSvgVariants(data.text);
+      if (variants.length) {
+        setSvgVariants(variants);
+        setLogoBgNote("");
+      } else {
+        setLogoError("The model did not return usable SVG. Try a shorter description.");
+      }
+    } catch {
+      if (requestId !== logoRequestRef.current) return;
+      setLogoError("The model is unavailable right now, so no variants were drawn. Try again or upload a file.");
+    } finally {
+      if (requestId === logoRequestRef.current) setSvgStatus("idle");
+    }
+  };
+
+  /** Adopt one vector variant as the mark, stashing the current one. */
+  const pickLogoSvg = (svg: string) => {
+    stashLogo(logoUrl);
+    setLogoUrl(svgToDataUrl(svg));
+    setLogoOrigin("ai");
+    setLogoStatus("ready");
+    setLogoError("");
+    setLogoBgNote("Vector mark: transparent by construction, no removal needed.");
+  };
+
+  /** Bring back an older mark, stashing the current one in its place. */
+  const restoreLogo = (url: string) => {
+    if (url === logoUrl) return;
+    stashLogo(logoUrl);
+    setLogoUrl(url);
+    setLogoOrigin(url.startsWith("data:image/svg") ? "ai" : "upload");
+    setLogoBgNote("");
+  };
+
   const uploadLogo = async (file: File | undefined) => {
     if (!file) return;
     setLogoError("");
     try {
+      if (file.type === "image/svg+xml" || /\.svg$/i.test(file.name)) {
+        const raw = await file.text();
+        const clean = sanitizeLogoSvg(raw);
+        if (!clean) throw new Error("That SVG could not be read. Pick a valid .svg file.");
+        stashLogo(logoUrl);
+        setLogoUrl(svgToDataUrl(clean));
+        setLogoOrigin("upload");
+        setLogoStatus("ready");
+        setLogoBgNote("Vector mark: transparent by construction, no removal needed.");
+        return;
+      }
       const dataUrl = await fileToLogoDataUrl(file);
+      stashLogo(logoUrl);
       setLogoUrl(await maybeRemoveBg(dataUrl));
       setLogoOrigin("upload");
       setLogoStatus("ready");
@@ -605,6 +699,8 @@ function Wizard() {
       framework,
       ...(logoUrl ? { logoUrl } : {}),
       logoRemoveBg,
+      logoFormat,
+      ...(project?.logoHistory?.length ? { logoHistory: project.logoHistory } : {}),
       ...(design ? { designSystem: design } : {}),
       wizardStep: nextStep,
     });
@@ -1030,6 +1126,14 @@ function Wizard() {
               onLogoRemoveBg={setLogoRemoveBg}
               onGenerateLogo={() => void generateLogo()}
               onUploadLogo={(file) => void uploadLogo(file)}
+              logoFormat={logoFormat}
+              onLogoFormat={setLogoFormat}
+              logoHistory={logoHistory}
+              onRestoreLogo={restoreLogo}
+              svgVariants={svgVariants}
+              svgStatus={svgStatus}
+              onGenerateSvg={() => void generateLogoSvg()}
+              onPickSvg={pickLogoSvg}
             />
           )}
 
@@ -1104,7 +1208,7 @@ function Wizard() {
                         height={28}
                         className="h-7 w-7 rounded-full object-cover"
                       />
-                      <span>{logoOrigin === "ai" ? "Drawn by the image model" : "Uploaded"}{logoRemoveBg ? ", background removed" : ""}</span>
+                      <span>{logoOrigin === "ai" ? (logoFormat === "svg" ? "Drawn as vector" : "Drawn by the image model") : "Uploaded"}{logoFormat === "svg" ? ", SVG" : ""}{logoRemoveBg && logoFormat === "png" ? ", background removed" : ""}{logoHistory.length ? `, ${logoHistory.length} previous kept` : ""}</span>
                     </HStack>
                   ) : (
                     "Initials"

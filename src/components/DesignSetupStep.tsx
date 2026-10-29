@@ -25,7 +25,14 @@ import {
   buildSamplePreviewHtml,
   type DesignSystemRef,
 } from "@/lib/design-system";
-import { initials, type LogoOrigin, type LogoStatus } from "@/lib/logo";
+import {
+  initials,
+  svgToDataUrl,
+  type LogoFormat,
+  type LogoOrigin,
+  type LogoStatus,
+  type LogoSvgVariant,
+} from "@/lib/logo";
 
 const fileCache = new Map<string, { designMd: string; tokensCss: string }>();
 const swatchCache = new Map<string, string[] | null>();
@@ -122,6 +129,14 @@ interface DesignSetupStepProps {
   onLogoRemoveBg: (value: boolean) => void;
   onGenerateLogo: () => void;
   onUploadLogo: (file: File | undefined) => void;
+  logoFormat: LogoFormat;
+  onLogoFormat: (format: LogoFormat) => void;
+  logoHistory: string[];
+  onRestoreLogo: (url: string) => void;
+  svgVariants: LogoSvgVariant[];
+  svgStatus: "idle" | "loading";
+  onGenerateSvg: () => void;
+  onPickSvg: (svg: string) => void;
 }
 
 export default function DesignSetupStep({
@@ -139,6 +154,14 @@ export default function DesignSetupStep({
   onLogoRemoveBg,
   onGenerateLogo,
   onUploadLogo,
+  logoFormat,
+  onLogoFormat,
+  logoHistory,
+  onRestoreLogo,
+  svgVariants,
+  svgStatus,
+  onGenerateSvg,
+  onPickSvg,
 }: DesignSetupStepProps) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
@@ -325,8 +348,8 @@ export default function DesignSetupStep({
       <VStack gap={2}>
         <Heading level={3}>Give it a mark</Heading>
         <Text type="supporting" color="secondary">
-          Describe the logo and let the image model draw it, or upload your
-          own. Skip to keep your initials as the mark.
+          Describe the logo, pick vector or raster, and generate it — or
+          upload your own. Skip to keep your initials as the mark.
         </Text>
         <HStack gap={4} vAlign="center">
           {logoUrl ? (
@@ -370,47 +393,148 @@ export default function DesignSetupStep({
           description="One or two sentences: motif, colors, mood. Flat and minimal reads best at small sizes."
         />
 
-        <HStack gap={3} vAlign="center">
-          <Button
-            label={logoStatus === "loading" ? "Drawing…" : "Generate logo"}
-            variant="primary"
-            className="min-h-11 md:min-h-0"
-            isDisabled={!logoPrompt.trim() || logoStatus === "loading"}
-            onClick={onGenerateLogo}
-          />
-          <Button
-            label="Upload"
-            variant="secondary"
-            className="min-h-11 md:min-h-0"
-            onClick={() => logoFileRef.current?.click()}
-          />
-          <input
-            ref={logoFileRef}
-            type="file"
-            accept="image/png,image/jpeg,image/webp,image/svg+xml"
-            className="hidden"
-            aria-label="Upload your own logo"
-            onChange={(event) => {
-              onUploadLogo(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-        </HStack>
+        <div
+          role="group"
+          aria-label="Logo format"
+          className="flex gap-1 self-start rounded-full bg-white/5 p-1">
+          {(
+            [
+              { value: "svg", label: "SVG · vector" },
+              { value: "png", label: "PNG · raster" },
+            ] as Array<{ value: LogoFormat; label: string }>
+          ).map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              onClick={() => onLogoFormat(option.value)}
+              aria-pressed={logoFormat === option.value}
+              className={`min-h-9 rounded-full px-4 text-[13px] font-medium transition-colors ${
+                logoFormat === option.value
+                  ? "bg-white text-[#0b0c10]"
+                  : "text-[#9aa0ae] hover:text-white"
+              }`}>
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <Text type="supporting" color="secondary">
+          {logoFormat === "svg"
+            ? "Vector from the text model: transparent by construction, sharp at any size."
+            : "Raster from the image model. Use remove-background when the mark arrives on a solid field."}
+        </Text>
 
-        <label className="flex min-h-11 cursor-pointer items-center gap-3 md:min-h-0">
-          <input
-            type="checkbox"
-            checked={logoRemoveBg}
-            onChange={(event) => onLogoRemoveBg(event.target.checked)}
-            className="size-4 accent-black"
-          />
-          <span className="text-[14px] text-[#f5f6f8]">
-            Remove background
-            <span className="block text-[12px] text-[#9aa0ae]">
-              On: the solid field behind the mark is cut so the logo sits clean on any surface.
+        {logoFormat === "svg" ? (
+          <HStack gap={3} vAlign="center">
+            <Button
+              label={svgStatus === "loading" ? "Drawing…" : "Generate 3 variants"}
+              variant="primary"
+              className="min-h-11 md:min-h-0"
+              isDisabled={!logoPrompt.trim() || svgStatus === "loading"}
+              onClick={onGenerateSvg}
+            />
+            <Button
+              label="Upload SVG"
+              variant="secondary"
+              className="min-h-11 md:min-h-0"
+              onClick={() => logoFileRef.current?.click()}
+            />
+          </HStack>
+        ) : (
+          <HStack gap={3} vAlign="center">
+            <Button
+              label={logoStatus === "loading" ? "Drawing…" : "Generate logo"}
+              variant="primary"
+              className="min-h-11 md:min-h-0"
+              isDisabled={!logoPrompt.trim() || logoStatus === "loading"}
+              onClick={onGenerateLogo}
+            />
+            <Button
+              label="Upload"
+              variant="secondary"
+              className="min-h-11 md:min-h-0"
+              onClick={() => logoFileRef.current?.click()}
+            />
+          </HStack>
+        )}
+        <input
+          ref={logoFileRef}
+          type="file"
+          accept="image/png,image/jpeg,image/webp,image/svg+xml"
+          className="hidden"
+          aria-label="Upload your own logo"
+          onChange={(event) => {
+            onUploadLogo(event.target.files?.[0]);
+            event.target.value = "";
+          }}
+        />
+
+        {svgVariants.length > 0 && (
+          <div className="grid grid-cols-3 gap-2">
+            {svgVariants.map((variant, index) => (
+              <button
+                key={index}
+                type="button"
+                onClick={() => onPickSvg(variant.svg)}
+                className="group flex flex-col items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.02] p-3 transition-colors hover:border-white/30 hover:bg-white/[0.04]">
+                <img
+                  src={svgToDataUrl(variant.svg)}
+                  alt={`Logo variant ${index + 1}${variant.rationale ? `: ${variant.rationale}` : ""}`}
+                  className="size-16 text-white [color-scheme:dark]"
+                />
+                {!!variant.rationale && (
+                  <span className="line-clamp-2 text-center text-[11px] leading-4 text-[#9aa0ae]">
+                    {variant.rationale}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {logoFormat === "png" && (
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 md:min-h-0">
+            <input
+              type="checkbox"
+              checked={logoRemoveBg}
+              onChange={(event) => onLogoRemoveBg(event.target.checked)}
+              className="size-4 accent-black"
+            />
+            <span className="text-[14px] text-[#f5f6f8]">
+              Remove background
+              <span className="block text-[12px] text-[#9aa0ae]">
+                On: the solid field behind the mark is cut so the logo sits clean on any surface.
+              </span>
             </span>
-          </span>
-        </label>
+          </label>
+        )}
+
+        {logoHistory.length > 0 && (
+          <VStack gap={2}>
+            <Text type="label">Previous marks ({logoHistory.length})</Text>
+            <div className="flex flex-wrap gap-2">
+              {logoHistory.map((url, index) => (
+                <button
+                  key={`${index}-${url.slice(-24)}`}
+                  type="button"
+                  onClick={() => onRestoreLogo(url)}
+                  title="Bring this mark back"
+                  aria-label={`Bring back previous mark ${index + 1}`}
+                  className="overflow-hidden rounded-xl border border-white/10 transition-colors hover:border-white/30">
+                  <img
+                    src={url}
+                    alt=""
+                    width={48}
+                    height={48}
+                    className="size-12 bg-white/[0.04] object-contain [color-scheme:dark]"
+                  />
+                </button>
+              ))}
+            </div>
+            <Text type="supporting" color="secondary">
+              Generating or uploading a new mark stashes the current one here. Click any to bring it back.
+            </Text>
+          </VStack>
+        )}
 
         {logoStatus === "loading" && (
           <div role="status" aria-live="polite" className="flex items-center gap-3">

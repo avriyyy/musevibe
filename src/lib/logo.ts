@@ -162,3 +162,144 @@ export async function removeLogoBackground(
   ctx.putImageData(frame, 0, 0);
   return { image: canvas.toDataURL("image/png"), removedRatio };
 }
+
+/** Logo image format. PNG comes from the image model, SVG from the text model. */
+export type LogoFormat = "png" | "svg";
+
+export interface LogoSvgVariant {
+  svg: string;
+  rationale: string;
+}
+
+/** Keep only a short trail of replaced marks; data URLs add up in storage. */
+export const MAX_LOGO_HISTORY = 6;
+
+/**
+ * The brief sent to the text model for vector marks. Distilled from the
+ * logo-generator skill (geometric primitives, viewBox 0 0 100 100,
+ * currentColor, no backdrop) plus the antislop bans: flat fills, no
+ * gradients, no generic filler icons, no text unless asked.
+ */
+export function buildLogoSvgPrompt(
+  description: string,
+  projectName: string,
+  idea: string,
+): string {
+  const trimmed = description.replace(/\s+/g, " ").trim().slice(0, 500);
+  const context = idea.replace(/\s+/g, " ").trim().slice(0, 200);
+
+  return [
+    `Design 3 logo variants for an app called "${projectName}".`,
+    context ? `The app does this: "${context}".` : "",
+    `The user describes the logo they want as: "${trimmed}".`,
+    "",
+    "Return ONLY a JSON object with this shape, no fences, no commentary:",
+    '{"variants":[{"svg":"<svg viewBox=\\"0 0 100 100\\">...</svg>","rationale":"one sentence"}]}',
+    "",
+    "Rules for every variant:",
+    "- One <svg> with viewBox=\"0 0 100 100\", no width or height attributes.",
+    "- Transparent by construction: never draw a background rect or page fill.",
+    "- Geometric primitives (circle, rect, polygon, path) grouped in <g>; at most two solid fills via currentColor and one fixed hex.",
+    "- Motif tied to what the app does. No sparkle, star, lightning bolt, robot, cube, diamond, or magic wand filler.",
+    "- No text or letters unless the user explicitly asked for them.",
+    "- No gradients, glow, shadows, filters, scripts, event handlers, or external references.",
+    "- Flat, neat, readable at 16 pixels. Valid XML that parses on its own.",
+    "- The three variants must feel distinctly different, not parameter tweaks.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Pull variant SVGs out of a model response; falls back to raw svg blocks. */
+export function parseLogoSvgVariants(raw: unknown): LogoSvgVariant[] {
+  if (typeof raw !== "string") return [];
+  let text = raw.trim();
+  if (!text) return [];
+  const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)\s*```/i);
+  if (fenced) text = fenced[1].trim();
+  const first = text.indexOf("{");
+  const last = text.lastIndexOf("}");
+  if (first !== -1 && last > first) {
+    try {
+      const data = JSON.parse(text.slice(first, last + 1)) as {
+        variants?: Array<{ svg?: unknown; rationale?: unknown }>;
+      };
+      const variants = (data.variants ?? [])
+        .map((entry) => ({
+          svg: sanitizeLogoSvg(typeof entry.svg === "string" ? entry.svg : ""),
+          rationale: (
+            typeof entry.rationale === "string" ? entry.rationale : ""
+          )
+            .trim()
+            .slice(0, 160),
+        }))
+        .filter((entry) => entry.svg);
+      if (variants.length) return variants.slice(0, 4);
+    } catch {
+      // Fall through to raw block extraction below.
+    }
+  }
+  return text
+    .match(/<svg[\s\S]*?<\/svg>/gi)
+    ?.map((svg) => sanitizeLogoSvg(svg))
+    .filter(Boolean)
+    .slice(0, 4)
+    .map((svg) => ({ svg, rationale: "" })) ?? [];
+}
+
+/** Strip scripts, handlers, and external references from a logo SVG. */
+export function sanitizeLogoSvg(raw: string): string {
+  let svg = raw.trim();
+  const open = svg.search(/<svg[\s>]/i);
+  if (open === -1) return "";
+  svg = svg.slice(open);
+  const close = svg.toLowerCase().lastIndexOf("</svg>");
+  if (close === -1) return "";
+  svg = svg.slice(0, close + "</svg>".length);
+  return svg
+    .replace(/<script[\s\S]*?<\/script\s*>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, "")
+    .replace(/(href|xlink:href)\s*=\s*("[^"]*"|'[^']*')/gi, (match, _attr, quoted: string) => {
+      const url = quoted.slice(1, -1).trim();
+      return url.startsWith("#") ? match : "";
+    })
+    .slice(0, 20000);
+}
+
+/** Encode a sanitized SVG as a data URL for <img> and storage. */
+export function svgToDataUrl(svg: string): string {
+  // <img> decodes the data URL as a standalone document: it needs the SVG
+  // namespace and intrinsic dimensions, or naturalWidth stays zero and
+  // nothing paints.
+  let framed = svg;
+  if (!/xmlns\s*=/i.test(framed)) {
+    framed = framed.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
+  }
+  if (!/\swidth\s*=/i.test(framed)) {
+    framed = framed.replace(/<svg\b/i, '<svg width="256" height="256"');
+  }
+  return `data:image/svg+xml;utf8,${encodeURIComponent(framed)}`;
+}
+
+/** Local fallback: geometric initials marks when the model is offline. */
+export function mockLogoSvgVariants(projectName: string): LogoSvgVariant[] {
+  const letters = initials(projectName).slice(0, 2);
+  const base = (inner: string, rationale: string): LogoSvgVariant => ({
+    svg: `<svg viewBox="0 0 100 100"><g fill="currentColor">${inner}</g></svg>`,
+    rationale,
+  });
+  return [
+    base(
+      `<circle cx="50" cy="50" r="34" fill="none" stroke="currentColor" stroke-width="10"/><text x="50" y="63" font-size="36" text-anchor="middle" font-family="system-ui,sans-serif" font-weight="700">${letters}</text>`,
+      "Ring with initials",
+    ),
+    base(
+      `<rect x="22" y="22" width="56" height="56" rx="14" fill="none" stroke="currentColor" stroke-width="10"/><circle cx="50" cy="50" r="10"/>`,
+      "Rounded square with a core dot",
+    ),
+    base(
+      `<polygon points="50,18 78,68 22,68" fill="none" stroke="currentColor" stroke-width="10" stroke-linejoin="round"/><circle cx="50" cy="55" r="8"/>`,
+      "Triangle shell with a core dot",
+    ),
+  ];
+}

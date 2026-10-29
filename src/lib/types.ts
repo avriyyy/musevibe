@@ -44,6 +44,10 @@ export interface Project {
   logoUrl?: string;
   /** Strip the image background after generation or upload. Defaults to on. */
   logoRemoveBg?: boolean;
+  /** Logo image format: raster from the image model, vector from the text model. */
+  logoFormat?: "png" | "svg";
+  /** Replaced marks, newest last, so a new generation never loses the old one. */
+  logoHistory?: string[];
   /** Chosen design system: template, uploaded design.md, or converted link. */
   designSystem?: DesignSystemRef;
   /** Planned prototype pages in build order; files hold the generated HTML. */

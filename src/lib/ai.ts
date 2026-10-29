@@ -1,11 +1,12 @@
 import type { Prd } from "./types";
 import { FALLBACK_QUESTIONS, deriveProjectName } from "./wizard";
+import { mockLogoSvgVariants } from "./logo";
 import { docFullName } from "./docs";
 
 // Abstraction AI agar bisa swap provider Meta (Muse Spark).
 // Kalau AI_API_URL / AI_API_KEY kosong -> mock lokal, demo tetap jalan.
 
-export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo" | "stack" | "name" | "doc" | "prototype" | "chat" | "design-system" | "pages";
+export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo" | "logo-svg" | "stack" | "name" | "doc" | "prototype" | "chat" | "design-system" | "pages";
 
 export interface AiGenerateResult {
   text: string;
@@ -183,6 +184,14 @@ function mockGenerate(kind: AiGenerateKind, prompt: string): string {
   if (kind === "doc") {
     const label = docFullName("prd");
     return `# ${label} (local draft)\n\n> The model is unavailable, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${idea}\n\n## Overview\nFill in the product context from the brief.\n\n## Details\nExpand each required section with concrete, product-specific content.\n\n## Open questions\nList what still needs a decision before building.`;
+  }
+  if (kind === "logo-svg") {
+    return JSON.stringify({
+      variants: mockLogoSvgVariants("Logo").map((entry) => ({
+        svg: entry.svg,
+        rationale: entry.rationale,
+      })),
+    });
   }
   if (kind === "design-system") {
     return `Design system (local)\n\nThe model is unavailable, so the reference could not be converted. Pick a bundled template instead, or paste DESIGN.md content directly.\n\nIdea: ${idea}`;
