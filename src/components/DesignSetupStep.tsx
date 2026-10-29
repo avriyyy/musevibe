@@ -108,7 +108,6 @@ async function loadTemplateFiles(id: string) {
 
 interface DesignSetupStepProps {
   projectName: string;
-  idea: string;
   design: DesignSystemRef | null;
   onDesign: (next: DesignSystemRef | null) => void;
   logoUrl: string | null;
@@ -126,7 +125,6 @@ interface DesignSetupStepProps {
 
 export default function DesignSetupStep({
   projectName,
-  idea,
   design,
   onDesign,
   logoUrl,
@@ -145,13 +143,8 @@ export default function DesignSetupStep({
   const [category, setCategory] = useState("All");
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
-  const [linkUrl, setLinkUrl] = useState("");
-  const [linkStatus, setLinkStatus] = useState<"idle" | "loading" | "error">("idle");
-  const [linkError, setLinkError] = useState("");
-  const [draftMd, setDraftMd] = useState("");
   const [showMd, setShowMd] = useState(false);
   const logoFileRef = useRef<HTMLInputElement>(null);
-  const mdFileRef = useRef<HTMLInputElement>(null);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -201,70 +194,6 @@ export default function DesignSetupStep({
   const previewEntry = previewId
     ? (DESIGN_SYSTEMS.find((entry) => entry.id === previewId) ?? null)
     : null;
-
-  const convertLink = async () => {
-    const url = linkUrl.trim();
-    if (!url || linkStatus === "loading") return;
-    setLinkStatus("loading");
-    setLinkError("");
-    try {
-      const response = await fetch("/api/design/reference", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url, projectName, idea }),
-      });
-      const data = (await response.json()) as {
-        name?: unknown;
-        designMd?: unknown;
-        tokensCss?: unknown;
-        error?: unknown;
-      };
-      if (!response.ok) {
-        throw new Error(
-          typeof data.error === "string" ? data.error : "The link could not be converted.",
-        );
-      }
-      const converted: DesignSystemRef = {
-        id: "custom",
-        name: typeof data.name === "string" && data.name ? data.name : "Linked reference",
-        designMd: typeof data.designMd === "string" ? data.designMd : DEFAULT_DESIGN_MD,
-        tokensCss: typeof data.tokensCss === "string" && data.tokensCss ? data.tokensCss : DEFAULT_TOKENS_CSS,
-        source: "link",
-        refUrl: url,
-      };
-      setDraftMd(converted.designMd);
-      onDesign(converted);
-    } catch (error) {
-      setLinkStatus("error");
-      setLinkError(error instanceof Error ? error.message : "The link could not be converted.");
-      return;
-    }
-    setLinkStatus("idle");
-  };
-
-  const uploadMd = async (file: File | undefined) => {
-    if (!file) return;
-    const text = await file.text();
-    if (text.trim().length < 50) {
-      setLinkStatus("error");
-      setLinkError("That file is too short to be a design system. Paste fuller DESIGN.md content.");
-      return;
-    }
-    const css = text.match(/```css\s*\n?([\s\S]*?)```/i)?.[1]?.trim() ?? "";
-    onDesign({
-      id: "custom",
-      name: file.name.replace(/\.md$/i, "") || "Uploaded system",
-      designMd: text.slice(0, 12000),
-      tokensCss: css || DEFAULT_TOKENS_CSS,
-      source: "upload",
-    });
-    setDraftMd(text.slice(0, 12000));
-  };
-
-  const previewSrcDoc =
-    design && (design.source === "upload" || design.source === "link" || design.source === "template")
-      ? buildSamplePreviewHtml(design.tokensCss || DEFAULT_TOKENS_CSS, projectName)
-      : null;
 
   const selectedLabel = design
     ? `${design.name} · ${design.source === "template" ? "template" : design.source === "link" ? "from link" : "uploaded"}`
@@ -373,109 +302,25 @@ export default function DesignSetupStep({
                   <span className="mt-0.5 truncate text-[11px] text-[#9aa0ae]">{entry.category}</span>
                 )}
                 <TemplateSwatches id={entry.id} />
-                <span className="mt-2 flex items-center gap-2 border-t border-white/[0.07] pt-2">
-                  <button
-                    type="button"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setPreviewId(entry.id);
-                    }}
-                    className="min-h-8 rounded-lg px-2 text-[12px] font-medium text-[#9aa0ae] underline hover:text-white md:min-h-0">
-                    Preview
-                  </button>
-                  <span className="ml-auto text-[11px] text-[#5b6472]">
-                    {busy ? "Loading…" : selected ? "In use" : "Click card to use"}
-                  </span>
-                </span>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setPreviewId(entry.id);
+                  }}
+                  className="mt-2 min-h-9 w-full rounded-xl bg-white text-[12px] font-medium text-[#0b0c10] transition-colors hover:bg-white/90">
+                  {busy ? "Loading…" : selected ? "Preview · in use" : "Preview"}
+                </button>
               </div>
             );
           })}
         </div>
         {filtered.length === 0 && (
           <Text type="supporting" color="secondary">
-            No template matches that search. Try another word, or upload your own file below.
+            No template matches that search. Try another word.
           </Text>
         )}
       </VStack>
-
-      <VStack gap={2}>
-        <Heading level={3}>Or bring your own</Heading>
-        <HStack gap={3}>
-          <div className="min-w-0 flex-1">
-            <TextInput
-              label="Reference link"
-              value={linkUrl}
-              onChange={setLinkUrl}
-              placeholder="https://example.com/design-guidelines"
-              description="A visible page with real text, converted into DESIGN.md plus tokens."
-            />
-          </div>
-          <div className="pt-6">
-            <Button
-              label={linkStatus === "loading" ? "Converting…" : "Convert link"}
-              variant="secondary"
-              className="min-h-11 md:min-h-0"
-              isDisabled={!linkUrl.trim() || linkStatus === "loading"}
-              onClick={() => void convertLink()}
-            />
-          </div>
-        </HStack>
-        {linkStatus === "error" && (
-          <Banner status="error" title="Link not converted" description={linkError} collapsible={false} />
-        )}
-        <HStack gap={3} vAlign="center">
-          <Button
-            label="Upload design.md"
-            variant="secondary"
-            className="min-h-11 md:min-h-0"
-            onClick={() => mdFileRef.current?.click()}
-          />
-          <input
-            ref={mdFileRef}
-            type="file"
-            accept=".md,text/markdown,text/plain"
-            className="hidden"
-            aria-label="Upload a design.md file"
-            onChange={(event) => {
-              void uploadMd(event.target.files?.[0]);
-              event.target.value = "";
-            }}
-          />
-          <Text type="supporting" color="secondary">
-            A DESIGN.md file from your own system. A fenced css block becomes the tokens.
-          </Text>
-        </HStack>
-        {(design?.source === "upload" || design?.source === "link") && (
-          <TextArea
-            label="DESIGN.md content (editable)"
-            rows={5}
-            value={draftMd}
-            onChange={(next) => {
-              setDraftMd(next);
-              if (design) onDesign({ ...design, designMd: next });
-            }}
-            description="Tune the converted text before finishing. The preview below follows it."
-          />
-        )}
-      </VStack>
-
-      {previewSrcDoc && (
-        <VStack gap={2}>
-          <Heading level={3}>Preview</Heading>
-          <div className="overflow-hidden rounded-xl border border-white/10">
-            <iframe
-              title={`${design?.name ?? "Design system"} preview`}
-              srcDoc={previewSrcDoc}
-              sandbox="allow-scripts"
-              className="h-72 w-full bg-white"
-            />
-          </div>
-          <Text type="supporting" color="secondary">
-            Rendered from the token block. The full template preview with real
-            components is one click away on any template card.
-          </Text>
-        </VStack>
-      )}
 
       <VStack gap={2}>
         <Heading level={3}>Give it a mark</Heading>

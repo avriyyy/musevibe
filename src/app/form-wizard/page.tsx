@@ -1017,7 +1017,6 @@ function Wizard() {
           {step === 2 && (
             <DesignSetupStep
               projectName={name}
-              idea={idea}
               design={design}
               onDesign={setDesign}
               logoUrl={logoUrl}
