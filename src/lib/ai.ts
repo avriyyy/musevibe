@@ -5,7 +5,7 @@ import { docFullName } from "./docs";
 // Abstraction AI agar bisa swap provider Meta (Muse Spark).
 // Kalau AI_API_URL / AI_API_KEY kosong -> mock lokal, demo tetap jalan.
 
-export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo" | "stack" | "name" | "doc" | "prototype";
+export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | "logo" | "stack" | "name" | "doc" | "prototype" | "chat";
 
 export interface AiGenerateResult {
   text: string;
@@ -186,6 +186,16 @@ function mockGenerate(kind: AiGenerateKind, prompt: string): string {
   }
   if (kind === "prototype") {
     return `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8" />\n<meta name="viewport" content="width=device-width, initial-scale=1" />\n<title>Prototype (local draft)</title>\n<style>\nbody { font-family: system-ui, sans-serif; margin: 0; padding: 32px; background: #0b0c10; color: #f5f6f8; }\nmain { max-width: 640px; margin: 0 auto; }\n</style>\n</head>\n<body>\n<main>\n<h1>Prototype (local draft)</h1>\n<p>${idea}</p>\n<p>The model is unavailable, so this is a placeholder. Generate again with the model for the full prototype.</p>\n</main>\n</body>\n</html>`;
+  }
+  if (kind === "chat") {
+    const lines = prompt.split("\n");
+    const lastUser = [...lines]
+      .reverse()
+      .find((line) => line.startsWith("User: "))
+      ?.slice("User: ".length)
+      .trim();
+    const question = lastUser || prompt.slice(0, 200);
+    return `The model is unavailable right now, so I cannot answer from the project context yet. Reconnect the model and ask again. Your message was: ${question}`;
   }
   return `// starter (mock) untuk: ${idea}\nexport default function App() {\n  return <h1>MuseVibe starter</h1>;\n}`;
 }

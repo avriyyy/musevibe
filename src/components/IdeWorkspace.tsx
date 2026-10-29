@@ -32,6 +32,7 @@ import {
   InboxIcon,
 } from "@heroicons/react/24/outline";
 import DocumentsView from "@/components/DocumentsView";
+import WorkspaceChat from "@/components/WorkspaceChat";
 import { parseCanvasShapes, type CanvasShape } from "@/lib/canvas";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
@@ -569,7 +570,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const running = phase !== null;
 
   return (
-    <div className="flex h-dvh flex-col bg-[#0b0c10] text-[#f5f6f8]">
+    <div className="relative flex h-dvh flex-col bg-[#0b0c10] text-[#f5f6f8]">
       <header className="relative flex h-14 shrink-0 items-center gap-3 border-b border-white/10 px-4">
         <Link
           href="/"
@@ -787,6 +788,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           )}
         </main>
       </div>
+
+      <WorkspaceChat
+        key={projectId}
+        project={project}
+        brief={prd}
+        docs={docs}
+        tasks={tasks}
+      />
     </div>
   );
 }

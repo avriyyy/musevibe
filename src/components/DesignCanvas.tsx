@@ -915,9 +915,9 @@ export default function DesignCanvas({
         />
       )}
 
-      {/* Picked prototype component, bottom center. */}
+      {/* Picked prototype component, above the chat pill. */}
       {inspected && !editingId && (
-        <div className="absolute bottom-4 left-1/2 z-10 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-[#17181d]/95 py-1.5 pl-4 pr-1.5 shadow-xl">
+        <div className="absolute bottom-20 left-1/2 z-10 flex max-w-[calc(100%-2rem)] -translate-x-1/2 items-center gap-2 rounded-full border border-white/10 bg-[#17181d]/95 py-1.5 pl-4 pr-1.5 shadow-xl">
           <span className="truncate text-[12px] font-medium text-[#f5f6f8]">
             {nodeLabel(inspected)}
           </span>
