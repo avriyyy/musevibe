@@ -2,15 +2,12 @@
 
 /**
  * Canvas chrome for the design canvas: a two-button navigation rail
- * (pan + select) centered at the top, and a top-right cluster with the
- * overview map next to a compact zoom stack. The stack shows the current
- * zoom, so the canvas never leaves you guessing at scale. Dark pills on
- * the workspace background.
+ * (pan + select) centered at the top, and a compact zoom stack in the top
+ * right corner. The stack shows the current zoom, so the canvas never
+ * leaves you guessing at scale. Dark pills on the workspace background.
  */
 
 import type { ReactElement, ReactNode } from "react";
-import Minimap from "./Minimap";
-import type { CanvasShape, Transform } from "@/lib/canvas";
 
 interface ToolDef {
   id: string;
@@ -86,10 +83,6 @@ export default function CanvasChrome({
   onZoomOut,
   onResetZoom,
   onFit,
-  shapes,
-  transform,
-  viewport,
-  onNavigate,
 }: {
   tool: string;
   onTool: (id: string) => void;
@@ -98,10 +91,6 @@ export default function CanvasChrome({
   onZoomOut: () => void;
   onResetZoom: () => void;
   onFit: () => void;
-  shapes: readonly CanvasShape[];
-  transform: Transform;
-  viewport: { w: number; h: number };
-  onNavigate: (worldX: number, worldY: number) => void;
 }) {
   return (
     <>
@@ -135,14 +124,8 @@ export default function CanvasChrome({
         </div>
       </div>
 
-      {/* Overview map + zoom, top right. */}
-      <div className="absolute right-3 top-3 z-10 flex items-start gap-2">
-        <Minimap
-          shapes={shapes}
-          transform={transform}
-          viewport={viewport}
-          onNavigate={onNavigate}
-        />
+      {/* Zoom, top right. */}
+      <div className="absolute right-3 top-3 z-10">
         <div className="flex w-10 flex-col items-center rounded-2xl border border-white/10 bg-[#17181d]/95 p-1 shadow-xl">
           <ZoomButton label="Zoom in" onClick={onZoomIn}>
             {strokeIcon(<path d="M12 5v14M5 12h14" />, 14)}

@@ -299,20 +299,6 @@ export default function DesignCanvas({
     return () => observer.disconnect();
   }, []);
 
-  const navigateTo = useCallback(
-    (worldX: number, worldY: number) => {
-      const el = containerRef.current;
-      const rect = el?.getBoundingClientRect();
-      if (!rect) return;
-      setTransform((prev) => ({
-        ...prev,
-        x: rect.width / 2 - worldX * prev.k,
-        y: rect.height / 2 - worldY * prev.k,
-      }));
-    },
-    [],
-  );
-
   const zoomBy = useCallback((factor: number, cx?: number, cy?: number) => {
     const el = containerRef.current;
     const rect = el?.getBoundingClientRect();
@@ -1088,10 +1074,6 @@ export default function DesignCanvas({
         onZoomOut={() => zoomBy(1 / 1.25)}
         onResetZoom={resetZoom}
         onFit={fitToScreen}
-        shapes={shapes}
-        transform={transform}
-        viewport={viewport}
-        onNavigate={navigateTo}
       />
     </div>
   );

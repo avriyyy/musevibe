@@ -34,7 +34,7 @@ import {
 import DocumentsView from "@/components/DocumentsView";
 import WorkspaceChat from "@/components/WorkspaceChat";
 import WorkspacePicker from "@/components/WorkspacePicker";
-import { parseCanvasShapes, type CanvasShape } from "@/lib/canvas";
+import { parseCanvasShapes } from "@/lib/canvas";
 import { useVibe } from "@/lib/store";
 import { initials } from "@/lib/logo";
 import { formatModelLabel } from "@/lib/models";
@@ -591,9 +591,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     );
   }
 
-  const answers = (project.answers ?? []).some(
-    (entry) => describeAnswerValue(entry.values ?? entry.answer) !== "",
-  );
   const running = phase !== null;
 
   return (
@@ -1233,7 +1230,3 @@ function TaskColumn({
   );
 }
 
-function describeAnswerValue(value: string | string[]): string {
-  if (Array.isArray(value)) return value.filter(Boolean).join(", ");
-  return typeof value === "string" ? value.trim() : "";
-}
