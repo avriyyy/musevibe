@@ -179,6 +179,10 @@ export const MAX_LOGO_HISTORY = 6;
  * logo-generator skill (geometric primitives, viewBox 0 0 100 100,
  * currentColor, no backdrop) plus the antislop bans: flat fills, no
  * gradients, no generic filler icons, no text unless asked.
+ *
+ * The description is repeated as numbered hard requirements with a
+ * self-check, because a bare style brief lets the model drift into
+ * generic marks that ignore what the user actually asked for.
  */
 export function buildLogoSvgPrompt(
   description: string,
@@ -191,20 +195,25 @@ export function buildLogoSvgPrompt(
   return [
     `Design 3 logo variants for an app called "${projectName}".`,
     context ? `The app does this: "${context}".` : "",
-    `The user describes the logo they want as: "${trimmed}".`,
+    "",
+    "Hard requirements from the user (every variant must satisfy all of them):",
+    `R1 motif: "${trimmed}". Build the mark around exactly what this says.`,
+    "R2 palette: use the exact colors the user named, translated to close hex values (deep green ~ #166534, forest ~ #14532d, navy ~ #1e3a8a, sky ~ #0284c7, amber ~ #d97706, terracotta ~ #c2410c, plum ~ #7e22ce, charcoal ~ #1f2937). At most two solid fills: currentColor plus one fixed hex.",
+    "R3 construction: one dominant motif filling ~60% of the 100x100 canvas, centered with breathing room, readable at 16 pixels.",
     "",
     "Return ONLY a JSON object with this shape, no fences, no commentary:",
-    '{"variants":[{"svg":"<svg viewBox=\\"0 0 100 100\\">...</svg>","rationale":"one sentence"}]}',
+    '{"variants":[{"svg":"<svg viewBox=\"0 0 100 100\">...</svg>","rationale":"one sentence"}]}',
     "",
     "Rules for every variant:",
     "- One <svg> with viewBox=\"0 0 100 100\", no width or height attributes.",
     "- Transparent by construction: never draw a background rect or page fill.",
-    "- Geometric primitives (circle, rect, polygon, path) grouped in <g>; at most two solid fills via currentColor and one fixed hex.",
-    "- Motif tied to what the app does. No sparkle, star, lightning bolt, robot, cube, diamond, or magic wand filler.",
+    "- Geometric primitives (circle, rect, polygon, path) grouped in <g>; flat fills only.",
     "- No text or letters unless the user explicitly asked for them.",
     "- No gradients, glow, shadows, filters, scripts, event handlers, or external references.",
-    "- Flat, neat, readable at 16 pixels. Valid XML that parses on its own.",
-    "- The three variants must feel distinctly different, not parameter tweaks.",
+    "- No sparkle, star, lightning bolt, robot, cube, diamond, or magic wand filler.",
+    "- Valid XML that parses on its own. The three variants must feel distinctly different, not parameter tweaks.",
+    "",
+    "Self-check before returning: re-read R1-R3 for each variant and drop any variant that misses one. Each rationale must name which part of the description it answers.",
   ]
     .filter(Boolean)
     .join("\n");

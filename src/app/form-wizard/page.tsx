@@ -207,6 +207,8 @@ function Wizard() {
   const [logoError, setLogoError] = useState("");
   const [logoRemoveBg, setLogoRemoveBg] = useState(true);
   const [logoBgNote, setLogoBgNote] = useState("");
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   const [logoFormat, setLogoFormat] = useState<LogoFormat>("svg");
   const [svgVariants, setSvgVariants] = useState<LogoSvgVariant[]>([]);
   const [svgStatus, setSvgStatus] = useState<"idle" | "loading">("idle");
@@ -927,7 +929,56 @@ function Wizard() {
           <VStack gap={isNarrow ? 3 : 5}>
             <HStack gap={3} vAlign="center">
               <StackItem size="fill">
-                <Heading level={1}>{name || "New project"}</Heading>
+                <span className="group flex items-center gap-1.5">
+                  {editingName ? (
+                    <TextInput
+                      label="Project name"
+                      isLabelHidden
+                      value={nameDraft}
+                      onChange={setNameDraft}
+                      placeholder="Untitled project"
+                      onKeyDown={(event: React.KeyboardEvent) => {
+                        if (event.key === "Enter") {
+                          const trimmed = nameDraft.trim();
+                          if (trimmed) updateProject(projectId, { name: trimmed });
+                          setEditingName(false);
+                        }
+                        if (event.key === "Escape") setEditingName(false);
+                      }}
+                      onBlur={() => {
+                        const trimmed = nameDraft.trim();
+                        if (trimmed) updateProject(projectId, { name: trimmed });
+                        setEditingName(false);
+                      }}
+                    />
+                  ) : (
+                    <>
+                      <Heading level={1}>{name || "New project"}</Heading>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setNameDraft(name);
+                          setEditingName(true);
+                        }}
+                        title="Rename project"
+                        aria-label="Rename project"
+                        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full opacity-0 transition hover:bg-black/5 focus-visible:opacity-100 group-hover:opacity-100">
+                        <svg
+                          aria-hidden
+                          width="12"
+                          height="12"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="1.8"
+                          strokeLinecap="round"
+                          strokeLinejoin="round">
+                          <path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                        </svg>
+                      </button>
+                    </>
+                  )}
+                </span>
               </StackItem>
               <Button
                 label="Cancel"

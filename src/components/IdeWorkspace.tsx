@@ -37,7 +37,15 @@ import WorkspaceChat from "@/components/WorkspaceChat";
 import WorkspacePicker from "@/components/WorkspacePicker";
 import { FRAME_H, FRAME_W, parseCanvasShapes } from "@/lib/canvas";
 import { useVibe } from "@/lib/store";
-import { initials } from "@/lib/logo";
+import {
+  MAX_LOGO_HISTORY,
+  fileToLogoDataUrl,
+  initials,
+  removeLogoBackground,
+  sanitizeLogoSvg,
+  svgToDataUrl,
+} from "@/lib/logo";
+import LogoModal from "@/components/LogoModal";
 import { formatModelLabel } from "@/lib/models";
 import {
   DOC_TYPES,
@@ -213,6 +221,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [chatDraft, setChatDraft] = useState<{ id: number; text: string } | null>(null);
   const [picking, setPicking] = useState(false);
   const [pickSession, setPickSession] = useState(0);
+  const [logoPickerOpen, setLogoPickerOpen] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   const mainRef = useRef<HTMLElement>(null);
 
   // Picking needs the composer open, so leaving a view or closing the chat
@@ -634,6 +645,67 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     [projectId],
   );
 
+  /** Stash the current mark before replacing it, so nothing is ever lost. */
+  const stashWorkspaceLogo = useCallback(
+    (current: string | null) => {
+      if (!current) return;
+      const history = project?.logoHistory ?? [];
+      const next = [...history.filter((entry) => entry !== current), current].slice(
+        -MAX_LOGO_HISTORY,
+      );
+      useVibe.getState().updateProject(projectId, { logoHistory: next });
+    },
+    [projectId, project?.logoHistory],
+  );
+
+  const restoreWorkspaceLogo = useCallback(
+    (url: string) => {
+      if (!project || url === project.logoUrl) return;
+      stashWorkspaceLogo(project.logoUrl ?? null);
+      useVibe.getState().updateProject(projectId, { logoUrl: url });
+    },
+    [projectId, project, stashWorkspaceLogo],
+  );
+
+  const uploadWorkspaceLogo = useCallback(
+    async (file: File | undefined) => {
+      if (!file || !project) return;
+      try {
+        if (file.type === "image/svg+xml" || /\.svg$/i.test(file.name)) {
+          const raw = await file.text();
+          const clean = sanitizeLogoSvg(raw);
+          if (!clean) return;
+          stashWorkspaceLogo(project.logoUrl ?? null);
+          useVibe
+            .getState()
+            .updateProject(projectId, { logoUrl: svgToDataUrl(clean) });
+          return;
+        }
+        const dataUrl = await fileToLogoDataUrl(file);
+        let finalUrl = dataUrl;
+        if (project.logoRemoveBg ?? true) {
+          try {
+            const { image } = await removeLogoBackground(dataUrl);
+            finalUrl = image;
+          } catch {
+            // Keep the original when removal fails.
+          }
+        }
+        stashWorkspaceLogo(project.logoUrl ?? null);
+        useVibe.getState().updateProject(projectId, { logoUrl: finalUrl });
+      } catch {
+        // Unreadable files change nothing.
+      }
+    },
+    [projectId, project, stashWorkspaceLogo],
+  );
+
+  const commitName = useCallback(() => {
+    const trimmed = nameDraft.trim();
+    if (trimmed) useVibe.getState().updateProject(projectId, { name: trimmed });
+    setEditingName(false);
+  }, [nameDraft, projectId]);
+
   const prototypeScreen =
     screens.find((screen) => screen.name === "Prototype") ??
     screens[0] ??
@@ -824,27 +896,78 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           </svg>
         </Link>
 
-        {project.logoUrl ? (
-          <img
-            src={project.logoUrl}
-            alt=""
-            width={36}
-            height={36}
-            className="h-9 w-9 shrink-0 rounded-full object-cover"
-          />
-        ) : (
+        <button
+          type="button"
+          onClick={() => setLogoPickerOpen(true)}
+          title="Change logo"
+          aria-label="Change project logo"
+          aria-haspopup="dialog"
+          className="group relative shrink-0 rounded-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8ab4ff]">
+          {project.logoUrl ? (
+            <img
+              src={project.logoUrl}
+              alt=""
+              width={36}
+              height={36}
+              className="h-9 w-9 rounded-full bg-white/[0.04] object-contain ring-1 ring-transparent transition group-hover:ring-white/30"
+            />
+          ) : (
+            <span
+              aria-hidden
+              className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-[13px] font-semibold text-[#c9cdd6] ring-1 ring-transparent transition group-hover:ring-white/30">
+              {initials(project.name)}
+            </span>
+          )}
           <span
             aria-hidden
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-[13px] font-semibold text-[#c9cdd6]"
-          >
-            {initials(project.name)}
+            className="absolute -bottom-1 left-1/2 -translate-x-1/2 whitespace-nowrap rounded-full bg-black/80 px-1.5 py-px text-[9px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+            Logo
           </span>
-        )}
+        </button>
 
-        <div className="min-w-0 flex-1">
-          <h1 className="truncate text-[15px] font-semibold leading-tight">
-            {project.name}
-          </h1>
+        <div className="group flex min-w-0 flex-1 items-center gap-1.5">
+          {editingName ? (
+            <input
+              autoFocus
+              value={nameDraft}
+              onChange={(event) => setNameDraft(event.target.value)}
+              onBlur={commitName}
+              onKeyDown={(event) => {
+                if (event.key === "Enter") commitName();
+                if (event.key === "Escape") setEditingName(false);
+              }}
+              aria-label="Project name"
+              className="h-8 min-w-0 flex-1 rounded-lg border border-white/25 bg-[#17181d] px-2 text-[15px] font-semibold text-[#f5f6f8] focus:outline-none"
+            />
+          ) : (
+            <>
+              <h1 className="truncate text-[15px] font-semibold leading-tight">
+                {project.name}
+              </h1>
+              <button
+                type="button"
+                onClick={() => {
+                  setNameDraft(project.name);
+                  setEditingName(true);
+                }}
+                title="Rename project"
+                aria-label="Rename project"
+                className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#5b6472] opacity-0 transition hover:bg-white/10 hover:text-white focus-visible:opacity-100 group-hover:opacity-100">
+                <svg
+                  aria-hidden
+                  width="12"
+                  height="12"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.8"
+                  strokeLinecap="round"
+                  strokeLinejoin="round">
+                  <path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
+                </svg>
+              </button>
+            </>
+          )}
         </div>
 
         <nav
@@ -1049,6 +1172,16 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           setPickSession((n) => n + 1);
         }}
       />
+      {logoPickerOpen && (
+        <LogoModal
+          projectName={project.name}
+          current={project.logoUrl ?? null}
+          history={project.logoHistory ?? []}
+          onPick={(url) => restoreWorkspaceLogo(url)}
+          onUpload={(file) => void uploadWorkspaceLogo(file)}
+          onClose={() => setLogoPickerOpen(false)}
+        />
+      )}
     </div>
   );
 }

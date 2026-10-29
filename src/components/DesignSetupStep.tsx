@@ -19,6 +19,7 @@ import { Spinner } from "@astryxdesign/core/Spinner";
 import { Banner } from "@astryxdesign/core/Banner";
 import { DESIGN_SYSTEMS, type DesignSystemEntry } from "@/lib/design-systems-catalog";
 import Markdown from "@/components/Markdown";
+import LogoModal from "@/components/LogoModal";
 import {
   DEFAULT_DESIGN_MD,
   DEFAULT_TOKENS_CSS,
@@ -167,6 +168,7 @@ export default function DesignSetupStep({
   const [category, setCategory] = useState("All");
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [loadingId, setLoadingId] = useState<string | null>(null);
+  const [logoPickerOpen, setLogoPickerOpen] = useState(false);
   const [showMd, setShowMd] = useState(false);
   const logoFileRef = useRef<HTMLInputElement>(null);
 
@@ -352,21 +354,34 @@ export default function DesignSetupStep({
           upload your own. Skip to keep your initials as the mark.
         </Text>
         <HStack gap={4} vAlign="center">
-          {logoUrl ? (
-            <img
-              src={logoUrl}
-              alt={`Logo for ${projectName.trim() || "the new project"}`}
-              width={72}
-              height={72}
-              className="h-[72px] w-[72px] shrink-0 rounded-2xl object-cover"
-            />
-          ) : (
-            <div
+          <button
+            type="button"
+            onClick={() => setLogoPickerOpen(true)}
+            title="Choose from generated marks"
+            aria-label="Choose from generated marks"
+            aria-haspopup="dialog"
+            className="group relative shrink-0 rounded-2xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8ab4ff]">
+            {logoUrl ? (
+              <img
+                src={logoUrl}
+                alt={`Logo for ${projectName.trim() || "the new project"}`}
+                width={72}
+                height={72}
+                className="h-[72px] w-[72px] rounded-2xl bg-white/[0.04] object-contain ring-1 ring-transparent transition group-hover:ring-white/30"
+              />
+            ) : (
+              <span
+                aria-hidden
+                className="flex h-[72px] w-[72px] items-center justify-center rounded-2xl bg-white/10 text-[24px] font-semibold text-[#c9cdd6] ring-1 ring-transparent transition group-hover:ring-white/30">
+                {initials(projectName.trim() || "?")}
+              </span>
+            )}
+            <span
               aria-hidden
-              className="flex h-[72px] w-[72px] shrink-0 items-center justify-center rounded-2xl bg-white/10 text-[24px] font-semibold text-[#c9cdd6]">
-              {initials(projectName.trim() || "?")}
-            </div>
-          )}
+              className="absolute inset-x-0 -bottom-1 mx-auto w-max rounded-full bg-black/80 px-2 py-0.5 text-[10px] font-medium text-white opacity-0 transition group-hover:opacity-100">
+              Change
+            </span>
+          </button>
           <VStack gap={1}>
             <Text type="label">
               {logoUrl
@@ -433,7 +448,7 @@ export default function DesignSetupStep({
               onClick={onGenerateSvg}
             />
             <Button
-              label="Upload SVG"
+              label="Upload"
               variant="secondary"
               className="min-h-11 md:min-h-0"
               onClick={() => logoFileRef.current?.click()}
@@ -549,6 +564,19 @@ export default function DesignSetupStep({
           <Banner status="error" title="Logo unavailable" description={logoError} collapsible={false} />
         )}
       </VStack>
+
+      {logoPickerOpen && (
+        <LogoModal
+          projectName={projectName}
+          current={logoUrl}
+          history={logoHistory}
+          variants={svgVariants}
+          onPick={(url) => onRestoreLogo(url)}
+          onPickVariant={(svg) => onPickSvg(svg)}
+          onUpload={(file) => onUploadLogo(file)}
+          onClose={() => setLogoPickerOpen(false)}
+        />
+      )}
 
       {previewEntry && (
         <PreviewModal
