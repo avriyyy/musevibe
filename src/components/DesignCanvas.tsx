@@ -62,6 +62,29 @@ type Gesture =
 
 const GRID = 28;
 
+/** Agentation's toolbar flips its toggle to "Exit" while feedback mode
+ *  is on; the body cursor also switches to crosshair. Either signal means
+ *  the next click would start an annotation. */
+function isAnnotatingActive(): boolean {
+  if (
+    typeof document !== "undefined" &&
+    getComputedStyle(document.body).cursor === "crosshair"
+  ) {
+    return true;
+  }
+  const hosts = document.querySelectorAll("agentation-toolbar");
+  for (const host of hosts) {
+    const root = (host as HTMLElement).shadowRoot;
+    if (!root) continue;
+    const buttons = root.querySelectorAll('button[aria-label="Exit"]');
+    for (const button of buttons) {
+      const rect = (button as HTMLElement).getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) return true;
+    }
+  }
+  return false;
+}
+
 /** One annotation as a compact chat quote: selector plus user comment. */
 function formatAnnotation(annotation: Annotation): string {
   const inner = resolveInnerElement(annotation);
@@ -166,6 +189,38 @@ export default function DesignCanvas({
   // annotate mode and it reports picks (including inside the frame)
   // through onAnnotationAdd / onSubmit below.
 
+  // While Agentation's feedback mode is on, clicks outside the prototype
+  // frame would annotate MuseVibe's own UI. Window capture runs before the
+  // document listeners, so swallowing the event here keeps the scope on
+  // the canvas: the frame, the marker popups, and our own chrome stay
+  // clickable, everything else is ignored for the duration.
+  useEffect(() => {
+    const guard = (event: MouseEvent) => {
+      if (!isAnnotatingActive()) return;
+      const active = document.activeElement;
+      if (active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement) return;
+      const path = event.composedPath();
+      for (const node of path) {
+        if (!(node instanceof HTMLElement)) continue;
+        if (node.tagName === "AGENTATION-TOOLBAR") return;
+        if (node.hasAttribute?.("data-canvas-chrome")) return;
+        if (
+          node.tagName === "IFRAME" &&
+          node.getAttribute("title") === "Prototype"
+        ) {
+          return;
+        }
+      }
+      event.stopPropagation();
+      event.preventDefault();
+    };
+    window.addEventListener("click", guard, true);
+    window.addEventListener("mousedown", guard, true);
+    return () => {
+      window.removeEventListener("click", guard, true);
+      window.removeEventListener("mousedown", guard, true);
+    };
+  }, []);
   // Persist edits, debounced. The seed echo is skipped so mounting never
   // dirties the store.
   useEffect(() => {
