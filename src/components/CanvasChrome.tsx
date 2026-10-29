@@ -1,10 +1,11 @@
 "use client";
 
 /**
- * Canvas chrome for the custom design canvas: a two-button navigation rail
- * (select + pan) centered at the top, and a top-right cluster with the
- * overview map next to compact zoom controls. Dark pills on the workspace
- * background.
+ * Canvas chrome for the design canvas: a two-button navigation rail
+ * (pan + select) centered at the top, and a top-right cluster with the
+ * overview map next to a compact zoom stack. The stack shows the current
+ * zoom, so the canvas never leaves you guessing at scale. Dark pills on
+ * the workspace background.
  */
 
 import type { ReactElement, ReactNode } from "react";
@@ -17,12 +18,12 @@ interface ToolDef {
   icon: ReactElement;
 }
 
-function strokeIcon(path: ReactNode): ReactElement {
+function strokeIcon(path: ReactNode, size = 18): ReactElement {
   return (
     <svg
       aria-hidden
-      width="18"
-      height="18"
+      width={size}
+      height={size}
       viewBox="0 0 24 24"
       fill="none"
       stroke="currentColor"
@@ -55,11 +56,35 @@ const TOOLS: ToolDef[] = [
   },
 ];
 
+function ZoomButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      onClick={onClick}
+      className="flex h-8 w-8 items-center justify-center rounded-xl text-[#c9cdd6] transition-colors hover:bg-white/10 hover:text-white"
+    >
+      {children}
+    </button>
+  );
+}
+
 export default function CanvasChrome({
   tool,
   onTool,
+  zoom,
   onZoomIn,
   onZoomOut,
+  onResetZoom,
   onFit,
   shapes,
   transform,
@@ -68,8 +93,10 @@ export default function CanvasChrome({
 }: {
   tool: string;
   onTool: (id: string) => void;
+  zoom: number;
   onZoomIn: () => void;
   onZoomOut: () => void;
+  onResetZoom: () => void;
   onFit: () => void;
   shapes: readonly CanvasShape[];
   transform: Transform;
@@ -97,7 +124,7 @@ export default function CanvasChrome({
                 onClick={() => onTool(entry.id)}
                 className={`flex h-9 w-9 items-center justify-center rounded-xl transition-colors ${
                   selected
-                    ? "bg-white text-black"
+                    ? "bg-white text-black shadow-sm"
                     : "text-[#c9cdd6] hover:bg-white/10 hover:text-white"
                 }`}
               >
@@ -116,46 +143,34 @@ export default function CanvasChrome({
           viewport={viewport}
           onNavigate={onNavigate}
         />
-        <div className="flex flex-col items-center rounded-2xl border border-white/10 bg-[#17181d]/95 p-1 shadow-xl">
+        <div className="flex w-10 flex-col items-center rounded-2xl border border-white/10 bg-[#17181d]/95 p-1 shadow-xl">
+          <ZoomButton label="Zoom in" onClick={onZoomIn}>
+            {strokeIcon(<path d="M12 5v14M5 12h14" />, 14)}
+          </ZoomButton>
           <button
             type="button"
-            title="Zoom in"
-            aria-label="Zoom in"
-            onClick={onZoomIn}
-            className="flex h-8 w-8 items-center justify-center rounded-xl text-[16px] leading-none text-[#c9cdd6] hover:bg-white/10 hover:text-white"
+            title="Reset zoom to 100%"
+            aria-label="Reset zoom to 100%"
+            onClick={onResetZoom}
+            className="h-6 w-full rounded-lg font-mono text-[10px] tabular-nums text-[#9aa0ae] transition-colors hover:bg-white/10 hover:text-white"
           >
-            +
+            {Math.round(zoom * 100)}%
           </button>
-          <button
-            type="button"
-            title="Zoom out"
-            aria-label="Zoom out"
-            onClick={onZoomOut}
-            className="flex h-8 w-8 items-center justify-center rounded-xl text-[16px] leading-none text-[#c9cdd6] hover:bg-white/10 hover:text-white"
-          >
-            −
-          </button>
-          <button
-            type="button"
-            title="Fit to screen"
-            aria-label="Fit to screen"
-            onClick={onFit}
-            className="flex h-8 w-8 items-center justify-center rounded-xl text-[#c9cdd6] hover:bg-white/10 hover:text-white"
-          >
-            <svg
-              aria-hidden
-              width="14"
-              height="14"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.8"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <path d="M4 9V4h5M20 15v5h-5M4 4l6 6M20 20l-6-6" />
-            </svg>
-          </button>
+          <ZoomButton label="Zoom out" onClick={onZoomOut}>
+            {strokeIcon(<path d="M5 12h14" />, 14)}
+          </ZoomButton>
+          <span aria-hidden className="my-0.5 h-px w-5 bg-white/10" />
+          <ZoomButton label="Fit to screen" onClick={onFit}>
+            {strokeIcon(
+              <>
+                <path d="M9 4H6a2 2 0 0 0-2 2v3" />
+                <path d="M15 4h3a2 2 0 0 1 2 2v3" />
+                <path d="M9 20H6a2 2 0 0 1-2-2v-3" />
+                <path d="M15 20h3a2 2 0 0 0 2-2v-3" />
+              </>,
+              15,
+            )}
+          </ZoomButton>
         </div>
       </div>
     </>

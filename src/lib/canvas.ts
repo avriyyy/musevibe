@@ -42,6 +42,10 @@ export const SHAPE_STROKE = "#e8ebf0";
 export const SHAPE_WIDTH = 2;
 export const TEXT_COLOR = "#f5f6f8";
 
+/** Size of the prototype frame the canvas holds, in canvas units. */
+export const FRAME_W = 960;
+export const FRAME_H = 640;
+
 /** Pan + zoom mapping scene coordinates to the screen. */
 export interface Transform {
   x: number;

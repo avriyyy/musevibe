@@ -21,6 +21,8 @@ import {
   type PickBox,
 } from "@/lib/pick";
 import {
+  FRAME_H,
+  FRAME_W,
   SHAPE_STROKE,
   SHAPE_WIDTH,
   TEXT_COLOR,
@@ -32,8 +34,7 @@ import {
   type CanvasShape,
   type Transform,
 } from "@/lib/canvas";
-export const FRAME_W = 960;
-export const FRAME_H = 640;
+export { FRAME_H, FRAME_W };
 
 interface DesignCanvasProps {
   /** Shapes used only to seed the first paint, never re-fed afterwards. */
@@ -321,6 +322,17 @@ export default function DesignCanvas({
       const k = Math.min(3, Math.max(0.1, prev.k * factor));
       const s = k / prev.k;
       return { k, x: px - (px - prev.x) * s, y: py - (py - prev.y) * s };
+    });
+  }, []);
+
+  const resetZoom = useCallback(() => {
+    const el = containerRef.current;
+    const rect = el?.getBoundingClientRect();
+    if (!rect) return;
+    setTransform((prev) => {
+      const cx = (rect.width / 2 - prev.x) / prev.k;
+      const cy = (rect.height / 2 - prev.y) / prev.k;
+      return { k: 1, x: rect.width / 2 - cx, y: rect.height / 2 - cy };
     });
   }, []);
 
@@ -754,6 +766,10 @@ export default function DesignCanvas({
   const gridSize = transform.k * GRID;
   const gridX = ((transform.x % gridSize) + gridSize) % gridSize;
   const gridY = ((transform.y % gridSize) + gridSize) % gridSize;
+  // A coarser grid every five cells adds depth without adding noise.
+  const majorSize = gridSize * 5;
+  const gridXMajor = ((transform.x % majorSize) + majorSize) % majorSize;
+  const gridYMajor = ((transform.y % majorSize) + majorSize) % majorSize;
 
   const selected = shapes.find((entry) => entry.id === selectedId) ?? null;
   const selectedBox = selected ? bboxOf(selected) : null;
@@ -816,10 +832,14 @@ export default function DesignCanvas({
         className="pointer-events-none absolute inset-0"
         style={{
           backgroundImage:
-            "radial-gradient(circle, rgba(255,255,255,0.09) 1px, transparent 1px)",
-          backgroundSize: `${gridSize}px ${gridSize}px`,
-          backgroundPosition: `${gridX}px ${gridY}px`,
+            "radial-gradient(circle, rgba(255,255,255,0.13) 1px, transparent 1px), radial-gradient(circle, rgba(255,255,255,0.06) 1px, transparent 1px)",
+          backgroundSize: `${majorSize}px ${majorSize}px, ${gridSize}px ${gridSize}px`,
+          backgroundPosition: `${gridXMajor}px ${gridYMajor}px, ${gridX}px ${gridY}px`,
         }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(ellipse_at_center,transparent_55%,rgba(0,0,0,0.5)_100%)]"
       />
 
       {/* World: pan + zoom. */}
@@ -835,11 +855,31 @@ export default function DesignCanvas({
             highlight the elements inside it; canvas gestures start from
             the area around the frame, the minimap, or the wheel. */}
         <div className="absolute" style={{ left: 0, top: 0, width: FRAME_W, height: FRAME_H }}>
-          <p className="pointer-events-none absolute -top-8 left-0 flex items-baseline gap-1.5 whitespace-nowrap">
-            <span className="text-[13px] font-semibold text-[#f5f6f8]">Prototype</span>
-            <span className="font-mono text-[12px] text-[#5b6472]">/</span>
-          </p>
-          <div className="h-full w-full overflow-hidden rounded-xl border border-white/15 bg-white shadow-2xl">
+          <div className="pointer-events-none absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap">
+            <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#c9cdd6]">
+              <svg
+                aria-hidden
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                className="text-[#8ab4ff]"
+              >
+                <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+                <path d="M3.5 9h17" />
+              </svg>
+              Prototype
+            </span>
+            <span aria-hidden className="h-3 w-px bg-white/15" />
+            <span className="font-mono text-[11px] tabular-nums text-[#5b6472]">
+              {FRAME_W} × {FRAME_H}
+            </span>
+          </div>
+          <div className="h-full w-full overflow-hidden rounded-2xl bg-white shadow-[0_1px_2px_rgba(0,0,0,0.45),0_20px_50px_-12px_rgba(0,0,0,0.75)] ring-1 ring-white/15">
             <iframe
               ref={iframeRef}
               title="Prototype"
@@ -1043,8 +1083,10 @@ export default function DesignCanvas({
           if (editingId) commitDraft();
           setTool(next);
         }}
+        zoom={transform.k}
         onZoomIn={() => zoomBy(1.25)}
         onZoomOut={() => zoomBy(1 / 1.25)}
+        onResetZoom={resetZoom}
         onFit={fitToScreen}
         shapes={shapes}
         transform={transform}
