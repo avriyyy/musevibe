@@ -80,10 +80,10 @@ import {
 import { useVibe } from "@/lib/store";
 import { createDraftProject } from "@/lib/draft";
 
-const STEPS = [
+const STEPS: Array<{ label: string; isOptional?: boolean }> = [
   { label: "Stack" },
   { label: "Questions" },
-  { label: "Design", isOptional: true },
+  { label: "Design" },
   { label: "Review" },
 ];
 

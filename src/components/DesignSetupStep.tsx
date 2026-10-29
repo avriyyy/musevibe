@@ -235,7 +235,7 @@ export default function DesignSetupStep({
           </HStack>
         )}
         {design && showMd && (
-          <pre className="max-h-56 overflow-auto rounded-xl bg-black/5 p-3 text-[12px] leading-5 whitespace-pre-wrap">
+          <pre className="max-h-56 overflow-auto rounded-xl border border-white/10 bg-white/[0.03] p-3 font-mono text-[12px] leading-5 text-[#c9cdd6] whitespace-pre-wrap">
             {design.designMd.slice(0, 4000)}
           </pre>
         )}
@@ -260,7 +260,7 @@ export default function DesignSetupStep({
               id="ds-category"
               value={category}
               onChange={(event) => setCategory(event.target.value)}
-              className="h-11 w-full rounded-xl border border-black/15 bg-white px-3 text-[14px] md:h-9">
+              className="h-11 w-full rounded-xl border border-white/10 bg-[#17181d] px-3 text-[14px] text-[#f5f6f8] [color-scheme:dark] md:h-10">
               {categories.map((entry) => (
                 <option key={entry} value={entry}>
                   {entry}
@@ -281,25 +281,31 @@ export default function DesignSetupStep({
                 role="option"
                 aria-selected={selected}
                 className={`flex flex-col rounded-xl border p-3 text-left transition-colors ${
-                  selected ? "border-black bg-black/[0.04]" : "border-black/10 hover:border-black/30"
+                  selected
+                    ? "border-[#8ab4ff]/60 bg-[#8ab4ff]/[0.08]"
+                    : "border-white/10 bg-white/[0.02] hover:border-white/25"
                 }`}>
-                <span className="truncate text-[13px] font-semibold">{entry.name}</span>
+                <span className="truncate text-[13px] font-semibold text-[#f5f6f8]">{entry.name}</span>
                 {!!entry.category && (
-                  <span className="truncate text-[11px] text-black/50">{entry.category}</span>
+                  <span className="truncate text-[11px] text-[#9aa0ae]">{entry.category}</span>
                 )}
                 <span className="mt-2 flex gap-2">
                   <button
                     type="button"
                     onClick={() => setPreviewId(entry.id)}
-                    className="min-h-11 rounded-lg px-2 text-[12px] font-medium underline md:min-h-0">
+                    className="min-h-11 rounded-lg px-2 text-[12px] font-medium text-[#9aa0ae] underline hover:text-white md:min-h-0">
                     Preview
                   </button>
                   <button
                     type="button"
-                    disabled={loadingId === entry.id}
+                    disabled={loadingId === entry.id || selected}
                     onClick={() => void applyTemplate(entry)}
-                    className="min-h-11 rounded-lg bg-black px-3 text-[12px] font-medium text-white disabled:opacity-50 md:min-h-0">
-                    {loadingId === entry.id ? "Loading…" : selected ? "Selected" : "Use"}
+                    className={`min-h-11 rounded-lg px-3 text-[12px] font-medium disabled:opacity-50 md:min-h-0 ${
+                      selected
+                        ? "border border-[#8ab4ff]/50 text-[#8ab4ff]"
+                        : "bg-white text-[#0b0c10] hover:bg-white/90"
+                    }`}>
+                    {loadingId === entry.id ? "Loading…" : selected ? "✓ Selected" : "Use"}
                   </button>
                 </span>
               </div>
@@ -377,7 +383,7 @@ export default function DesignSetupStep({
       {previewSrcDoc && (
         <VStack gap={2}>
           <Heading level={3}>Preview</Heading>
-          <div className="overflow-hidden rounded-xl border border-black/10">
+          <div className="overflow-hidden rounded-xl border border-white/10">
             <iframe
               title={`${design?.name ?? "Design system"} preview`}
               srcDoc={previewSrcDoc}
@@ -474,9 +480,9 @@ export default function DesignSetupStep({
             onChange={(event) => onLogoRemoveBg(event.target.checked)}
             className="size-4 accent-black"
           />
-          <span className="text-[14px]">
+          <span className="text-[14px] text-[#f5f6f8]">
             Remove background
-            <span className="block text-[12px] text-black/50">
+            <span className="block text-[12px] text-[#9aa0ae]">
               On: the solid field behind the mark is cut so the logo sits clean on any surface.
             </span>
           </span>
@@ -549,14 +555,14 @@ function PreviewModal({
       className="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4"
       onClick={onClose}>
       <div
-        className="flex max-h-[86dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white"
+        className="flex max-h-[86dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#17181d] shadow-2xl"
         onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center gap-3 border-b border-black/10 px-4 py-3">
+        <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <p className="truncate text-[15px] font-semibold">{entry.name}</p>
-            {!!entry.category && <p className="truncate text-[12px] text-black/50">{entry.category}</p>}
+            <p className="truncate text-[15px] font-semibold text-[#f5f6f8]">{entry.name}</p>
+            {!!entry.category && <p className="truncate text-[12px] text-[#9aa0ae]">{entry.category}</p>}
           </div>
-          <div className="flex gap-1 rounded-full bg-black/5 p-1">
+          <div className="flex gap-1 rounded-full bg-white/5 p-1">
             {pages.map((page, index) => (
               <button
                 key={`${page.path}-${index}`}
@@ -564,7 +570,7 @@ function PreviewModal({
                 onClick={() => setTab(index)}
                 aria-pressed={tab === index}
                 className={`rounded-full px-3 py-1.5 text-[12px] font-medium ${
-                  tab === index ? "bg-black text-white" : "text-black/60 hover:text-black"
+                  tab === index ? "bg-white text-[#0b0c10]" : "text-[#9aa0ae] hover:text-white"
                 }`}>
                 {page.title || page.role || `View ${index + 1}`}
               </button>
@@ -575,7 +581,7 @@ function PreviewModal({
             type="button"
             onClick={onClose}
             aria-label="Close preview"
-            className="flex size-9 items-center justify-center rounded-full text-[18px] text-black/50 hover:bg-black/5 hover:text-black">
+            className="flex size-9 items-center justify-center rounded-full text-[18px] text-[#9aa0ae] hover:bg-white/10 hover:text-white">
             ×
           </button>
         </div>
