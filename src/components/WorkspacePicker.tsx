@@ -14,6 +14,8 @@ import { boxOf, describeElement, quoteFor, type PickBox } from "@/lib/pick";
 interface WorkspacePickerProps {
   /** The view the picker is allowed to touch. */
   rootRef: React.RefObject<HTMLElement | null>;
+  /** Documents picks inside the rendered doc, tasks picks whole cards. */
+  scope: "documents" | "tasks";
   picking: boolean;
   /** Bumped on every arm so a previous pick never resurfaces. */
   pickSession: number;
@@ -32,6 +34,7 @@ interface Picked {
 
 export default function WorkspacePicker({
   rootRef,
+  scope,
   picking,
   pickSession,
   bottomInset,
@@ -45,42 +48,37 @@ export default function WorkspacePicker({
   useEffect(() => {
     const root = rootRef.current;
     if (!root || !picking) return;
+    // Documents only allow the rendered markdown, tasks only whole cards.
+    // Anything else in the view is not a component for this tab.
     const targetOf = (event: Event) => {
       const node = event.target as Node | null;
       if (!node || node.nodeType !== 1) return null;
       const el = node as Element;
-      if (el === root) return null;
-      return el;
-    };
-    // A click on an icon or a label span should quote the control it
-    // belongs to, not the anonymous span.
-    const settle = (el: Element) => {
-      let node = el;
-      for (let depth = 0; depth < 3; depth += 1) {
-        const parent = node.parentElement;
-        if (!parent || parent === root) break;
-        if (!parent.matches("button, a, [role='button'], [role='link'], li")) break;
-        node = parent;
+      if (!root.contains(el)) return null;
+      if (scope === "tasks") {
+        return el.closest("[data-pick-card]");
       }
-      return node;
+      const doc = el.closest("[data-pick-scope]");
+      if (!doc) return null;
+      return el === doc ? null : el;
+    };
+    // Swallow every click in the view while picking, so a stray click on a
+    // doc row or a column cannot change what is on screen mid-pick.
+    const block = (event: MouseEvent) => {
+      const node = event.target as Node | null;
+      if (!node || node.nodeType !== 1) return;
+      event.preventDefault();
+      event.stopPropagation();
     };
     const onMove = (event: MouseEvent) => {
       const el = targetOf(event);
-      setHover(el ? boxOf(settle(el)) : null);
+      setHover(el ? boxOf(el) : null);
     };
     const onLeave = () => setHover(null);
-    const onDown = (event: MouseEvent) => {
-      if (!targetOf(event)) return;
-      // A pick must not open documents, tasks, or links.
-      event.preventDefault();
-      event.stopPropagation();
-    };
     const onClick = (event: MouseEvent) => {
-      const hit = targetOf(event);
-      if (!hit) return;
-      event.preventDefault();
-      event.stopPropagation();
-      const el = settle(hit);
+      block(event);
+      const el = targetOf(event);
+      if (!el) return;
       const { label, text } = describeElement(el, false);
       pickedElRef.current = el;
       setPicked({ label, text, box: boxOf(el), session: pickSession });
@@ -88,15 +86,15 @@ export default function WorkspacePicker({
     };
     root.addEventListener("mousemove", onMove, true);
     root.addEventListener("mouseleave", onLeave, true);
-    root.addEventListener("mousedown", onDown, true);
+    root.addEventListener("mousedown", block, true);
     root.addEventListener("click", onClick, true);
     return () => {
       root.removeEventListener("mousemove", onMove, true);
       root.removeEventListener("mouseleave", onLeave, true);
-      root.removeEventListener("mousedown", onDown, true);
+      root.removeEventListener("mousedown", block, true);
       root.removeEventListener("click", onClick, true);
     };
-  }, [picking, pickSession, rootRef]);
+  }, [picking, pickSession, scope, rootRef]);
 
   // The picked element can move under its card (document scroll, resize);
   // keep the box attached to it instead of letting it drift.

@@ -82,7 +82,9 @@ export default function DocView({
       <div className="mt-4 rounded-2xl border border-white/10 bg-[#17181d] p-5 sm:p-6">
         {mode === "preview" ? (
           doc.markdown.trim() ? (
-            <Markdown text={doc.markdown} />
+            <div data-pick-scope="document">
+              <Markdown text={doc.markdown} />
+            </div>
           ) : (
             <div className="py-6 text-center">
               <p className="text-[13px] text-[#9aa0ae]">

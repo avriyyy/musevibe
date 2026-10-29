@@ -833,6 +833,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       {view.kind !== "design" && (
         <WorkspacePicker
           rootRef={mainRef}
+          scope={view.kind === "tasks" ? "tasks" : "documents"}
           picking={picking}
           pickSession={pickSession}
           bottomInset={chatHeight}
@@ -1205,6 +1206,7 @@ function TaskColumn({
             }}
             role="button"
             tabIndex={0}
+            data-pick-card
             aria-label={`Open details for ${task.title}`}
             className={`group cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${draggingId === task.id ? "opacity-50" : ""}`}
           >
