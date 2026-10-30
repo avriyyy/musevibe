@@ -35,7 +35,7 @@ export async function aiGenerate(
 
   if (!url || !key) return local(kind, prompt);
 
-  const text = await providerText(url, key, model, prompt);
+  const text = await providerText(url, key, model, prompt, kind);
   if (text) return { text, source: "ai" };
   return local(kind, prompt);
 }
@@ -46,8 +46,14 @@ async function providerText(
   key: string,
   model: string,
   prompt: string,
+  kind?: AiGenerateKind,
 ): Promise<string | null> {
   const base = url.replace(/\/+$/, "");
+  // A full app screen is a long answer: reasoning plus a 6 to 9k token HTML
+  // file. The shorter kinds keep the tighter budget and timeout.
+  const heavy = kind === "prototype" || kind === "pages";
+  const budget = heavy ? 14000 : 8000;
+  const timeout = heavy ? 180000 : 90000;
 
   try {
     const res = await fetch(`${base}/chat/completions`, {
@@ -58,9 +64,9 @@ async function providerText(
         messages: [{ role: "user", content: prompt }],
         // Reasoning models spend most of this budget before writing an answer.
         // At 4000 the longest PRDs ran out mid-reasoning and came back empty.
-        max_tokens: 8000,
+        max_tokens: budget,
       }),
-      signal: AbortSignal.timeout(90000),
+      signal: AbortSignal.timeout(timeout),
     });
     if (res.ok) {
       const data = (await res.json()) as {
@@ -80,7 +86,7 @@ async function providerText(
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model, kind: "text", prompt }),
-      signal: AbortSignal.timeout(90000),
+      signal: AbortSignal.timeout(timeout),
     });
     if (!res.ok) return null;
 

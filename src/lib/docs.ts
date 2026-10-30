@@ -290,28 +290,169 @@ export function parsePrototypeHtml(raw: unknown): string {
   return text;
 }
 
+/** Remove resources that would need the network, so a page always renders. */
+export function stripExternalResources(html: string): string {
+  return html
+    .replace(/<link\b[^>]*\brel\s*=\s*["']?stylesheet["']?[^>]*>/gi, "")
+    .replace(/<link\b[^>]*\bhref\s*=\s*["']https?:\/\/[^"']*["'][^>]*>/gi, "")
+    .replace(
+      /<script\b[^>]*\bsrc\s*=\s*["'](?:https?:)?\/\/[^"']*["'][^>]*>\s*<\/script\s*>/gi,
+      "",
+    )
+    .replace(/@import\s+(?:url\()?["']?(?:https?:)?\/\/[^;]+;/gi, "");
+}
+
+/**
+ * Make any model output a complete document. Models often return a bare
+ * fragment or an <html> without a <body>, which can render blank inside
+ * the canvas iframe. This wraps it so the body always exists.
+ */
+export function normalizePrototypeHtml(raw: unknown): string {
+  let html = parsePrototypeHtml(raw);
+  if (!html) return "";
+  html = stripExternalResources(html);
+  if (!/<html[\s>]/i.test(html)) {
+    const title =
+      html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1]?.trim() ||
+      "Prototype";
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${title}</title>
+</head>
+<body>
+${html}
+</body>
+</html>`;
+  }
+  if (!/<body[\s>]/i.test(html)) {
+    const headClose = html.match(/<\/head\s*>/i);
+    const htmlOpen = html.match(/<html[^>]*>/i);
+    let before = "";
+    let rest = html;
+    if (headClose?.index !== undefined) {
+      const at = headClose.index + headClose[0].length;
+      before = html.slice(0, at);
+      rest = html.slice(at);
+    } else if (htmlOpen?.index !== undefined) {
+      const at = htmlOpen.index + htmlOpen[0].length;
+      before = html.slice(0, at);
+      rest = html.slice(at);
+    }
+    rest = rest.replace(/<\/html\s*>\s*$/i, "");
+    html = `${before}
+<body>
+${rest}
+</body>
+</html>`;
+  }
+  if (!/^\s*<!doctype html/i.test(html)) html = `<!DOCTYPE html>\n${html}`;
+  return html.trim();
+}
+
 /** True when the markup smells like framework code instead of plain HTML. */
 export function looksLikeFrameworkCode(html: string): boolean {
   return (
     /^\s*import\s+.+\s+from\s*["']/m.test(html) ||
-    /\bfrom\s+["']react["']/.test(html) ||
-    /\bexport\s+default\b/.test(html) ||
-    /\buse(State|Effect|Ref|Memo|Callback)\s*\(/.test(html) ||
-    /<[A-Z][A-Za-z0-9]*[\s>/]/.test(html) ||
+    /\bfrom\s+["'](?:react|vue|svelte|next)["']/.test(html) ||
+    /\bexport\s+(?:default|const|function)\b/.test(html) ||
+    /\buse(?:State|Effect|Ref|Memo|Callback)\s*\(/.test(html) ||
+    /<[A-Z][A-Za-z0-9]*\b[^>]*\b(?:className|onClick|onChange|onSubmit|key)\s*=/.test(
+      html,
+    ) ||
+    /<[A-Z][A-Za-z0-9]*\b[^>]*=\s*\{/.test(html) ||
     /<template[\s>]/.test(html) ||
-    /\sv-(if|for|bind|on|model|show|slot)\s*=/.test(html) ||
+    /\sv-(?:if|for|bind|on|model|show|slot)\s*=/.test(html) ||
     /\s@[a-z]+\s*=/.test(html)
   );
 }
 
 /** True when the HTML holds enough visible copy to not render blank. */
 export function hasVisibleContent(html: string): boolean {
-  const text = html
+  const body = html.match(/<body[\s>][\s\S]*?<\/body\s*>/i)?.[0] ?? html;
+  const text = body
     .replace(/<script[\s>][\s\S]*?<\/script\s*>/gi, " ")
     .replace(/<style[\s>][\s\S]*?<\/style\s*>/gi, " ")
     .replace(/<!--[\s\S]*?-->/g, " ")
     .replace(/<[^>]+>/g, " ")
     .replace(/\s+/g, " ")
     .trim();
-  return text.length >= 120;
+  if (text.length < 140) return false;
+  const blocks = body.match(
+    /<(?:h1|h2|h3|p|button|a|li|td|label|input|section|article)\b/gi,
+  );
+  if (!blocks || blocks.length < 3) return false;
+  // Content hidden until JavaScript runs still renders blank in a frame.
+  if (
+    /<(?:body|main|html)[^>]*style\s*=\s*["'][^"']*(?:opacity\s*:\s*0(?:[;\s"']|$)|visibility\s*:\s*hidden|display\s*:\s*none)/i.test(
+      html,
+    )
+  ) {
+    return false;
+  }
+  if (
+    /(?:^|[},])\s*(?:body|html|main)\s*\{[^}]*(?:opacity\s*:\s*0(?:[;\s}]|$)|visibility\s*:\s*hidden|display\s*:\s*none)/i.test(
+      html,
+    )
+  ) {
+    return false;
+  }
+  return true;
+}
+
+/** Words too common to prove a planned block is present. */
+const COVERAGE_STOP = new Set([
+  "with",
+  "from",
+  "that",
+  "this",
+  "your",
+  "into",
+  "over",
+  "each",
+  "then",
+  "than",
+  "and",
+  "for",
+  "the",
+  "one",
+  "all",
+  "per",
+  "not",
+  "are",
+  "its",
+  "has",
+  "have",
+  "plus",
+  "show",
+  "shows",
+]);
+
+/**
+ * Which planned blocks the rendered page does not mention. Used as a
+ * quality gate: a page that skipped half its blocks gets one repair pass.
+ */
+export function missingPageSections(
+  html: string,
+  sections: string[] = [],
+): string[] {
+  if (!sections.length) return [];
+  const body = html.match(/<body[\s>][\s\S]*?<\/body\s*>/i)?.[0] ?? html;
+  const text = body
+    .replace(/<script[\s>][\s\S]*?<\/script\s*>/gi, " ")
+    .replace(/<style[\s>][\s\S]*?<\/style\s*>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+  return sections.filter((section) => {
+    const words = section
+      .toLowerCase()
+      .replace(/[^a-z0-9\s]/g, " ")
+      .split(/\s+/)
+      .filter((word) => word.length > 3 && !COVERAGE_STOP.has(word));
+    if (!words.length) return false;
+    return !words.some((word) => text.includes(word));
+  });
 }

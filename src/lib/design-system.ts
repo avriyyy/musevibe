@@ -25,6 +25,10 @@ export interface PlannedPage {
   slug: string;
   title: string;
   brief: string;
+  /** Concrete blocks the screen shows, top to bottom. */
+  sections?: string[];
+  /** The single action this screen exists for. */
+  primaryAction?: string;
 }
 
 /** File path of the first frame: the rendered design system. */
@@ -66,17 +70,43 @@ A calm neutral baseline: near-black accents on white, one radius, system type.
 - Real copy only, never lorem ipsum or bracketed placeholders.
 `;
 
-/** Short rules distilled from the antislop skills, pasted into page prompts. */
+/**
+ * Distilled from the antislop skill plus the craft signals that make a
+ * product screen read as designed instead of generated. Positive levers
+ * first, bans second, so the model has something to build toward.
+ */
 export const ANTISLOP_DESIGN_RULES = [
-  "Pull every color, radius, and font from the tokens below. No raw hex values outside the token block.",
-  "No blue-purple gradients, no rainbow gradients, no blurred radial orbs, no glow except on at most one focal element.",
-  "Glass (backdrop blur) on at most one surface; everything else stays solid. Flat fills before shadows; most elements sit flat.",
-  "Buttons, inputs, cards, and badges keep distinct radii from the tokens; never make everything pill-shaped.",
-  "No dot grids, blueprint lines, or graph paper behind content.",
-  "Headings carry the style personality; body text stays scannable. Real copy from the brief, no lorem ipsum, no TODO, no bracketed placeholders.",
-  "Inline SVG icons only, never emoji as icons. Visible focus states, AA contrast, real labels on every control.",
-  "Responsive: readable on a 390px phone and a 1280px desktop.",
+  "Design bar: this must read like a senior product designer shipped it, not like a generated landing page.",
+  "One focal point per screen: one element is clearly the most important and everything else defers to it.",
+  "Composition varies: a calm grid, generous whitespace, and at least one asymmetry or oversized element. Never stack a centered title, subtitle, and identical cards.",
+  "Type carries the hierarchy: a confident page title (32 to 48px, tight leading), 14 to 16px body, 12 to 13px metadata. Never all-caps tracked eyebrows.",
+  "Two neutrals plus one accent from the tokens. The accent appears only on the primary action, the active nav item, and one focal detail.",
+  "Flat surfaces with 1px hairline borders and the system radius. Shadow only on one floating layer such as a menu or dialog.",
+  "Density: show 6 to 10 real rows, items, or cards so the screen feels used, not an empty demo.",
+  "Inline SVG icons only, 16 to 18px, 1.5 stroke. No emoji, no icon-library look, no decorative arrow on every button.",
+  "Every control does something visible: nav links point to a planned screen, tabs and accordions toggle, dialogs close with Escape, forms show validation. If it has no behavior, render it as text.",
+  "Accessible by default: AA contrast, a visible :focus-visible ring, real labels on inputs, 44px tap targets on small screens.",
+  "Motion is subtle: 120 to 200ms ease-out on hover and press only. No fade-up on every element, no parallax.",
+  "Responsive: the layout still works at 390px wide with no horizontal overflow.",
 ].join("\n");
+
+/** Brand fidelity: the model must never invent a name, tagline, or logo. */
+function brandRules(projectName: string, logoUrl?: string): string {
+  const name = projectName.trim() || "Untitled project";
+  const lines = [
+    `Brand: the product is called "${name}". Use that exact name in the title, header, and copy. Never invent a different brand name, tagline, mascot, or logo mark.`,
+  ];
+  if (logoUrl && logoUrl.length < 12000) {
+    lines.push(
+      `The product logo is this exact image, place it in the header as given: <img src="${logoUrl}" alt="${name} logo" />`,
+    );
+  } else {
+    lines.push(
+      "No logo file exists, so render the name as a plain text wordmark. Do not draw an invented logo, icon, or emblem.",
+    );
+  }
+  return lines.join("\n");
+}
 
 /** Ask the model to turn a reference text into DESIGN.md plus tokens.css. */
 export function buildDesignSystemPrompt(
@@ -141,12 +171,13 @@ export function buildShowcasePrompt(
   return [
     "Write one self-contained HTML file: a design-system showcase page for the app below.",
     `Project: "${projectName}". Idea: "${idea.slice(0, 400)}".`,
+    brandRules(projectName),
     "",
     "The design system to demonstrate:",
-    `"""${designMd.slice(0, 4000)}"""`,
+    `"""${designMd.slice(0, 5200)}"""`,
     "",
     "Paste this token block verbatim as the FIRST thing in the single <style> tag, then reference every value via var(--*):",
-    `${tokensCss.slice(0, 3000)}`,
+    `${tokensCss.slice(0, 4000)}`,
     "",
     "Page content (each in its own labeled section):",
     "- Header with the project name and one primary action.",
@@ -155,31 +186,61 @@ export function buildShowcasePrompt(
     "Rules:",
     "- One file. All CSS in one <style> tag, all JS (if any) in one <script> tag.",
     "- No external requests: no CDN, no web fonts, no remote images. System fonts and inline SVG only.",
-    "- Plain HTML, CSS, and JS only: no React, Vue, Svelte, Next.js, or any framework code — no import/export statements, no JSX, no components, no template directives.",
+    "- Plain HTML, CSS, and JS only: no React, Vue, Svelte, Next.js, or any framework code. No import or export statements, no JSX, no components, no template directives.",
     "- Real copy tied to the project, no lorem ipsum, no placeholders.",
     ANTISLOP_DESIGN_RULES,
     "- Return ONLY the HTML, no fences or commentary.",
   ].join("\n");
 }
 
-/** Ask the model which pages the PRD implies, in build order. */
+/** Keep the App Flow parts that name screens and routes, not the diagram. */
+function appFlowExcerpt(appFlow: string, maxChars = 3400): string {
+  if (!appFlow.trim()) return "";
+  const chunks = ["Flow overview", "Screen-by-screen flow", "Navigation map"]
+    .map(
+      (heading) =>
+        appFlow.match(
+          new RegExp(`##\\s*${heading}[\\s\\S]*?(?=\\n##\\s|$)`, "i"),
+        )?.[0] ?? "",
+    )
+    .filter(Boolean);
+  const text = chunks.length ? chunks.join("\n\n") : appFlow;
+  return text.slice(0, maxChars);
+}
+
+/**
+ * Ask the model which screens the documents imply, in build order. The
+ * App Flow doc is the source of truth for screen names and jobs; the PRD
+ * supplies the domain content. Marketing pages are never planned.
+ */
 export function buildPagePlanPrompt(
   projectName: string,
   idea: string,
   brief: string,
+  appFlow = "",
 ): string {
   return [
-    "You plan the screens of a first-version prototype from its PRD.",
+    "You plan the screens of a first-version application prototype from its documents.",
     `Project: "${projectName}". Idea: "${idea.slice(0, 400)}".`,
-    `The PRD: """${brief.slice(0, 3500)}"""`,
+    `PRD: """${brief.slice(0, 3600)}"""`,
+    appFlow.trim()
+      ? `App Flow doc (screen table and navigation map): """${appFlowExcerpt(appFlow)}"""`
+      : "",
     "",
-    'Return ONLY a JSON object, no fences, no commentary: {"pages":[{"slug":"home","title":"Home","brief":"one sentence on what this screen shows"}]}',
+    'Return ONLY a JSON object, no fences, no commentary: {"pages":[{"slug":"home","title":"Home","brief":"one sentence on the screen job","sections":["block","block","block"],"primaryAction":"the one action"}]}',
     "",
     "Rules:",
-    "- 3 to 6 pages that together deliver the core flow, ordered the way they should be built.",
-    "- Slugs are lowercase kebab-case. Titles are short screen names.",
-    "- Each brief is one concrete sentence naming the screen's content, never repeating the title.",
-  ].join("\n");
+    "- These are application screens, not marketing pages. Never plan a landing page with hero, features, pricing, testimonials, FAQ, or waitlist.",
+    "- Use the screens named in the App Flow doc when it has them; otherwise plan 3 to 6 screens that deliver the core flow.",
+    "- Order them the way they are built and used: entry screen first, then the main working screen, then detail, create, and settings.",
+    "- slug is lowercase kebab-case and becomes the route (<slug>.html). title is a short screen name.",
+    "- brief is one concrete sentence naming the real content on the screen, never repeating the title.",
+    "- sections are 3 to 5 short labels for the blocks the screen shows, top to bottom (for example: 'Search and filters', 'Today items', 'Empty state').",
+    "- primaryAction is the one action the screen exists for, in the product's words.",
+    "- No screen may repeat another screen's job.",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 /** Parse the page plan; null when the model answered with prose. */
@@ -193,14 +254,39 @@ export function parsePagePlan(raw: unknown): PlannedPage[] | null {
   if (first === -1 || last <= first) return null;
   try {
     const data = JSON.parse(text.slice(first, last + 1)) as {
-      pages?: Array<{ slug?: unknown; title?: unknown; brief?: unknown }>;
+      pages?: Array<{
+        slug?: unknown;
+        title?: unknown;
+        brief?: unknown;
+        sections?: unknown;
+        primaryAction?: unknown;
+      }>;
     };
     const pages = (data.pages ?? [])
-      .map((entry) => ({
-        slug: slugify(typeof entry.slug === "string" ? entry.slug : ""),
-        title: (typeof entry.title === "string" ? entry.title : "").trim().slice(0, 60),
-        brief: (typeof entry.brief === "string" ? entry.brief : "").trim().slice(0, 200),
-      }))
+      .map((entry) => {
+        const sections = Array.isArray(entry.sections)
+          ? entry.sections
+              .filter((item): item is string => typeof item === "string")
+              .map((item) => item.trim().slice(0, 70))
+              .filter(Boolean)
+              .slice(0, 5)
+          : undefined;
+        const primaryAction =
+          typeof entry.primaryAction === "string"
+            ? entry.primaryAction.trim().slice(0, 70)
+            : undefined;
+        return {
+          slug: slugify(typeof entry.slug === "string" ? entry.slug : ""),
+          title: (typeof entry.title === "string" ? entry.title : "")
+            .trim()
+            .slice(0, 60),
+          brief: (typeof entry.brief === "string" ? entry.brief : "")
+            .trim()
+            .slice(0, 200),
+          ...(sections?.length ? { sections } : {}),
+          ...(primaryAction ? { primaryAction } : {}),
+        };
+      })
       .filter((entry) => entry.slug && entry.title);
     return pages.length ? pages.slice(0, 8) : null;
   } catch {
@@ -215,55 +301,164 @@ export interface PriorPageContext {
   html: string;
 }
 
+/** Everything one page generation needs, in one object. */
+export interface PagePromptContext {
+  projectName: string;
+  idea: string;
+  prd: string;
+  appFlow?: string;
+  page: PlannedPage;
+  designMd: string;
+  tokensCss: string;
+  /** Full plan, so nav routes stay identical across screens. */
+  plan?: PlannedPage[];
+  priorPages?: PriorPageContext[];
+  userNote?: string;
+  logoUrl?: string;
+}
+
 /** Shrink generated HTML to its structural shell: head, header, nav, headings. */
-function excerptPageHtml(html: string, maxChars = 2200): string {
+function excerptPageHtml(html: string, maxChars = 1800): string {
   const head = html.match(/<head[\s>][\s\S]*?<\/head\s*>/i)?.[0] ?? "";
   const body = html.match(/<body[\s>][\s\S]*$/i)?.[0] ?? html;
   const shell = (head + "\n" + body)
     .replace(/<script[\s>][\s\S]*?<\/script\s*>/gi, "")
     .replace(/<!--([\s\S]*?)-->/g, "");
   const text = shell.replace(/\s+/g, " ").trim();
-  return text.length > maxChars ? `${text.slice(0, maxChars)}…` : text;
+  return text.length > maxChars ? `${text.slice(0, maxChars)}...` : text;
 }
 
-export function buildPagePrompt(
-  projectName: string,
-  idea: string,
-  brief: string,
-  page: PlannedPage,
-  designMd: string,
-  tokensCss: string,
-  priorPages: PriorPageContext[] = [],
-  userNote = "",
-): string {
-  const prior = priorPages
+/** Pull the App Flow rows and table that describe this screen. */
+function screenSpec(appFlow: string, page: PlannedPage): string {
+  if (!appFlow.trim()) return "";
+  const needles = [page.title, page.slug.replace(/-/g, " ")]
+    .map((needle) => needle.toLowerCase().trim())
+    .filter((needle) => needle.length > 2);
+  const rows = appFlow
+    .split("\n")
+    .filter((line) =>
+      needles.some((needle) => line.toLowerCase().includes(needle)),
+    )
+    .slice(0, 6)
+    .join("\n");
+  const flow =
+    appFlow.match(/##\s*Screen-by-screen flow[\s\S]*?(?=\n##\s|$)/i)?.[0] ?? "";
+  return [rows, flow.slice(0, 1800)]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 2400);
+}
+
+/** One stable route list so every screen ships the same navigation. */
+function routeList(plan: PlannedPage[] | undefined): string {
+  if (!plan?.length) return "";
+  return plan
+    .map((entry) => `${entry.title} -> ${entry.slug}.html`)
+    .join("; ");
+}
+
+export function buildPagePrompt(context: PagePromptContext): string {
+  const { page } = context;
+  const sections = (page.sections ?? []).filter(Boolean);
+  const spec = screenSpec(context.appFlow ?? "", page);
+  const routes = routeList(context.plan);
+  const prior = (context.priorPages ?? [])
     .map(
       (entry) =>
         `--- Earlier screen "${entry.title}" (${entry.slug}.html) ---\n${excerptPageHtml(entry.html)}`,
     )
     .join("\n")
-    .slice(0, 6000);
+    .slice(0, 5200);
   return [
-    `Write one self-contained HTML file: the "${page.title}" screen of the app below.`,
-    `Project: "${projectName}". Idea: "${idea.slice(0, 400)}".`,
-    brief ? `Product brief: """${brief.slice(0, 3000)}"""` : "",
-    `This screen: ${page.brief || page.title}.`,
-    userNote.trim() ? `User change request for this screen: "${userNote.trim().slice(0, 800)}". Apply it visibly.` : "",
+    "You are a senior product designer and front-end engineer. Build one real application screen as a single self-contained HTML file.",
+    "",
+    "PRODUCT",
+    `Name: "${context.projectName.trim() || "Untitled project"}" (use it exactly).`,
+    `Idea: "${context.idea.replace(/\s+/g, " ").trim().slice(0, 400)}".`,
+    context.prd.trim()
+      ? `PRD: """${context.prd.replace(/\s+/g, " ").trim().slice(0, 3200)}"""`
+      : "",
+    spec ? `App Flow detail for this screen:\n${spec}` : "",
+    brandRules(context.projectName, context.logoUrl),
+    "",
+    "THIS SCREEN",
+    `Title: "${page.title}". Route: ${page.slug}.html.`,
+    `Job: ${page.brief || page.title}.`,
+    sections.length
+      ? `Blocks it must show, top to bottom: ${sections.join(" / ")}.`
+      : "",
+    page.primaryAction ? `Primary action: "${page.primaryAction}".` : "",
+    context.userNote?.trim()
+      ? `User change request for this screen: "${context.userNote.trim().slice(0, 800)}". Apply it visibly and keep everything else consistent.`
+      : "",
+    "",
+    "THIS IS AN APP SCREEN, NOT A LANDING PAGE",
+    "- Render the working product surface: app chrome (wordmark, navigation, account), the screen's real content, and its primary action.",
+    "- Do not add marketing sections (hero headline, feature grid, testimonials, pricing, FAQ, trusted-by, waitlist) unless the screen job explicitly asks for them.",
+    "- Content starts immediately and fills a 960x640 desktop frame. Do not push the useful content below a decorative hero.",
+    "- Every block in the list above must be visible, with its own heading and real content. Missing a block is a failure.",
+    "- The block labels are an internal outline. Never print them verbatim; write natural product headings in the product's voice, or let the UI speak for itself.",
+    "- Keep the app header compact (64px or less) and the first working region visible inside the first 640px. Use 24 to 32px section gaps, not 100px marketing spacing.",
+    "- Show 6 to 10 specific items drawn from the product domain in the PRD, with real labels, statuses, and actions. A screen that is more than a third empty whitespace is a failure.",
+    "- Never invent people, personal names, avatars, member counts, ratings, prices, reviews, or statistics. Use neutral roles (You, Owner, Member) and only the data the documents give you.",
+    "- A short factual line from the screen job is enough. Never write a marketing tagline or slogan.",
+    "",
+    routes ? `NAVIGATION\nAll screens in this app: ${routes}.` : "",
+    routes
+      ? "Reuse one identical header, nav, footer, spacing rhythm, and component styling on every screen. Mark this screen with aria-current=\"page\". Only link to routes in that list, never add Features, Pricing, About, Contact, or Blog links that have no screen."
+      : "",
     "",
     prior
-      ? `Already generated screens this page must connect to (reuse the SAME header, nav, footer, and route names; link back and forth so nothing dangles):\n${prior}\n`
+      ? `EARLIER SCREENS THIS ONE MUST CONNECT TO\n${prior}\nKeep the same wordmark, nav labels, header height, footer, and component styles. This screen is the next step in that flow.\n`
       : "",
-    "The design system this screen must follow:",
-    `"""${designMd.slice(0, 3000)}"""`,
+    "DESIGN SYSTEM",
+    "Follow this DESIGN.md. It is the direction, not a suggestion:",
+    `"""${context.designMd.slice(0, 5200)}"""`,
     "",
-    "Paste this token block verbatim as the FIRST thing in the single <style> tag, then reference every value via var(--*):",
-    `${tokensCss.slice(0, 3000)}`,
+    "Paste this token block verbatim as the FIRST thing in the single <style> tag, then reference every value via var(--*). Never hardcode a hex value that exists as a token:",
+    `${context.tokensCss.slice(0, 4200)}`,
     "",
-    "Rules:",
-    "- One file. All CSS in one <style> tag, all JS (if any) in one <script> tag.",
-    "- No external requests: no CDN, no web fonts, no remote images. System fonts and inline SVG only.",
-    "- Plain HTML, CSS, and JS only: no React, Vue, Svelte, Next.js, or any framework code — no import/export statements, no JSX, no components, no template directives.",
-    "- The screen's core content is visible without scrolling past a hero.",
+    ANTISLOP_DESIGN_RULES,
+    "",
+    "HARD RULES",
+    "- One file: <!DOCTYPE html>, <html>, <head>, one <style>, one <body>. Never return a fragment, a plan, or commentary.",
+    "- Plain HTML, CSS, and JS only. No React, Vue, Svelte, Next.js, or framework code: no import or export statements, no JSX, no components, no template directives, no className.",
+    "- No external requests: no CDN, no web fonts, no remote images, no @import. System font stacks and inline SVG only.",
+    "- Visible on first paint: real content inside <body>, no opacity:0, no visibility:hidden, no display:none on the body or main, no splash overlay, no JavaScript required to show the screen.",
+    "- Text contrast meets AA. Inputs have visible labels. Focus states are visible. No horizontal overflow at 390px.",
+    "- No em dashes, no lorem ipsum, no TODO, no bracketed placeholders, no emoji as icons.",
+    "- Use the exact project name. Never invent a different brand, logo, or tagline.",
+    "- Return ONLY the HTML, no fences or commentary.",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+/** Second chance after a blank, hidden, or framework-code render. */
+export function buildPageRepairPrompt(context: PagePromptContext): string {
+  const { page } = context;
+  const sections = (page.sections ?? []).filter(Boolean);
+  return [
+    `Your last output for the "${page.title}" screen failed: it rendered blank, hid its content, or returned framework code instead of plain HTML. Return the complete corrected file now.`,
+    "",
+    `Project name: "${context.projectName.trim() || "Untitled project"}" (use it exactly).`,
+    `Screen job: ${page.brief || page.title}.`,
+    sections.length ? `Blocks it must show: ${sections.join(" / ")}.` : "",
+    page.primaryAction ? `Primary action: "${page.primaryAction}".` : "",
+    brandRules(context.projectName, context.logoUrl),
+    "",
+    "Paste this token block verbatim as the FIRST thing in the single <style> tag:",
+    `${context.tokensCss.slice(0, 4200)}`,
+    "",
+    "Non-negotiable fixes:",
+    "- Start with <!DOCTYPE html>, include <html>, <head>, and a <body> that already holds the visible screen.",
+    "- Real page title, app header, nav, and 6 or more content items inside <body>, visible without scrolling.",
+    "- Every block listed above appears with its own heading and content. A mostly empty screen is a failure.",
+    "- Never print the block labels verbatim as headings; write natural product headings.",
+    "- No opacity:0, no visibility:hidden, no display:none on body or main, no splash overlay, no JavaScript needed for the first paint.",
+    "- Plain HTML, CSS, and JS only. No React, Vue, Svelte, Next.js, no imports, no JSX, no components.",
+    "- No external requests, no web fonts, no remote images; system fonts and inline SVG only.",
+    "- No em dashes, no lorem ipsum, no TODO, no invented brand or logo.",
     ANTISLOP_DESIGN_RULES,
     "- Return ONLY the HTML, no fences or commentary.",
   ]
@@ -271,28 +466,114 @@ export function buildPagePrompt(
     .join("\n");
 }
 
-/** Second chance after a blank render: demand visible content, same system. */
-export function buildPageRepairPrompt(
-  projectName: string,
-  page: PlannedPage,
-  designMd: string,
-  tokensCss: string,
-): string {
-  return [
-    `Your last output for the "${page.title}" screen rendered as a blank white page. Return ONLY the complete, corrected, self-contained HTML file for it.`,
-    `Project: "${projectName}". This screen: ${page.brief || page.title}.`,
-    "",
-    "Paste this token block verbatim as the FIRST thing in the single <style> tag, then reference every value via var(--*):",
-    `${tokensCss.slice(0, 3000)}`,
-    "",
-    "Non-negotiable fixes:",
-    "- Real headline plus real paragraphs, buttons, or cards inside <body>, visible without scrolling.",
-    "- No external requests, no web fonts, no remote images; system fonts and inline SVG only.",
-    "- Plain HTML, CSS, and JS only: no React, Vue, Svelte, Next.js, or any framework code — no import/export statements, no JSX, no components, no template directives.",
-    "- No empty <body>, no splash overlay that hides content, no JavaScript required to show the first paint.",
-    ANTISLOP_DESIGN_RULES,
-    "- Return ONLY the HTML, no fences or commentary.",
-  ].join("\n");
+/**
+ * Local last resort: a real, on-brand screen built from the tokens and the
+ * plan. Used only when two model attempts both fail, so a frame never
+ * renders as a blank white page.
+ */
+export function buildFallbackPageHtml(context: PagePromptContext): string {
+  const esc = (value: string) =>
+    value
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  const name = esc(context.projectName.trim() || "Untitled project");
+  const title = esc(context.page.title);
+  const brief = esc(context.page.brief || "The core content for this screen.");
+  const blocks = (
+    context.page.sections?.length
+      ? context.page.sections
+      : ["Overview", "Recent activity", "Details"]
+  )
+    .slice(0, 4)
+    .map(esc);
+  const action = esc(context.page.primaryAction || "New item");
+  const nav = (context.plan ?? [])
+    .slice(0, 5)
+    .map(
+      (entry) =>
+        `<a href="${entry.slug}.html"${entry.slug === context.page.slug ? ' aria-current="page"' : ""}>${esc(entry.title)}</a>`,
+    )
+    .join("");
+  const rows = Array.from({ length: 5 }, (_, index) => {
+    const block = blocks[index % blocks.length];
+    return `<tr><td><span class="dot"></span>${block} ${index + 1}</td><td>Today</td><td><span class="tag">Active</span></td><td class="muted">Open</td></tr>`;
+  }).join("");
+  const cardCopy = [
+    "Items waiting for a decision.",
+    "Drafts that still need details.",
+    "Work that is moving right now.",
+    "Finished items kept for reference.",
+  ];
+  const cards = blocks
+    .map(
+      (block, index) =>
+        `<article class="card"><p class="meta">${block}</p><h2>${index === 0 ? "Ready to review" : index === 1 ? "Needs your input" : index === 2 ? "In progress" : "Recently closed"}</h2><p class="copy">${cardCopy[index % cardCopy.length]}</p></article>`,
+    )
+    .join("");
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>${name} - ${title}</title>
+<style>
+:root {
+  --bg: #ffffff; --fg: #111827; --fg-2: #4b5563; --meta: #6b7280;
+  --accent: #111111; --accent-on: #ffffff; --surface: #f6f7f9;
+  --border: #e5e7eb; --radius: 10px;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+${context.tokensCss || ""}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--fg); font-family: var(--font); font-size: 15px; line-height: 1.5; }
+.shell { min-height: 100vh; display: flex; flex-direction: column; }
+header { display: flex; align-items: center; gap: 24px; padding: 14px 28px; border-bottom: 1px solid var(--border); }
+.brand { font-weight: 650; letter-spacing: -0.01em; }
+nav { display: flex; gap: 18px; margin-left: 8px; }
+nav a { color: var(--fg-2); text-decoration: none; font-size: 14px; padding: 6px 0; border-bottom: 2px solid transparent; }
+nav a[aria-current="page"] { color: var(--fg); border-color: var(--accent); }
+.spacer { flex: 1; }
+.avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border); display: grid; place-items: center; font-size: 11px; color: var(--fg-2); }
+main { padding: 28px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; }
+h1 { font-size: 30px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 6px; }
+.copy { color: var(--fg-2); margin: 0 0 20px; max-width: 52ch; }
+.btn { display: inline-flex; align-items: center; height: 38px; padding: 0 16px; border-radius: var(--radius); border: 1px solid var(--accent); background: var(--accent); color: var(--accent-on); font: inherit; font-size: 14px; }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.card { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--bg); }
+.card h2 { font-size: 15px; margin: 4px 0 6px; }
+.card .copy { font-size: 13px; margin: 0; }
+.meta { margin: 0; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--meta); }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid var(--border); }
+th { font-size: 12px; color: var(--meta); font-weight: 500; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 8px; }
+.tag { border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; color: var(--fg-2); }
+.muted { color: var(--meta); }
+aside { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: var(--surface); align-self: start; }
+aside h2 { font-size: 14px; margin: 0 0 8px; }
+aside ul { margin: 0; padding-left: 18px; color: var(--fg-2); font-size: 13px; }
+@media (max-width: 760px) { main { grid-template-columns: 1fr; padding: 18px; } .grid { grid-template-columns: 1fr; } nav { display: none; } }
+</style>
+</head>
+<body>
+<div class="shell">
+<header><span class="brand">${name}</span><nav>${nav}</nav><span class="spacer"></span><span class="avatar">${esc(name.slice(0, 2).toUpperCase())}</span></header>
+<main>
+<section>
+<p class="meta">${title}</p>
+<h1>${title}</h1>
+<p class="copy">${brief}</p>
+<button class="btn" type="button">${action}</button>
+<div class="grid">${cards}</div>
+<table><thead><tr><th>Item</th><th>Updated</th><th>Status</th><th>Owner</th></tr></thead><tbody>${rows}</tbody></table>
+</section>
+<aside><h2>Next steps</h2><ul>${blocks.map((block) => `<li>${block}</li>`).join("")}</ul></aside>
+</main>
+</div>
+</body>
+</html>`;
 }
 
 /** Local fallback page plan when the model is offline: core flow screens. */
@@ -362,30 +643,55 @@ input { width: 100%; box-sizing: border-box; border: 1px solid var(--border); bo
 </html>`;
 }
 
-/** The system the canvas renders: the saved choice, else the minimal template. */
+/** True when a token block can actually theme a page. */
+export function hasDesignTokens(tokensCss: string | undefined): boolean {
+  return Boolean(tokensCss && /--(?:bg|fg|accent)\s*:/.test(tokensCss));
+}
+
+/**
+ * The system the canvas renders: the saved choice, else the template by
+ * id. A saved system with an empty token block is repaired from its
+ * template, so a page never renders unthemed and the model never has to
+ * invent colors.
+ */
 export async function resolveProjectDesignSystem(project: {
   designSystem?: DesignSystemRef;
 }): Promise<DesignSystemRef> {
-  if (project.designSystem) return project.designSystem;
+  const saved = project.designSystem;
+  if (saved && hasDesignTokens(saved.tokensCss)) return saved;
+  const id =
+    saved?.source === "template" && saved.id ? saved.id : "minimal";
+  const savedMd =
+    saved?.designMd && saved.designMd.trim().length > 40
+      ? saved.designMd
+      : "";
   try {
     const [designMd, tokensCss] = await Promise.all([
-      fetch("/design-systems/minimal/DESIGN.md").then((res) => {
+      fetch(`/design-systems/${id}/DESIGN.md`).then((res) => {
         if (!res.ok) throw new Error("missing");
         return res.text();
       }),
-      fetch("/design-systems/minimal/tokens.css").then((res) => {
+      fetch(`/design-systems/${id}/tokens.css`).then((res) => {
         if (!res.ok) throw new Error("missing");
         return res.text();
       }),
     ]);
-    return { id: "minimal", name: "Minimal", designMd, tokensCss, source: "template" };
+    return {
+      id,
+      name: saved?.name ?? "Minimal",
+      designMd: savedMd || designMd,
+      tokensCss: hasDesignTokens(tokensCss) ? tokensCss : DEFAULT_TOKENS_CSS,
+      source: saved?.source ?? "template",
+    };
   } catch {
     return {
-      id: "minimal",
-      name: "Minimal",
-      designMd: DEFAULT_DESIGN_MD,
-      tokensCss: DEFAULT_TOKENS_CSS,
-      source: "template",
+      id,
+      name: saved?.name ?? "Minimal",
+      designMd: savedMd || DEFAULT_DESIGN_MD,
+      tokensCss: hasDesignTokens(saved?.tokensCss)
+        ? (saved as DesignSystemRef).tokensCss
+        : DEFAULT_TOKENS_CSS,
+      source: saved?.source ?? "template",
     };
   }
 }

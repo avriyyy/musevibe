@@ -54,8 +54,9 @@ import {
   buildDocPrompt,
   hasVisibleContent,
   looksLikeFrameworkCode,
+  missingPageSections,
+  normalizePrototypeHtml,
   parseDocMarkdown,
-  parsePrototypeHtml,
   type DocKind,
 } from "@/lib/docs";
 import {
@@ -73,6 +74,7 @@ import {
 import { DESIGN_SYSTEMS } from "@/lib/design-systems-catalog";
 import {
   SHOWCASE_PATH,
+  buildFallbackPageHtml,
   buildPagePlanPrompt,
   buildPageRepairPrompt,
   buildPagePrompt,
@@ -502,7 +504,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         current.model,
       );
       const html =
-        parsePrototypeHtml(reply.text) ||
+        normalizePrototypeHtml(reply.text) ||
         buildSamplePreviewHtmlFallback(current, system);
       saveHtmlFile(SHOWCASE_PATH, html);
     } catch {
@@ -552,6 +554,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           current.name,
           current.idea,
           state.prdByProject[projectId] ?? "",
+          (state.docsByProject[projectId] ?? EMPTY_DOCS).find(
+            (doc) => doc.kind === "afd",
+          )?.markdown ?? "",
         ),
         current.model,
       );
@@ -589,43 +594,54 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               : null;
           })
           .filter((entry) => entry !== null);
+        const docs = state.docsByProject[projectId] ?? EMPTY_DOCS;
+        const appFlow =
+          docs.find((doc) => doc.kind === "afd")?.markdown ?? "";
+        const context = {
+          projectName: current.name,
+          idea: current.idea,
+          prd: state.prdByProject[projectId] ?? "",
+          appFlow,
+          page,
+          designMd: system.designMd,
+          tokensCss: system.tokensCss,
+          plan,
+          priorPages,
+          userNote: note,
+          logoUrl: current.logoUrl,
+        };
         const reply = await requestAi(
           "prototype",
-          buildPagePrompt(
-            current.name,
-            current.idea,
-            state.prdByProject[projectId] ?? "",
-            page,
-            system.designMd,
-            system.tokensCss,
-            priorPages,
-            note,
-          ),
+          buildPagePrompt(context),
           current.model,
         );
-        let html = parsePrototypeHtml(reply.text);
-        if (!hasVisibleContent(html) || looksLikeFrameworkCode(html)) {
-          // One repair attempt: the last output would have rendered blank
-          // or is framework code instead of plain HTML.
+        let html = normalizePrototypeHtml(reply.text);
+        const plannedSections = page.sections ?? [];
+        const thin = (value: string) =>
+          !hasVisibleContent(value) ||
+          looksLikeFrameworkCode(value) ||
+          (plannedSections.length > 0 &&
+            missingPageSections(value, plannedSections).length >=
+              Math.ceil(plannedSections.length / 2));
+        if (thin(html)) {
+          // One repair attempt: the last output would have rendered blank,
+          // hidden its content, or is framework code instead of plain HTML.
           try {
             const retry = await requestAi(
               "prototype",
-              buildPageRepairPrompt(
-                current.name,
-                page,
-                system.designMd,
-                system.tokensCss,
-              ),
+              buildPageRepairPrompt(context),
               current.model,
             );
-            const fixed = parsePrototypeHtml(retry.text);
-            if (hasVisibleContent(fixed) && !looksLikeFrameworkCode(fixed)) html = fixed;
+            const fixed = normalizePrototypeHtml(retry.text);
+            if (!thin(fixed)) html = fixed;
           } catch {
             // Keep the first attempt below.
           }
         }
         if (!hasVisibleContent(html) || looksLikeFrameworkCode(html)) {
-          html = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8" />\n<title>${page.title}</title>\n</head>\n<body>\n<h1>${page.title}</h1>\n<p>${page.brief}</p>\n</body>\n</html>`;
+          // Two failed attempts: draw the screen locally from the tokens
+          // and the plan so the frame is never a blank white page.
+          html = buildFallbackPageHtml(context);
         }
         saveHtmlFile(pageFilePath(slug), html);
       } finally {
@@ -910,7 +926,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         try {
           const reply = await requestAi(
             "pages",
-            buildPagePlanPrompt(current0.name, current0.idea, brief),
+            buildPagePlanPrompt(
+              current0.name,
+              current0.idea,
+              brief,
+              (
+                useVibe.getState().docsByProject[projectId] ?? EMPTY_DOCS
+              ).find((doc) => doc.kind === "afd")?.markdown ?? "",
+            ),
             current0.model,
           );
           const plan = parsePagePlan(reply.text) ?? fallbackPagePlan();
@@ -926,6 +949,29 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       setPrepActive(null);
     }
   }, [projectId, saveDocMarkdown]);
+
+  // Pages drawn before the HTML guards can hold blank or framework output.
+  // Drop them once per project so the sidebar offers Generate instead of
+  // leaving a white frame on the canvas.
+  const sweptPagesRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!hydrated || !project || sweptPagesRef.current === projectId) return;
+    const state = useVibe.getState();
+    const files = state.filesByProject[projectId];
+    if (!files?.length) return;
+    sweptPagesRef.current = projectId;
+    const invalid = files.filter(
+      (file) =>
+        file.path.startsWith("page-") &&
+        (!hasVisibleContent(file.content) ||
+          looksLikeFrameworkCode(file.content)),
+    );
+    if (!invalid.length) return;
+    state.setFiles(
+      projectId,
+      files.filter((file) => !invalid.includes(file)),
+    );
+  }, [hydrated, project, projectId]);
 
   // Fresh projects prepare once behind the blur overlay. Anything already
   // seeded keeps the old lazy path: the effects below fill the gaps.
