@@ -1,16 +1,14 @@
 "use client";
 
 /**
- * Floating workspace chat: a bottom-edge drawer tab that slides upward
- * into a wide composer bar grounded in the live project (idea, brief,
- * documents, task board). Collapses back into the bottom edge to hide.
+ * Floating workspace command bar: a bottom-edge drawer tab that slides
+ * upward into a wide composer. It is action-only, never a chatbot: every
+ * prompt runs as workspace actions and answers with a one-line receipt.
  * Dark pills and white accents match the workspace chrome.
  */
 
 import { useEffect, useRef, useState } from "react";
-import Markdown from "./Markdown";
 import { blobToWav } from "@/lib/audio";
-import { buildChatPrompt, type ChatMessage } from "@/lib/chat";
 import {
   FALLBACK_MODELS,
   formatModelLabel,
@@ -18,7 +16,7 @@ import {
 } from "@/lib/models";
 import { useVibe } from "@/lib/store";
 import type { Project, ProjectDoc, Task } from "@/lib/types";
-import { quoteLine, type ChatQuote } from "@/lib/pick";
+import type { ChatQuote } from "@/lib/pick";
 
 interface WorkspaceChatProps {
   project: Project;
@@ -28,17 +26,18 @@ interface WorkspaceChatProps {
   onHeightChange?: (height: number) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Quoted selections appended into the input, newest wins. */
+  /** Quoted selections appended as chips, newest wins. */
   draft: { id: number; quote: ChatQuote } | null;
+  /** Run one prompt as workspace actions; returns the receipt to show. */
+  onAction: (
+    message: string,
+    pins: Array<{ label: string; text: string; comment: string }>,
+  ) => Promise<{ ok: boolean; note: string }> ;
   onDraftConsumed?: () => void;
   /** Armed component picker, available while the design canvas is open. */
   canPick?: boolean;
   picking?: boolean;
   onTogglePick?: () => void;
-}
-
-interface ChatTurn extends ChatMessage {
-  offline?: boolean;
 }
 
 type MicState = "idle" | "recording" | "transcribing";
@@ -56,33 +55,31 @@ export default function WorkspaceChat({
   canPick = false,
   picking = false,
   onTogglePick,
+  onAction,
 }: WorkspaceChatProps) {
-  const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [chips, setChips] = useState<Array<{ id: number; quote: ChatQuote }>>([]);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [status, setStatus] = useState<
+    { tone: "working" | "done" | "error"; text: string } | null
+  >(null);
   const [micState, setMicState] = useState<MicState>("idle");
   const [micError, setMicError] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const busyRef = useRef(false);
   const shellRef = useRef<HTMLDivElement>(null);
   const heightRef = useRef(onHeightChange);
   const pickerRef = useRef<HTMLDivElement>(null);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [models, setModels] = useState<AiModelOption[]>(FALLBACK_MODELS);
   const [modelOpen, setModelOpen] = useState(false);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
-  const stateRef = useRef({ project, brief, docs, tasks });
   const draftSeenRef = useRef<number | null>(null);
 
-  // Thread state resets via the keyed remount in the parent.
-
-  // Latest project snapshot for in-flight requests.
+  // Latest height callback for the resize observer below.
   useEffect(() => {
-    stateRef.current = { project, brief, docs, tasks };
     heightRef.current = onHeightChange;
   });
 
@@ -185,74 +182,63 @@ export default function WorkspaceChat({
     return () => observer.disconnect();
   }, [open]);
 
-  // Keep the latest reply in view, and focus the box when opened.
+  // Focus the box when opened.
   useEffect(() => {
     if (!open) return;
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight });
     inputRef.current?.focus();
-  }, [open, turns.length, busy]);
+  }, [open, busy]);
+
+  // One-line receipt for the last action; successes fade away on their own.
+  const flashStatus = (
+    tone: "working" | "done" | "error",
+    text: string,
+    sticky = false,
+  ) => {
+    if (statusTimerRef.current) {
+      clearTimeout(statusTimerRef.current);
+      statusTimerRef.current = null;
+    }
+    setStatus({ tone, text });
+    if (!sticky) {
+      statusTimerRef.current = setTimeout(() => setStatus(null), 5000);
+    }
+  };
+
+  useEffect(
+    () => () => {
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    },
+    [],
+  );
 
   const send = async (text?: string) => {
     const typed = (text ?? input).trim();
-    const context = chips
-      .map((chip) => quoteLine(chip.quote))
-      .join("\n");
-    const message = [
-      context ? `[Pinned context]\n${context}` : "",
-      typed,
-    ]
+    const pins = chips.map((chip) => ({ ...chip.quote }));
+    const message = [typed, pins.length ? "(see pinned context)" : ""]
       .filter(Boolean)
-      .join("\n\n");
-    if (!message || busyRef.current) return;
+      .join("\n");
+    if ((!typed && !pins.length) || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
-    setError("");
+    flashStatus("working", "Working…", true);
     const sentChips = chips;
-    const next: ChatTurn[] = [...turns, { role: "user", content: message }];
-    setTurns(next);
     setInput("");
     setChips([]);
     try {
-      const {
-        project: currentProject,
-        brief: currentBrief,
-        docs: currentDocs,
-        tasks: currentTasks,
-      } = stateRef.current;
-      const response = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "chat",
-          prompt: buildChatPrompt(
-            currentProject,
-            currentBrief,
-            currentDocs,
-            currentTasks,
-            next,
-            message,
-          ),
-          ...(currentProject.model ? { model: currentProject.model } : {}),
-        }),
-      });
-      if (!response.ok) throw new Error(`Chat request failed: ${response.status}`);
-      const data = (await response.json()) as {
-        text?: unknown;
-        source?: unknown;
-      };
-      const text =
-        typeof data.text === "string" && data.text.trim()
-          ? data.text.trim()
-          : "The model returned nothing. Try asking again.";
-      setTurns((prev) => [
-        ...prev,
-        { role: "assistant", content: text, offline: data.source !== "ai" },
-      ]);
+      const result = await onAction(typed, pins);
+      if (result.ok) {
+        flashStatus("done", result.note);
+      } else {
+        flashStatus("error", result.note, true);
+        setInput(typed);
+        setChips(sentChips);
+      }
     } catch (err) {
-      setError(
+      flashStatus(
+        "error",
         err instanceof Error ? err.message : "The chat request failed.",
+        true,
       );
-      setTurns((prev) => prev.slice(0, -1));
       setInput(typed);
       setChips(sentChips);
     } finally {
@@ -385,56 +371,6 @@ export default function WorkspaceChat({
   return (
     <div ref={shellRef} className="absolute bottom-4 left-1/2 z-40 w-[min(720px,calc(100vw-2rem))] -translate-x-1/2">
       <div className="musevibe-sheet flex max-h-[min(560px,calc(100dvh-8rem))] flex-col gap-2">
-        {/* Messages, only once the thread starts. */}
-        {turns.length > 0 && (
-          <div className="min-h-0 overflow-hidden rounded-2xl border border-white/10 bg-[#17181d]/95 shadow-2xl backdrop-blur">
-            <div
-              ref={scrollRef}
-              className="max-h-[300px] overflow-y-auto px-4 py-3"
-            >
-              <div className="flex flex-col gap-2.5">
-                {turns.map((turn, index) => (
-                  <div
-                    key={index}
-                    className={`max-w-[90%] rounded-2xl px-3 py-2 text-[13px] leading-relaxed ${
-                      turn.role === "user"
-                        ? "self-end bg-white text-[#0b0c10]"
-                        : "self-start bg-white/5 text-[#e8ebf0]"
-                    }`}
-                  >
-                    {turn.role === "assistant" ? (
-                      <>
-                        <Markdown text={turn.content} />
-                        {turn.offline && (
-                          <p className="mt-1.5 text-[11px] text-[#5b6472]">
-                            Offline draft: reconnect the model for a live answer.
-                          </p>
-                        )}
-                      </>
-                    ) : (
-                      <p className="whitespace-pre-wrap">{turn.content}</p>
-                    )}
-                  </div>
-                ))}
-                {busy && (
-                  <div
-                    role="status"
-                    className="flex items-center gap-2 self-start rounded-2xl bg-white/5 px-3 py-2 text-[12px] text-[#9aa0ae]"
-                  >
-                    <span className="size-3 animate-pulse rounded-full bg-white/40" />
-                    Thinking…
-                  </div>
-                )}
-              </div>
-              {error && (
-                <p role="alert" className="mt-2 text-[12px] text-[#f0a6a6]">
-                  {error}
-                </p>
-              )}
-            </div>
-          </div>
-        )}
-
         {/* Wide composer bar. */}
         <div
           className={`rounded-2xl border bg-[#17181d]/95 px-3 pb-2 pt-2 shadow-2xl backdrop-blur transition-colors ${
@@ -447,6 +383,66 @@ export default function WorkspaceChat({
               void send();
             }}
           >
+            {status && (
+              <div
+                role={status.tone === "error" ? "alert" : "status"}
+                className={`flex items-center gap-2 px-1 pb-1.5 pt-1 text-[12px] ${
+                  status.tone === "error"
+                    ? "text-[#f0a6a6]"
+                    : status.tone === "done"
+                      ? "text-[#7ee2a8]"
+                      : "text-[#9aa0ae]"
+                }`}
+              >
+                {status.tone === "working" ? (
+                  <span
+                    aria-hidden
+                    className="size-3 shrink-0 animate-pulse rounded-full bg-white/40"
+                  />
+                ) : status.tone === "done" ? (
+                  <svg
+                    aria-hidden
+                    width="13"
+                    height="13"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    className="shrink-0"
+                  >
+                    <path d="M20 6L9 17l-5-5" />
+                  </svg>
+                ) : (
+                  <span aria-hidden className="shrink-0 font-bold">
+                    !
+                  </span>
+                )}
+                <span className="min-w-0 flex-1 truncate">{status.text}</span>
+                {status.tone !== "working" && (
+                  <button
+                    type="button"
+                    onClick={() => setStatus(null)}
+                    aria-label="Dismiss"
+                    className="flex size-5 shrink-0 items-center justify-center rounded-full text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+                  >
+                    <svg
+                      aria-hidden
+                      width="10"
+                      height="10"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                    >
+                      <path d="M6 6l12 12M18 6L6 18" />
+                    </svg>
+                  </button>
+                )}
+              </div>
+            )}
             {chips.length > 0 && (
               <div
                 role="list"
@@ -532,7 +528,7 @@ export default function WorkspaceChat({
               placeholder={
                 picking
                   ? "Pick a component or a whole frame, then say what should change…"
-                  : "Ask or change anything…"
+                  : "Tell Muse what to change…"
               }
               aria-label="Ask about this project"
               disabled={busy}

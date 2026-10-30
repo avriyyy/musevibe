@@ -53,6 +53,7 @@ import {
   DOC_TYPES,
   buildDocPrompt,
   hasVisibleContent,
+  looksLikeFrameworkCode,
   parseDocMarkdown,
   parsePrototypeHtml,
   type DocKind,
@@ -64,6 +65,11 @@ import {
   fallbackTasks,
   parseTasks,
 } from "@/lib/plan";
+import {
+  buildActionPrompt,
+  parseActionResponse,
+  type ChatAction,
+} from "@/lib/chat";
 import { DESIGN_SYSTEMS } from "@/lib/design-systems-catalog";
 import {
   SHOWCASE_PATH,
@@ -181,7 +187,7 @@ interface AiReply {
 }
 
 async function requestAi(
-  kind: "prd" | "tasks" | "doc" | "prototype" | "pages",
+  kind: "prd" | "tasks" | "doc" | "prototype" | "pages" | "chat",
   prompt: string,
   model?: string,
 ): Promise<AiReply> {
@@ -561,7 +567,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
 
   /** Generate one planned page in the chosen design system. */
   const generatePage = useCallback(
-    async (slug: string) => {
+    async (slug: string, note?: string) => {
       const state = useVibe.getState();
       const current = state.projects.find((entry) => entry.id === projectId);
       const plan: PlannedPage[] = current?.pagePlan ?? [];
@@ -593,12 +599,14 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             system.designMd,
             system.tokensCss,
             priorPages,
+            note,
           ),
           current.model,
         );
         let html = parsePrototypeHtml(reply.text);
-        if (!hasVisibleContent(html)) {
-          // One repair attempt: the last output would have rendered blank.
+        if (!hasVisibleContent(html) || looksLikeFrameworkCode(html)) {
+          // One repair attempt: the last output would have rendered blank
+          // or is framework code instead of plain HTML.
           try {
             const retry = await requestAi(
               "prototype",
@@ -611,12 +619,12 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               current.model,
             );
             const fixed = parsePrototypeHtml(retry.text);
-            if (hasVisibleContent(fixed)) html = fixed;
+            if (hasVisibleContent(fixed) && !looksLikeFrameworkCode(fixed)) html = fixed;
           } catch {
             // Keep the first attempt below.
           }
         }
-        if (!hasVisibleContent(html)) {
+        if (!hasVisibleContent(html) || looksLikeFrameworkCode(html)) {
           html = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8" />\n<title>${page.title}</title>\n</head>\n<body>\n<h1>${page.title}</h1>\n<p>${page.brief}</p>\n</body>\n</html>`;
         }
         saveHtmlFile(pageFilePath(slug), html);
@@ -647,6 +655,142 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       await generatePage(page.slug);
     }
   }, [projectId, generatePage]);
+
+  /**
+   * Run one chat prompt as actions, never as conversation. The model
+   * returns a JSON action list; each entry is applied to the store and
+   * the caller shows the one-line receipt.
+   */
+  const runChatAction = useCallback(
+    async (
+      message: string,
+      pins: Array<{ label: string; text: string; comment: string }>,
+    ): Promise<{ ok: boolean; note: string }> => {
+      const state = useVibe.getState();
+      const current = state.projects.find((entry) => entry.id === projectId);
+      if (!current) return { ok: false, note: "Project not found." };
+      const brief = state.prdByProject[projectId] ?? "";
+      const docs = state.docsByProject[projectId] ?? EMPTY_DOCS;
+      const tasks = state.tasksByProject[projectId] ?? EMPTY_TASKS;
+      const pages = (current.pagePlan ?? []).map((page) => ({
+        slug: page.slug,
+        title: page.title,
+        generated: (state.filesByProject[projectId] ?? []).some(
+          (file) => file.path === pageFilePath(page.slug),
+        ),
+      }));
+      let reply: { text: string; source: "ai" | "local" };
+      try {
+        reply = await requestAi(
+          "chat",
+          buildActionPrompt(
+            current,
+            brief,
+            docs,
+            tasks,
+            pages,
+            pins,
+            message,
+          ),
+          current.model,
+        );
+      } catch {
+        return { ok: false, note: "The chat request failed." };
+      }
+      if (reply.source !== "ai") {
+        return {
+          ok: false,
+          note: "The model is unavailable right now, so nothing changed.",
+        };
+      }
+      const parsed = parseActionResponse(reply.text);
+      if (!parsed) {
+        return { ok: false, note: "The model did not answer with actions." };
+      }
+      const applied: string[] = [];
+      const taskStatusOf = (value: string): TaskStatus | null => {
+        const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "");
+        if (normalized === "todo" || normalized === "todoo") return "todo";
+        if (normalized === "doing" || normalized === "inprogress") return "doing";
+        if (normalized === "review" || normalized === "inreview") return "review";
+        if (normalized === "blocked") return "blocked";
+        if (normalized === "done") return "done";
+        if (normalized === "cancelled" || normalized === "canceled") return "cancelled";
+        return null;
+      };
+      for (const action of parsed.actions as ChatAction[]) {
+        if (action.type === "update_doc") {
+          const doc = useVibe
+            .getState()
+            .docsByProject[projectId]?.find(
+              (entry) => entry.kind === action.kind,
+            );
+          if (doc && action.markdown.trim()) {
+            saveDocMarkdown(doc.id, action.markdown.trim());
+            applied.push(doc.title || doc.kind);
+          }
+        } else if (action.type === "add_task") {
+          const entry: Task = {
+            id:
+              typeof crypto !== "undefined" && "randomUUID" in crypto
+                ? crypto.randomUUID()
+                : `task-${Date.now()}`,
+            title: action.title,
+            status: "todo",
+            ...(action.notes ? { notes: action.notes } : {}),
+          };
+          useVibe
+            .getState()
+            .setTasks(projectId, [
+              ...(useVibe.getState().tasksByProject[projectId] ?? []),
+              entry,
+            ]);
+          applied.push(`task "${entry.title}"`);
+        } else if (action.type === "move_task") {
+          const next = taskStatusOf(action.status);
+          const list = useVibe.getState().tasksByProject[projectId] ?? [];
+          const hit = list.find((entry) =>
+            entry.title.toLowerCase().includes(action.title.toLowerCase().slice(0, 24)),
+          );
+          if (hit && next) {
+            useVibe
+              .getState()
+              .setTasks(
+                projectId,
+                list.map((entry) =>
+                  entry.id === hit.id ? { ...entry, status: next } : entry,
+                ),
+              );
+            applied.push(`"${hit.title}" to ${next}`);
+          }
+        } else if (action.type === "generate_page") {
+          const st = useVibe.getState();
+          const plan = st.projects.find((e) => e.id === projectId)?.pagePlan ?? [];
+          const hit =
+            plan.find((entry) => entry.slug === action.slug) ??
+            plan.find((entry) =>
+              entry.title.toLowerCase().includes(action.slug.toLowerCase()),
+            );
+          if (hit) {
+            // Sequential on purpose: one model call at a time keeps long
+            // reasoning generations from colliding.
+            // eslint-disable-next-line no-await-in-loop
+            await generatePage(hit.slug, action.note);
+            applied.push(`page "${hit.title}"`);
+          }
+        } else if (action.type === "rename_project") {
+          useVibe.getState().updateProject(projectId, { name: action.name });
+          applied.push("project name");
+        }
+      }
+      if (!applied.length) return { ok: true, note: parsed.note };
+      return {
+        ok: true,
+        note: `${parsed.note} Changed: ${applied.join("; ")}.`,
+      };
+    },
+    [projectId, saveDocMarkdown, generatePage],
+  );
 
   /**
    * First-run preparation behind a blur overlay: seed the six plan docs
@@ -1368,6 +1512,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         onOpenChange={changeChatOpen}
         draft={chatDraft}
         onDraftConsumed={() => setChatDraft(null)}
+        onAction={runChatAction}
         onHeightChange={setChatHeight}
         canPick
         picking={picking}

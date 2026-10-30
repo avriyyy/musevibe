@@ -155,6 +155,7 @@ export function buildShowcasePrompt(
     "Rules:",
     "- One file. All CSS in one <style> tag, all JS (if any) in one <script> tag.",
     "- No external requests: no CDN, no web fonts, no remote images. System fonts and inline SVG only.",
+    "- Plain HTML, CSS, and JS only: no React, Vue, Svelte, Next.js, or any framework code — no import/export statements, no JSX, no components, no template directives.",
     "- Real copy tied to the project, no lorem ipsum, no placeholders.",
     ANTISLOP_DESIGN_RULES,
     "- Return ONLY the HTML, no fences or commentary.",
@@ -233,6 +234,7 @@ export function buildPagePrompt(
   designMd: string,
   tokensCss: string,
   priorPages: PriorPageContext[] = [],
+  userNote = "",
 ): string {
   const prior = priorPages
     .map(
@@ -246,6 +248,7 @@ export function buildPagePrompt(
     `Project: "${projectName}". Idea: "${idea.slice(0, 400)}".`,
     brief ? `Product brief: """${brief.slice(0, 3000)}"""` : "",
     `This screen: ${page.brief || page.title}.`,
+    userNote.trim() ? `User change request for this screen: "${userNote.trim().slice(0, 800)}". Apply it visibly.` : "",
     "",
     prior
       ? `Already generated screens this page must connect to (reuse the SAME header, nav, footer, and route names; link back and forth so nothing dangles):\n${prior}\n`
@@ -259,6 +262,7 @@ export function buildPagePrompt(
     "Rules:",
     "- One file. All CSS in one <style> tag, all JS (if any) in one <script> tag.",
     "- No external requests: no CDN, no web fonts, no remote images. System fonts and inline SVG only.",
+    "- Plain HTML, CSS, and JS only: no React, Vue, Svelte, Next.js, or any framework code — no import/export statements, no JSX, no components, no template directives.",
     "- The screen's core content is visible without scrolling past a hero.",
     ANTISLOP_DESIGN_RULES,
     "- Return ONLY the HTML, no fences or commentary.",
@@ -284,6 +288,7 @@ export function buildPageRepairPrompt(
     "Non-negotiable fixes:",
     "- Real headline plus real paragraphs, buttons, or cards inside <body>, visible without scrolling.",
     "- No external requests, no web fonts, no remote images; system fonts and inline SVG only.",
+    "- Plain HTML, CSS, and JS only: no React, Vue, Svelte, Next.js, or any framework code — no import/export statements, no JSX, no components, no template directives.",
     "- No empty <body>, no splash overlay that hides content, no JavaScript required to show the first paint.",
     ANTISLOP_DESIGN_RULES,
     "- Return ONLY the HTML, no fences or commentary.",

@@ -290,6 +290,20 @@ export function parsePrototypeHtml(raw: unknown): string {
   return text;
 }
 
+/** True when the markup smells like framework code instead of plain HTML. */
+export function looksLikeFrameworkCode(html: string): boolean {
+  return (
+    /^\s*import\s+.+\s+from\s*["']/m.test(html) ||
+    /\bfrom\s+["']react["']/.test(html) ||
+    /\bexport\s+default\b/.test(html) ||
+    /\buse(State|Effect|Ref|Memo|Callback)\s*\(/.test(html) ||
+    /<[A-Z][A-Za-z0-9]*[\s>/]/.test(html) ||
+    /<template[\s>]/.test(html) ||
+    /\sv-(if|for|bind|on|model|show|slot)\s*=/.test(html) ||
+    /\s@[a-z]+\s*=/.test(html)
+  );
+}
+
 /** True when the HTML holds enough visible copy to not render blank. */
 export function hasVisibleContent(html: string): boolean {
   const text = html
