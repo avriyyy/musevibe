@@ -28,6 +28,11 @@ const MAX_PLACEHOLDER = 120;
 const MAX_OPTION = 60;
 const MAX_OPTIONS = 6;
 
+/** Stable questionnaire coverage. First four are required. */
+export const REQUIRED_QUESTION_IDS = ["audience", "problem", "core-action", "first-build"] as const;
+export const OPTIONAL_QUESTION_IDS = ["constraints-integrations", "out-of-scope"] as const;
+export const CANONICAL_QUESTION_IDS = [...REQUIRED_QUESTION_IDS, ...OPTIONAL_QUESTION_IDS] as const;
+
 export const FALLBACK_QUESTIONS: WizardQuestion[] = [
   {
     id: "audience",
@@ -38,8 +43,16 @@ export const FALLBACK_QUESTIONS: WizardQuestion[] = [
     required: true,
   },
   {
+    id: "problem",
+    label: "What problem does this solve?",
+    description: "One or two sentences about what hurts today. If it is unproven, say so.",
+    type: "textarea",
+    required: true,
+    placeholder: "e.g. I forget small habits because tracking apps feel like chores",
+  },
+  {
     id: "core-action",
-    label: "What is the one action that must work on day one?",
+    label: "What is the core workflow that must work on day one?",
     description: "One sentence. If everything else broke, this would still have to work.",
     type: "textarea",
     required: true,
@@ -47,25 +60,19 @@ export const FALLBACK_QUESTIONS: WizardQuestion[] = [
   },
   {
     id: "first-build",
-    label: "Which pieces belong in the first build?",
-    description: "Leave out anything that can wait. You can add it after the demo.",
-    type: "multi",
-    options: [
-      "Accounts and sign-in",
-      "Data storage",
-      "Payments",
-      "Notifications",
-      "Dashboard or analytics",
-      "File uploads",
-    ],
+    label: "What should the first version include?",
+    description: "List the screens, features, or data it needs. Leave out anything that can wait.",
+    type: "textarea",
     required: true,
+    placeholder: "e.g. A habit list, a today view, streaks saved locally",
   },
   {
-    id: "feel",
-    label: "What should it feel like?",
-    type: "single",
-    options: ["Calm and minimal", "Bold and playful", "Dense and technical", "Warm and friendly"],
-    required: true,
+    id: "constraints-integrations",
+    label: "Any constraints or integrations to respect?",
+    description: "Optional. Technical limits, data to import, or services it must work with.",
+    type: "textarea",
+    required: false,
+    placeholder: "e.g. Must work offline; import habits from a CSV",
   },
   {
     id: "out-of-scope",
@@ -84,15 +91,25 @@ export function buildQuestionPrompt(idea: string): string {
     "You are the setup wizard for MuseVibe, a workspace that turns one app idea into a PRD, a task board, wireframes, and starter code.",
     `The user's idea: "${trimmed}"`,
     "",
-    "Write 4 to 6 short questions that pin down what to build before anything is generated. Ask about this specific product, not about the tech stack, platform, or timeline.",
+    "Write exactly 6 short questions that pin down what to build before anything is generated. Ask about this specific product, not about the tech stack, platform, framework, or timeline (a separate step already captures those).",
+    "Use exactly these stable ids and coverage, in this order:",
+    '1. id "audience" (required, single): who the product is for.',
+    '2. id "problem" (required, textarea): the problem or need it solves.',
+    '3. id "core-action" (required, textarea): the core workflow that must work on day one.',
+    '4. id "first-build" (required, textarea): what the first version includes — screens, features, data. Free response; never prime with auth, accounts, or payments.',
+    '5. id "constraints-integrations" (optional, textarea): constraints or integrations to respect.',
+    '6. id "out-of-scope" (optional, textarea): what the first build deliberately leaves out.',
+    "",
     "Return ONLY a JSON object with this shape:",
     '{"questions":[{"id":"audience","label":"Who is this for?","description":"Why it matters","type":"single","options":["Just me","A small team"],"required":true,"placeholder":""}]}',
     "",
     "Rules:",
-    '- type is one of "text", "textarea", "single", "multi".',
+    '- type is one of "text", "textarea", "single", "multi". Prefer "single" for audience and "textarea" for the rest; use those exact types unless the idea clearly needs options.',
     '- "single" and "multi" need 2 to 5 short options; leave options out for text types.',
-    "- id is lowercase kebab-case and unique. label max 80 characters. description max 140 characters. placeholder max 100 characters.",
-    "- At most two questions may require a written answer. Mark optional questions with required: false.",
+    "- Keep the six ids above verbatim (lowercase kebab-case). label max 80 characters. description max 140 characters. placeholder max 100 characters.",
+    "- Mark the first four required: true and the last two required: false.",
+    "- Do not ask about platform, framework, timeline, or tech stack.",
+    "- Do not suggest accounts, sign-in, auth, backend, or payments as default scope.",
     "- No markdown fences, no commentary.",
   ].join("\n");
 }
@@ -112,18 +129,6 @@ function slugify(value: string): string {
     .replace(/^-+|-+$/g, "")
     .slice(0, 40);
   return slug || "question";
-}
-
-function uniqueId(base: string, used: Set<string>): string {
-  if (!used.has(base)) {
-    used.add(base);
-    return base;
-  }
-  let suffix = 2;
-  while (used.has(`${base}-${suffix}`)) suffix += 1;
-  const id = `${base}-${suffix}`;
-  used.add(id);
-  return id;
 }
 
 function normalizeType(value: unknown): WizardQuestionType | null {
@@ -158,8 +163,13 @@ function unwrapJson(raw: unknown): unknown {
 
 /**
  * Accepts the provider's raw text (or an already-parsed payload) and returns
- * only questions that are safe to render. Anything malformed is dropped; if
- * fewer than three survive, the caller should use the fallback set.
+ * only the six canonical questions in canonical order. Anything else falls
+ * back: the six ids are required coverage (the two optional ids mean
+ * optional answers, not optional questions), audience must be single and the
+ * rest text/textarea, and any extra, duplicate, missing, or mistyped entry
+ * returns null so the caller uses FALLBACK_QUESTIONS. Cached drafts bypass
+ * this gate entirely, so old questionnaires stay usable and no migration is
+ * forced.
  */
 export function parseWizardQuestions(raw: unknown): WizardQuestion[] | null {
   const parsed = unwrapJson(raw);
@@ -173,24 +183,39 @@ export function parseWizardQuestions(raw: unknown): WizardQuestion[] | null {
       : null;
   if (!items) return null;
 
-  const usedIds = new Set<string>();
-  const questions: WizardQuestion[] = [];
+  // Exactly six entries: no missing optionals, no noncanonical extras.
+  if (items.length !== MAX_QUESTIONS) return null;
+
+  const canonicalSet = new Set<string>(CANONICAL_QUESTION_IDS as readonly string[]);
+  const requiredSet = new Set<string>(REQUIRED_QUESTION_IDS as readonly string[]);
+  const byId = new Map<string, WizardQuestion>();
 
   for (const item of items) {
-    if (questions.length >= MAX_QUESTIONS) break;
-    if (!item || typeof item !== "object") continue;
+    if (!item || typeof item !== "object") return null;
 
     const entry = item as Record<string, unknown>;
+    const rawId = typeof entry.id === "string" ? entry.id : "";
+    const id = slugify(rawId);
+    if (!canonicalSet.has(id)) return null;
+    if (byId.has(id)) return null;
+
     const label = readString(entry.label, MAX_LABEL);
-    if (!label) continue;
+    if (!label) return null;
 
     const type = normalizeType(entry.type);
-    if (!type) continue;
+    if (!type) return null;
+
+    // Category types: audience is single-select, everything else is free text.
+    if (id === "audience") {
+      if (type !== "single") return null;
+    } else if (type !== "text" && type !== "textarea") {
+      return null;
+    }
 
     let options: string[] | undefined;
-    if (type === "single" || type === "multi") {
+    if (type === "single") {
       const rawOptions = Array.isArray(entry.options) ? entry.options : null;
-      if (!rawOptions) continue;
+      if (!rawOptions) return null;
 
       options = [];
       for (const option of rawOptions) {
@@ -198,25 +223,29 @@ export function parseWizardQuestions(raw: unknown): WizardQuestion[] | null {
         if (value && !options.includes(value)) options.push(value);
         if (options.length >= MAX_OPTIONS) break;
       }
-      if (options.length < 2) continue;
+      if (options.length < 2) return null;
     }
 
-    const rawId = typeof entry.id === "string" ? entry.id : label;
     const description = readString(entry.description, MAX_DESCRIPTION) ?? undefined;
     const placeholder = readString(entry.placeholder, MAX_PLACEHOLDER) ?? undefined;
 
-    questions.push({
-      id: uniqueId(slugify(rawId), usedIds),
+    byId.set(id, {
+      id,
       label,
       description,
       type,
       options,
-      required: entry.required === true,
+      // First four required, last two optional; never trust the model flag.
+      required: requiredSet.has(id),
       placeholder,
     });
   }
 
-  return questions.length >= 3 ? questions : null;
+  for (const canonicalId of CANONICAL_QUESTION_IDS) {
+    if (!byId.has(canonicalId)) return null;
+  }
+
+  return CANONICAL_QUESTION_IDS.map((canonicalId) => byId.get(canonicalId) as WizardQuestion);
 }
 
 export function answerToText(value: WizardAnswerValue | undefined): string {

@@ -7,6 +7,8 @@
  */
 
 import type { Project, ProjectDoc, Task } from "./types";
+import type { ChatQuote } from "./pick";
+import { targetLine } from "./pick";
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -81,13 +83,13 @@ export interface ChatActionResult {
 }
 
 /** Pinned quotes rendered the same way they appear above the composer. */
-export function formatPins(pins: Array<{ label: string; text: string; comment: string }>): string {
+export function formatPins(pins: Array<ChatQuote>): string {
   if (!pins.length) return "";
   return pins
     .map((pin) => {
       const where = pin.text ? `: "${pin.text}"` : "";
       const note = pin.comment.trim() ? ` — ${pin.comment.trim()}` : "";
-      return `- ${pin.label}${where}${note}`;
+      return `- ${pin.label}${where}${note}${targetLine(pin.target)}`;
     })
     .join("\n");
 }
@@ -98,7 +100,7 @@ export function buildActionPrompt(
   docs: ProjectDoc[],
   tasks: Task[],
   pages: Array<{ slug: string; title: string; generated: boolean }>,
-  pins: Array<{ label: string; text: string; comment: string }>,
+  pins: Array<ChatQuote>,
   message: string,
 ): string {
   const lines = [
@@ -108,7 +110,7 @@ export function buildActionPrompt(
   if (brief.trim()) lines.push(`Brief: ${clamp(brief.trim(), 1200)}`);
   if (docs.length) {
     lines.push(
-      `Documents (kind): ${docs.map((doc) => doc.kind).join(", ")}`,
+      `Documents: ${docs.map((doc) => `${doc.kind} "${doc.title || doc.kind}"`).join(", ")}`,
     );
   }
   if (tasks.length) {
@@ -122,7 +124,28 @@ export function buildActionPrompt(
     );
   }
   const pinned = formatPins(pins);
-  if (pinned) lines.push(`Pinned context:\n${pinned}`);
+  if (pinned) lines.push(`Pinned context (exact targets in brackets):\n${pinned}`);
+  // Include the current markdown of the pinned or named document(s) only,
+  // bounded so a long doc cannot flood the prompt. Pinned edits get a larger
+  // window (12k chars) so the model sees the full document, not a slice it
+  // might then "complete" by dropping trailing sections.
+  const relevantDocs = selectRelevantDocs(docs, pins, message);
+  const FULL_DOC_CHARS = 12000;
+  for (const doc of relevantDocs) {
+    const raw = doc.markdown.trim();
+    const truncated = raw.length > FULL_DOC_CHARS;
+    const body = truncated ? raw.slice(0, FULL_DOC_CHARS) : raw;
+    lines.push(
+      ``,
+      `Current "${doc.title || doc.kind}" document (kind=${doc.kind}, edit exactly this document, preserve unrelated sections):`,
+      `"""${body || "(empty document)"}"""`,
+      ...(truncated
+        ? [
+            `(Note: the document above was truncated at ${FULL_DOC_CHARS} chars for prompt size; the update_doc markdown you return must still be the COMPLETE new document — reproduce the full document with your edit applied, never a shortened excerpt.)`,
+          ]
+        : []),
+    );
+  }
   lines.push(
     ``,
     `User command: ${message || "(no text, act on the pinned context)"}`,
@@ -133,17 +156,43 @@ export function buildActionPrompt(
     `Action types (use only these):`,
     `- update_doc {kind, markdown}: rewrite one plan document fully. kind is one of: ${docs.map((doc) => doc.kind).join(", ") || "prd"}.`,
     `- add_task {title, notes?}: append one task. Title starts with a verb, under 90 chars.`,
-    `- move_task {title, status}: move the task whose title matches best. status is one of: todo, doing, review, blocked, done, cancelled.`,
+    `- move_task {title, status}: move the task whose title matches EXACTLY (case-insensitive full-title match). status is one of: todo, doing, review, blocked, done, cancelled.`,
     `- generate_page {slug, note?}: regenerate one planned page; note carries the user's change request. slug must be one of: ${pages.map((page) => page.slug).join(", ") || "(none)"}.`,
     `- rename_project {name}: rename the project.`,
     ``,
     `Rules:`,
     `- Pick the smallest action list that fulfills the command; unrelated pins are context only.`,
-    `- A pinned change request on a page becomes generate_page with that request as note. A pinned task with "done/finish/complete" becomes move_task to done.`,
-    `- update_doc markdown is the COMPLETE new document, concrete and specific, no em dashes, no TODO or placeholders.`,
+    `- A pin with [target page slug="..."] must become generate_page for that exact slug with the pin comment as note. A pin with [target document kind="..."] must become update_doc for that exact kind. A pinned task with "done/finish/complete" becomes move_task to done for that exact task title (copy the pinned title verbatim). Never choose a different page slug, document kind, or task title than the pinned target.`,
+    `- update_doc markdown is the COMPLETE new document: keep every unrelated section, heading, and detail exactly as in the current document above, changing only what the command and pin ask for. Concrete and specific, no em dashes, no TODO or placeholders. Never return a blank, shortened, or excerpt-only document; if you cannot produce the full document, return no update_doc action.`,
+    `- generate_page note is a surgical change to the annotated component only; the page prompt already carries the current HTML to preserve.`,
     `- If the command matches nothing actionable, return {"note":"<what you need, plainly>","actions":[]}.`,
   );
   return lines.join("\n");
+}
+
+/** Which documents the model needs verbatim: pinned docs first, else a doc kind named in the command. */
+function selectRelevantDocs(
+  docs: ProjectDoc[],
+  pins: Array<ChatQuote>,
+  message: string,
+): ProjectDoc[] {
+  const pinnedKinds = pins
+    .map((pin) => pin.target?.kind === "doc" ? pin.target.docKind : undefined)
+    .filter((kind): kind is string => Boolean(kind));
+  if (pinnedKinds.length) {
+    const found = docs.filter((doc) => pinnedKinds.includes(doc.kind));
+    if (found.length) return found.slice(0, 2);
+  }
+  const lowered = message.toLowerCase();
+  const named = docs.filter((doc) => {
+    const kind = doc.kind.toLowerCase();
+    const title = (doc.title || "").toLowerCase();
+    return (
+      (kind.length >= 2 && lowered.includes(kind)) ||
+      (title.length >= 3 && lowered.includes(title))
+    );
+  });
+  return named.slice(0, 1);
 }
 
 /** Parse the model's action JSON; null when it chatted instead. */
@@ -193,4 +242,102 @@ export function parseActionResponse(raw: unknown): ChatActionResult | null {
   } catch {
     return null;
   }
+}
+
+/** Normalize a markdown heading for integrity comparison. Strips leading
+ * heading markers so "# Title", "## Title", and a user-typed "Title" compare
+ * the same. */
+function normalizeHeading(value: string): string {
+  return value
+    .replace(/^#{1,6}\s*/, "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
+/** All ## (and deeper) headings in a document, in order. */
+export function extractMarkdownHeadings(markdown: string): string[] {
+  return markdown
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => /^#{2,}\s+\S/.test(line))
+    .map(normalizeHeading);
+}
+
+/**
+ * True when the user's command explicitly asks to remove content. English and
+ * Indonesian verbs are accepted; Indonesian stems match with affixes
+ * (menghapus, dihapuskan, menghilangkan, membuang, menyingkirkan).
+ */
+const REMOVAL_PATTERN =
+  /\b(remove|removes|removed|removing|delet(e|es|ed|ing)|drop(s|ped|ping)?|cut|strip|omit)\b|hapus|hilang|buang|singkir/i;
+
+export function isRemovalRequest(message: string, pins: Array<ChatQuote>): boolean {
+  const haystack = [
+    message,
+    ...pins.map((pin) => `${pin.comment} ${pin.text}`),
+  ]
+    .join(" ")
+    .toLowerCase();
+  return REMOVAL_PATTERN.test(haystack);
+}
+
+/** True when one source line names the heading while asking to remove it. */
+function isHeadingRemovalAllowed(
+  heading: string,
+  message: string,
+  pins: Array<ChatQuote>,
+): boolean {
+  const core = heading.trim().toLowerCase();
+  if (!core) return false;
+  const sources = [message, ...pins.map((pin) => `${pin.comment} ${pin.text}`)];
+  return sources.some((source) => {
+    const lowered = (source || "").toLowerCase();
+    return lowered.includes(core) && REMOVAL_PATTERN.test(lowered);
+  });
+}
+
+/**
+ * Fail-closed integrity check for a pinned document edit. The replacement
+ * must be non-trivial and must preserve every existing ## heading by
+ * default. A missing heading is allowed only when the user explicitly named
+ * that heading in the same command or pin that asks to remove/delete it.
+ * Truncated or blank model output fails and the caller must leave the
+ * stored document unchanged.
+ */
+export function checkPinnedDocIntegrity(
+  previous: string,
+  next: string,
+  message: string,
+  pins: Array<ChatQuote>,
+): { ok: boolean; reason?: string } {
+  const before = previous.trim();
+  const after = (next ?? "").trim();
+  if (!after) return { ok: false, reason: "the replacement was blank" };
+  // A complete document rewrite is never a one-liner.
+  if (after.length < 80) {
+    return { ok: false, reason: "the replacement was too short to be complete" };
+  }
+  if (!before) return { ok: true };
+  const beforeWords = before.split(/\s+/).length;
+  const afterWords = after.split(/\s+/).length;
+  // A pinned edit that loses more than half its words is truncation, not an edit.
+  if (afterWords < beforeWords * 0.4 && afterWords < beforeWords - 120) {
+    return { ok: false, reason: "the replacement looks truncated" };
+  }
+  const oldHeadings = extractMarkdownHeadings(before);
+  if (!oldHeadings.length) return { ok: true };
+  const nextSet = new Set(extractMarkdownHeadings(after));
+  const missing = oldHeadings.filter((heading) => !nextSet.has(heading));
+  if (!missing.length) return { ok: true };
+  const blocked = missing.filter(
+    (heading) => !isHeadingRemovalAllowed(heading, message, pins),
+  );
+  if (blocked.length) {
+    return {
+      ok: false,
+      reason: `a section went missing (${blocked.slice(0, 2).join("; ")})`,
+    };
+  }
+  return { ok: true };
 }

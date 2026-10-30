@@ -193,6 +193,37 @@ export function buildShowcasePrompt(
   ].join("\n");
 }
 
+/** Second chance after a blank, hidden, or framework-code showcase. */
+export function buildShowcaseRepairPrompt(
+  projectName: string,
+  idea: string,
+  designMd: string,
+  tokensCss: string,
+): string {
+  return [
+    `Your last showcase output for "${projectName.trim() || "Untitled project"}" failed: it rendered blank, hid its content, or returned framework code instead of plain HTML. Return the complete corrected file now.`,
+    "",
+    `Project: "${projectName}". Idea: "${idea.slice(0, 400)}".`,
+    brandRules(projectName),
+    "",
+    "Paste this token block verbatim as the FIRST thing in the single <style> tag:",
+    `${tokensCss.slice(0, 4000)}`,
+    "",
+    "Design system to demonstrate:",
+    `"""${designMd.slice(0, 5200)}"""`,
+    "",
+    "Non-negotiable fixes:",
+    "- Start with <!DOCTYPE html>, include <html>, <head>, and a <body> that already holds the visible showcase.",
+    "- Header with the project name and one primary action, then labeled sections: type scale, buttons, inputs with labels, card grid, table, badges, loading state.",
+    "- Real copy tied to the project. No lorem ipsum, no TODO, no placeholders.",
+    "- Plain HTML, CSS, and JS only. No React, Vue, Svelte, Next.js, no imports, no JSX, no components.",
+    "- No external requests, no web fonts, no remote images; system fonts and inline SVG only.",
+    "- No opacity:0, no visibility:hidden, no display:none on body or main, no splash overlay, no JavaScript needed for the first paint.",
+    ANTISLOP_DESIGN_RULES,
+    "- Return ONLY the HTML, no fences or commentary.",
+  ].join("\n");
+}
+
 /** Keep the App Flow parts that name screens and routes, not the diagram. */
 function appFlowExcerpt(appFlow: string, maxChars = 3400): string {
   if (!appFlow.trim()) return "";
@@ -233,7 +264,7 @@ export function buildPagePlanPrompt(
     "- These are application screens, not marketing pages. Never plan a landing page with hero, features, pricing, testimonials, FAQ, or waitlist.",
     "- Use the screens named in the App Flow doc when it has them; otherwise plan 3 to 6 screens that deliver the core flow.",
     "- Order them the way they are built and used: entry screen first, then the main working screen, then detail, create, and settings.",
-    "- slug is lowercase kebab-case and becomes the route (<slug>.html). title is a short screen name.",
+    "- slug is lowercase kebab-case and becomes the route (page-<slug>.html). title is a short screen name.",
     "- brief is one concrete sentence naming the real content on the screen, never repeating the title.",
     "- sections are 3 to 5 short labels for the blocks the screen shows, top to bottom (for example: 'Search and filters', 'Today items', 'Empty state').",
     "- primaryAction is the one action the screen exists for, in the product's words.",
@@ -288,7 +319,21 @@ export function parsePagePlan(raw: unknown): PlannedPage[] | null {
         };
       })
       .filter((entry) => entry.slug && entry.title);
-    return pages.length ? pages.slice(0, 8) : null;
+    if (!pages.length) return null;
+    // Two planned screens must never share a file. Keep the first title and
+    // give later collisions a deterministic suffix instead of overwriting.
+    const used = new Set<string>();
+    const unique = pages.map((entry) => {
+      let slug = entry.slug;
+      let suffix = 2;
+      while (used.has(slug)) {
+        slug = slugify(`${entry.slug}-${suffix}`);
+        suffix += 1;
+      }
+      used.add(slug);
+      return slug === entry.slug ? entry : { ...entry, slug };
+    });
+    return unique.slice(0, 8);
   } catch {
     return null;
   }
@@ -315,6 +360,8 @@ export interface PagePromptContext {
   priorPages?: PriorPageContext[];
   userNote?: string;
   logoUrl?: string;
+  /** Current HTML for a chat-requested edit; absent when drawing fresh. */
+  existingHtml?: string;
 }
 
 /** Shrink generated HTML to its structural shell: head, header, nav, headings. */
@@ -353,7 +400,7 @@ function screenSpec(appFlow: string, page: PlannedPage): string {
 function routeList(plan: PlannedPage[] | undefined): string {
   if (!plan?.length) return "";
   return plan
-    .map((entry) => `${entry.title} -> ${entry.slug}.html`)
+    .map((entry) => `${entry.title} -> ${pageFilePath(entry.slug)}`)
     .join("; ");
 }
 
@@ -365,10 +412,14 @@ export function buildPagePrompt(context: PagePromptContext): string {
   const prior = (context.priorPages ?? [])
     .map(
       (entry) =>
-        `--- Earlier screen "${entry.title}" (${entry.slug}.html) ---\n${excerptPageHtml(entry.html)}`,
+        `--- Earlier screen "${entry.title}" (${pageFilePath(entry.slug)}) ---\n${excerptPageHtml(entry.html)}`,
     )
     .join("\n")
     .slice(0, 5200);
+  const editing = Boolean(context.existingHtml?.trim());
+  const currentHtml = editing
+    ? context.existingHtml!.replace(/\s+/g, " ").trim().slice(0, 9000)
+    : "";
   return [
     "You are a senior product designer and front-end engineer. Build one real application screen as a single self-contained HTML file.",
     "",
@@ -382,7 +433,7 @@ export function buildPagePrompt(context: PagePromptContext): string {
     brandRules(context.projectName, context.logoUrl),
     "",
     "THIS SCREEN",
-    `Title: "${page.title}". Route: ${page.slug}.html.`,
+    `Title: "${page.title}". Route: ${pageFilePath(page.slug)}.`,
     `Job: ${page.brief || page.title}.`,
     sections.length
       ? `Blocks it must show, top to bottom: ${sections.join(" / ")}.`
@@ -391,6 +442,10 @@ export function buildPagePrompt(context: PagePromptContext): string {
     context.userNote?.trim()
       ? `User change request for this screen: "${context.userNote.trim().slice(0, 800)}". Apply it visibly and keep everything else consistent.`
       : "",
+    editing
+      ? `EDIT MODE: the current page HTML is below. Make a surgical change to the annotated component only. Preserve all unrelated structure, copy, styles, and behavior exactly; do not redesign the page, rename routes, or drop content.`
+      : "",
+    editing ? `Current page HTML to edit:\n"""${currentHtml}"""` : "",
     "",
     "THIS IS AN APP SCREEN, NOT A LANDING PAGE",
     "- Render the working product surface: app chrome (wordmark, navigation, account), the screen's real content, and its primary action.",
@@ -438,6 +493,7 @@ export function buildPagePrompt(context: PagePromptContext): string {
 export function buildPageRepairPrompt(context: PagePromptContext): string {
   const { page } = context;
   const sections = (page.sections ?? []).filter(Boolean);
+  const editing = Boolean(context.existingHtml?.trim());
   return [
     `Your last output for the "${page.title}" screen failed: it rendered blank, hid its content, or returned framework code instead of plain HTML. Return the complete corrected file now.`,
     "",
@@ -445,6 +501,15 @@ export function buildPageRepairPrompt(context: PagePromptContext): string {
     `Screen job: ${page.brief || page.title}.`,
     sections.length ? `Blocks it must show: ${sections.join(" / ")}.` : "",
     page.primaryAction ? `Primary action: "${page.primaryAction}".` : "",
+    context.userNote?.trim()
+      ? `User change request to preserve: "${context.userNote.trim().slice(0, 800)}".`
+      : "",
+    editing
+      ? `EDIT MODE: change only the annotated component. Preserve all unrelated structure, copy, styles, and behavior from the current page HTML below.`
+      : "",
+    editing
+      ? `Current page HTML:\n"""${context.existingHtml!.replace(/\s+/g, " ").trim().slice(0, 9000)}"""`
+      : "",
     brandRules(context.projectName, context.logoUrl),
     "",
     "Paste this token block verbatim as the FIRST thing in the single <style> tag:",
@@ -481,37 +546,28 @@ export function buildFallbackPageHtml(context: PagePromptContext): string {
   const name = esc(context.projectName.trim() || "Untitled project");
   const title = esc(context.page.title);
   const brief = esc(context.page.brief || "The core content for this screen.");
-  const blocks = (
-    context.page.sections?.length
-      ? context.page.sections
-      : ["Overview", "Recent activity", "Details"]
-  )
+  const blocks = (context.page.sections ?? [])
+    .filter(Boolean)
     .slice(0, 4)
     .map(esc);
-  const action = esc(context.page.primaryAction || "New item");
+  const action = context.page.primaryAction?.trim()
+    ? esc(context.page.primaryAction)
+    : "";
   const nav = (context.plan ?? [])
     .slice(0, 5)
     .map(
       (entry) =>
-        `<a href="${entry.slug}.html"${entry.slug === context.page.slug ? ' aria-current="page"' : ""}>${esc(entry.title)}</a>`,
+        `<a href="${pageFilePath(entry.slug)}"${entry.slug === context.page.slug ? ' aria-current="page"' : ""}>${esc(entry.title)}</a>`,
     )
     .join("");
-  const rows = Array.from({ length: 5 }, (_, index) => {
-    const block = blocks[index % blocks.length];
-    return `<tr><td><span class="dot"></span>${block} ${index + 1}</td><td>Today</td><td><span class="tag">Active</span></td><td class="muted">Open</td></tr>`;
-  }).join("");
-  const cardCopy = [
-    "Items waiting for a decision.",
-    "Drafts that still need details.",
-    "Work that is moving right now.",
-    "Finished items kept for reference.",
-  ];
-  const cards = blocks
-    .map(
-      (block, index) =>
-        `<article class="card"><p class="meta">${block}</p><h2>${index === 0 ? "Ready to review" : index === 1 ? "Needs your input" : index === 2 ? "In progress" : "Recently closed"}</h2><p class="copy">${cardCopy[index % cardCopy.length]}</p></article>`,
-    )
-    .join("");
+  const cards = blocks.length
+    ? blocks
+        .map(
+          (block, index) =>
+            `<article class="card"><p class="meta">Section ${index + 1}</p><h2>${block}</h2></article>`,
+        )
+        .join("")
+    : `<div class="empty"><h2>Starter preview</h2><p>This screen follows the page summary above. Use Ask Muse in the workspace chat to describe the real content and actions it should show.</p></div>`;
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -536,25 +592,19 @@ nav a { color: var(--fg-2); text-decoration: none; font-size: 14px; padding: 6px
 nav a[aria-current="page"] { color: var(--fg); border-color: var(--accent); }
 .spacer { flex: 1; }
 .avatar { width: 28px; height: 28px; border-radius: 50%; background: var(--surface); border: 1px solid var(--border); display: grid; place-items: center; font-size: 11px; color: var(--fg-2); }
-main { padding: 28px; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 28px; }
+main { padding: 28px; }
+main > section { max-width: 960px; margin: 0 auto; }
 h1 { font-size: 30px; line-height: 1.15; letter-spacing: -0.02em; margin: 0 0 6px; }
 .copy { color: var(--fg-2); margin: 0 0 20px; max-width: 52ch; }
 .btn { display: inline-flex; align-items: center; height: 38px; padding: 0 16px; border-radius: var(--radius); border: 1px solid var(--accent); background: var(--accent); color: var(--accent-on); font: inherit; font-size: 14px; }
-.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 20px 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; margin: 20px 0; }
 .card { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; background: var(--bg); }
 .card h2 { font-size: 15px; margin: 4px 0 6px; }
-.card .copy { font-size: 13px; margin: 0; }
 .meta { margin: 0; font-size: 11px; letter-spacing: 0.04em; text-transform: uppercase; color: var(--meta); }
-table { width: 100%; border-collapse: collapse; font-size: 14px; }
-th, td { text-align: left; padding: 11px 8px; border-bottom: 1px solid var(--border); }
-th { font-size: 12px; color: var(--meta); font-weight: 500; }
-.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-right: 8px; }
-.tag { border: 1px solid var(--border); border-radius: 999px; padding: 2px 8px; font-size: 11px; color: var(--fg-2); }
-.muted { color: var(--meta); }
-aside { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; background: var(--surface); align-self: start; }
-aside h2 { font-size: 14px; margin: 0 0 8px; }
-aside ul { margin: 0; padding-left: 18px; color: var(--fg-2); font-size: 13px; }
-@media (max-width: 760px) { main { grid-template-columns: 1fr; padding: 18px; } .grid { grid-template-columns: 1fr; } nav { display: none; } }
+.empty { margin-top: 20px; border: 1px dashed var(--border); border-radius: var(--radius); padding: 20px; background: var(--surface); }
+.empty h2 { margin: 0 0 6px; font-size: 16px; }
+.empty p { max-width: 54ch; margin: 0; color: var(--fg-2); }
+@media (max-width: 760px) { main { padding: 18px; } header { padding: 12px 18px; gap: 12px; } .grid { grid-template-columns: 1fr; } nav { display: none; } }
 </style>
 </head>
 <body>
@@ -565,11 +615,9 @@ aside ul { margin: 0; padding-left: 18px; color: var(--fg-2); font-size: 13px; }
 <p class="meta">${title}</p>
 <h1>${title}</h1>
 <p class="copy">${brief}</p>
-<button class="btn" type="button">${action}</button>
+${action ? `<button class="btn" type="button">${action}</button>` : ""}
 <div class="grid">${cards}</div>
-<table><thead><tr><th>Item</th><th>Updated</th><th>Status</th><th>Owner</th></tr></thead><tbody>${rows}</tbody></table>
 </section>
-<aside><h2>Next steps</h2><ul>${blocks.map((block) => `<li>${block}</li>`).join("")}</ul></aside>
 </main>
 </div>
 </body>
@@ -579,9 +627,9 @@ aside ul { margin: 0; padding-left: 18px; color: var(--fg-2); font-size: 13px; }
 /** Local fallback page plan when the model is offline: core flow screens. */
 export function fallbackPagePlan(): PlannedPage[] {
   return [
-    { slug: "home", title: "Home", brief: "The main screen with the core content and primary action." },
-    { slug: "details", title: "Details", brief: "A detail view for one item with actions to keep or change it." },
-    { slug: "settings", title: "Settings", brief: "Preferences and account controls in one quiet form." },
+    { slug: "overview", title: "Overview", brief: "See what needs attention and open the app's main action." },
+    { slug: "items", title: "Items", brief: "Search, add, and update the core records this app manages." },
+    { slug: "settings", title: "Settings", brief: "Change this app's preferences and account options." },
   ];
 }
 
@@ -597,6 +645,71 @@ export function slugify(value: string): string {
 /** File path for a generated page inside the project files. */
 export function pageFilePath(slug: string): string {
   return `page-${slugify(slug)}.html`;
+}
+
+export type PrototypeHrefKind = "fragment" | "external" | "empty" | "candidate";
+
+export interface PrototypeHrefTarget {
+  kind: PrototypeHrefKind;
+  /** Basename candidate like "page-settings.html" when kind is "candidate". */
+  candidate?: string;
+}
+
+const PROTOTYPE_SCHEME_RE = /^[a-zA-Z][a-zA-Z0-9+.-]*:/;
+
+/**
+ * Classify a raw anchor href from generated prototype HTML without touching
+ * the network. Fragments stay in-page, schemes and protocol-relative URLs
+ * are external, and everything else reduces to a basename candidate whose
+ * query and hash are stripped. Basenames are matched exactly (no substring
+ * or prefix matching) so slugs like "settings" and "settings-advanced"
+ * never collide.
+ */
+export function classifyPrototypeHref(href: unknown): PrototypeHrefTarget {
+  if (typeof href !== "string") return { kind: "empty" };
+  const trimmed = href.trim();
+  if (!trimmed) return { kind: "empty" };
+  if (trimmed.startsWith("#")) return { kind: "fragment" };
+  if (trimmed.startsWith("//")) return { kind: "external" };
+  if (PROTOTYPE_SCHEME_RE.test(trimmed)) return { kind: "external" };
+  const withoutHash = trimmed.split("#", 1)[0] ?? "";
+  const withoutQuery = withoutHash.split("?", 1)[0] ?? "";
+  const path = withoutQuery.trim();
+  if (!path) return { kind: "empty" };
+  const lastSlash = path.lastIndexOf("/");
+  let base = (lastSlash >= 0 ? path.slice(lastSlash + 1) : path).trim();
+  if (!base || base === "." || base === "..") return { kind: "empty" };
+  try {
+    base = decodeURIComponent(base);
+  } catch {
+    // Keep the raw basename when it is not valid percent-encoding.
+  }
+  if (!base) return { kind: "empty" };
+  return { kind: "candidate", candidate: base };
+}
+
+/**
+ * Resolve a prototype anchor href to an existing frame id. Returns the
+ * exact frame id on match, otherwise null. Only exact basename equality
+ * counts, plus the extensionless form of the same basename
+ * ("page-settings" -> "page-settings.html"). Never infers a "page-"
+ * prefix, so "settings.html" does not match "page-settings.html".
+ */
+export function resolvePrototypeFrameId(
+  href: string,
+  frameIds: ReadonlySet<string> | readonly string[],
+): string | null {
+  const target = classifyPrototypeHref(href);
+  if (target.kind !== "candidate" || !target.candidate) return null;
+  const set = frameIds instanceof Set ? frameIds : new Set(frameIds);
+  if (set.has(target.candidate)) return target.candidate;
+  if (
+    !target.candidate.includes(".") &&
+    set.has(`${target.candidate}.html`)
+  ) {
+    return `${target.candidate}.html`;
+  }
+  return null;
 }
 
 /**

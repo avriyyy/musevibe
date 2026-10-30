@@ -15,14 +15,11 @@ import {
   type AiModelOption,
 } from "@/lib/models";
 import { useVibe } from "@/lib/store";
-import type { Project, ProjectDoc, Task } from "@/lib/types";
+import type { Project } from "@/lib/types";
 import type { ChatQuote } from "@/lib/pick";
 
 interface WorkspaceChatProps {
   project: Project;
-  brief: string;
-  docs: ProjectDoc[];
-  tasks: Task[];
   onHeightChange?: (height: number) => void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -31,7 +28,7 @@ interface WorkspaceChatProps {
   /** Run one prompt as workspace actions; returns the receipt to show. */
   onAction: (
     message: string,
-    pins: Array<{ label: string; text: string; comment: string }>,
+    pins: Array<ChatQuote>,
   ) => Promise<{ ok: boolean; note: string }> ;
   onDraftConsumed?: () => void;
   /** Armed component picker, available while the design canvas is open. */
@@ -44,9 +41,6 @@ type MicState = "idle" | "recording" | "transcribing";
 
 export default function WorkspaceChat({
   project,
-  brief,
-  docs,
-  tasks,
   onHeightChange,
   open,
   onOpenChange,
@@ -214,9 +208,6 @@ export default function WorkspaceChat({
   const send = async (text?: string) => {
     const typed = (text ?? input).trim();
     const pins = chips.map((chip) => ({ ...chip.quote }));
-    const message = [typed, pins.length ? "(see pinned context)" : ""]
-      .filter(Boolean)
-      .join("\n");
     if ((!typed && !pins.length) || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
@@ -227,7 +218,7 @@ export default function WorkspaceChat({
     try {
       const result = await onAction(typed, pins);
       if (result.ok) {
-        flashStatus("done", result.note);
+        flashStatus("done", result.note, true);
       } else {
         flashStatus("error", result.note, true);
         setInput(typed);
@@ -263,6 +254,7 @@ export default function WorkspaceChat({
       body.append("audio", wav, "prompt.wav");
       const response = await fetch("/api/ai/transcribe", { method: "POST", body });
       const data = (await response.json()) as {
+        transcript?: unknown;
         text?: unknown;
         error?: unknown;
       };
@@ -271,7 +263,12 @@ export default function WorkspaceChat({
           typeof data.error === "string" ? data.error : "Transcription failed.",
         );
       }
-      const text = typeof data.text === "string" ? data.text.trim() : "";
+      const text =
+        typeof data.transcript === "string"
+          ? data.transcript.trim()
+          : typeof data.text === "string"
+            ? data.text.trim()
+            : "";
       if (!text) {
         setMicError("Nothing heard. Try again.");
       } else {
@@ -467,6 +464,22 @@ export default function WorkspaceChat({
                       <span className="block font-mono text-[11px] text-[#8ab4ff]">
                         {chip.quote.label}
                       </span>
+                      {chip.quote.target?.kind === "page" && chip.quote.target.slug && (
+                        <span className="mt-0.5 block text-[11px] text-[#9aa0ae]">
+                          Page: {chip.quote.target.pageTitle || chip.quote.target.slug} ({chip.quote.target.slug})
+                        </span>
+                      )}
+                      {chip.quote.target?.kind === "doc" && chip.quote.target.docKind && (
+                        <span className="mt-0.5 block text-[11px] text-[#9aa0ae]">
+                          Document: {chip.quote.target.docTitle || chip.quote.target.docKind} ({chip.quote.target.docKind})
+                        </span>
+                      )}
+                      {chip.quote.target?.kind === "task" && chip.quote.target.taskTitle && (
+                        <span className="mt-0.5 block text-[11px] text-[#9aa0ae]">
+                          Task: {chip.quote.target.taskTitle}
+                          {chip.quote.target.taskStatus ? ` [${chip.quote.target.taskStatus}]` : ""}
+                        </span>
+                      )}
                       {!!chip.quote.text && (
                         <span className="mt-1 block text-[12px] leading-5 text-[#c9cdd6]">
                           &ldquo;{chip.quote.text}&rdquo;

@@ -11,6 +11,13 @@
  */
 
 import type { Project } from "./types";
+import {
+  PRD_GUIDANCE,
+  PRD_MIN_WORDS,
+  PRD_SECTIONS,
+  buildPrdFallback,
+  buildUnifiedPrdPrompt,
+} from "./prd-contract";
 
 export type DocKind = "prd" | "trd" | "afd" | "dbd" | "bsd" | "ipd";
 
@@ -27,7 +34,7 @@ export const DOC_TYPES: DocTypeInfo[] = [
     kind: "prd",
     label: "PRD",
     full: "Product Requirements Document",
-    blurb: "Goals, users, requirements, and acceptance criteria.",
+    blurb: "Problem, users, core flow, and what ships first.",
     filename: "prd.md",
   },
   {
@@ -97,22 +104,8 @@ interface DocSpec {
 
 const SPECS: Record<DocKind, DocSpec> = {
   prd: {
-    sections: [
-      "## Goals and non-goals",
-      "## Target users",
-      "## Functional requirements",
-      "## Non-functional requirements",
-      "## Out of scope for v1",
-      "## Acceptance criteria",
-      "## Open questions",
-    ],
-    guidance: [
-      "Goals must be verifiable outcomes a developer can check by using the app, with one observable signal each. Non-goals name the tempting features v1 deliberately skips.",
-      "Functional requirements are a numbered list (FR-1, FR-2, …). Each one states an actor, an action, and the visible result. Cover the whole core flow from first open to the value moment.",
-      "Non-functional requirements give concrete bars: cold-start feel, offline behavior, accessibility (keyboard, contrast, focus), and data staying on device where relevant.",
-      "Acceptance criteria are a checklist, one checkable sentence per requirement, written so a stranger can pass or fail the build without asking questions.",
-      "Open questions list only genuine undecided points with the options on the table. Never invent answers.",
-    ],
+    sections: [...PRD_SECTIONS],
+    guidance: [...PRD_GUIDANCE],
   },
   trd: {
     sections: [
@@ -204,6 +197,18 @@ export function buildDocPrompt(
   project: Project,
   brief: string,
 ): string {
+  // The PRD uses the single unified contract (same headings, order, and
+  // wizard/stack context as runPlan and first-run preparation).
+  if (kind === "prd") {
+    const base = buildUnifiedPrdPrompt(project);
+    const trimmed = brief.replace(/\s+/g, " ").trim().slice(0, 2000);
+    if (!trimmed) return base;
+    return [
+      base,
+      "",
+      `Previous draft to improve (keep what works, fix what is missing): """${trimmed}"""`,
+    ].join("\n");
+  }
   const info = DOC_TYPES.find((entry) => entry.kind === kind);
   const spec = SPECS[kind];
   const trimmedBrief = brief.replace(/\s+/g, " ").trim().slice(0, 4000);
@@ -232,6 +237,155 @@ export function buildDocPrompt(
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/** A repair pass that names the missing contract instead of asking again. */
+export function buildDocRepairPrompt(
+  kind: DocKind,
+  project: Project,
+  brief: string,
+  previous: string,
+  missing: string[],
+): string {
+  return [
+    buildDocPrompt(kind, project, brief),
+    "",
+    "YOUR PREVIOUS ANSWER WAS REJECTED",
+    previous.trim()
+      ? `It was missing or malformed at: ${missing.join(", ")}.`
+      : "It was empty.",
+    "Rewrite the whole document. Keep every required heading exactly as written, in order, with real product-specific content under each one.",
+    "Do not apologise or explain what changed. Return only the corrected markdown.",
+  ].join("\n");
+}
+
+/** A local outline with the right title and sections for this document. */
+export function buildDocFallback(
+  kind: string,
+  project: Project,
+  brief: string,
+): string {
+  if (kind === "prd") return buildPrdFallback(project);
+  const info = DOC_TYPES.find((entry) => entry.kind === kind);
+  const spec = kind in SPECS ? SPECS[kind as DocKind] : null;
+  const name = project.name.trim() || "Untitled project";
+  if (!info || !spec) {
+    return `# ${info?.full ?? kind} — ${name}\n\n> Local outline. The model is unavailable, so this page is a starting point. Generate again for the full document.\n\n## Overview\n\n${project.idea.trim()}\n`;
+  }
+  const briefLine = brief.replace(/\s+/g, " ").trim().slice(0, 320);
+  return [
+    `# ${info.label} — ${name}`,
+    "",
+    "> Local outline. The model is unavailable, so the section frame below is real but the detail is not finished. Generate again when the model is back; this draft is never presented as a model answer.",
+    "",
+    "## Product context",
+    "",
+    project.idea.replace(/\s+/g, " ").trim().slice(0, 700),
+    briefLine && briefLine !== project.idea.trim()
+      ? `\nAgreed brief: ${briefLine}`
+      : "",
+    "",
+    ...spec.sections.flatMap((section, index) => [
+      section,
+      "",
+      index === 0
+        ? `This section is waiting for the model. It will define the ${section.replace(/^##\s*/, "").toLowerCase()} for ${name} using the agreed brief.`
+        : `- Decision needed: ${spec.guidance[index % spec.guidance.length]}`,
+      "",
+    ]),
+  ].join("\n");
+}
+
+export interface DocQuality {
+  ok: boolean;
+  words: number;
+  missing: string[];
+}
+
+function normalizeHeadingLine(line: string): string {
+  return line.trim().replace(/\s+/g, ' ').toLowerCase();
+}
+
+/** Enforce the section contract before a model answer is stored. */
+export function inspectDocMarkdown(kind: string, markdown: string): DocQuality {
+  const spec = kind in SPECS ? SPECS[kind as DocKind] : null;
+  const text = markdown.trim();
+  const words = text ? text.split(/\s+/).length : 0;
+  const missing: string[] = [];
+  if (!text) {
+    return { ok: false, words, missing: ['Empty document: no markdown to check.'] };
+  }
+
+  // Title: the first non-empty line must be a single-# heading.
+  const lines = text.split('\n');
+  const firstContent = lines.find((line) => line.trim().length > 0) ?? '';
+  if (!/^#\s+\S/.test(firstContent.trim()) || /^##/.test(firstContent.trim())) {
+    missing.push('Missing title: start with "# <project name>" and nothing else before it.');
+  }
+
+  // Real ## headings in document order.
+  const headings = lines
+    .map((line) => line.trim())
+    .filter((line) => /^##\s+\S/.test(line))
+    .map(normalizeHeadingLine);
+  const required = (spec?.sections ?? []).map(normalizeHeadingLine);
+
+  const counts = new Map<string, number>();
+  for (const heading of headings) {
+    counts.set(heading, (counts.get(heading) ?? 0) + 1);
+  }
+
+  let cursor = -1;
+  required.forEach((section, index) => {
+    const positions: number[] = [];
+    headings.forEach((heading, at) => {
+      if (heading === section) positions.push(at);
+    });
+    const original = spec?.sections[index] ?? section;
+    if (!positions.length) {
+      missing.push(`Missing section: ${original}`);
+      return;
+    }
+    if ((counts.get(section) ?? 0) > 1) {
+      missing.push(`Duplicate section: ${original} appears ${counts.get(section)} times, keep it exactly once`);
+    }
+    const firstAt = positions[0];
+    if (firstAt <= cursor) {
+      const prev = spec?.sections[index - 1] ?? 'the previous section';
+      missing.push(`Out of order: ${original} must come after ${prev}`);
+    } else {
+      cursor = firstAt;
+    }
+    // Each required heading needs real content before the next heading.
+    const lineIndex = lines.findIndex(
+      (line) => normalizeHeadingLine(line) === section,
+    );
+    if (lineIndex !== -1) {
+      let hasContent = false;
+      for (let at = lineIndex + 1; at < lines.length; at += 1) {
+        const trimmed = lines[at].trim();
+        if (/^#{1,6}\s/.test(trimmed)) break;
+        if (trimmed) {
+          hasContent = true;
+          break;
+        }
+      }
+      if (!hasContent) missing.push(`Empty section: ${original} has no content under it`);
+    }
+  });
+
+  // Length: the prompts ask for 350-600 words (PRD 220-380); 250 keeps the
+  // gate useful without failing table- and mermaid-heavy documents.
+  const minimum = PRD_MIN_WORDS;
+  if (words < minimum) {
+    missing.push(`Too short: ${words} words, need at least ${minimum}`);
+  }
+
+  if (/\b(?:TODO|TBD|lorem ipsum|placeholder|coming soon|\[insert [^\]]+\]|\[\s*\]|xxx+)\b/i.test(text)) {
+    missing.push('Placeholder text: remove TODO, TBD, lorem ipsum, or bracketed placeholders like [insert X]');
+  }
+
+  return { ok: missing.length === 0, words, missing };
 }
 
 export function buildPrototypePrompt(project: Project, brief: string): string {

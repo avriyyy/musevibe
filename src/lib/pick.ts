@@ -68,12 +68,31 @@ export function boxOf(el: Element): PickBox {
   return { x: rect.x, y: rect.y, w: rect.width, h: rect.height };
 }
 
+/** Exact workspace target a pin refers to, so chat edits the right thing. */
+export interface ChatQuoteTarget {
+  kind: "page" | "doc" | "task";
+  /** Planned page slug, only when the frame is a planned page. */
+  slug?: string;
+  /** Planned page title. */
+  pageTitle?: string;
+  /** Plan document kind (prd, trd, afd, dbd, bsd, ipd, note). */
+  docKind?: string;
+  /** Plan document title. */
+  docTitle?: string;
+  /** Task title for task pins. */
+  taskTitle?: string;
+  /** Task status for task pins. */
+  taskStatus?: string;
+}
+
 /** A picked component (or task) pinned into the chat, never sent on its own. */
 export interface ChatQuote {
   label: string;
   text: string;
   /** The user's change request; empty for bare context pins like tasks. */
   comment: string;
+  /** Exact target, when the pick came from a known page, doc, or task. */
+  target?: ChatQuoteTarget;
 }
 
 /** The quote that lands in the chat input, never sent on its own. */
@@ -84,8 +103,23 @@ export function quoteFor(label: string, text: string, comment: string): string {
 }
 
 /** One structured line per pinned quote, easy for the model to parse. */
+export function targetLine(target: ChatQuoteTarget | undefined): string {
+  if (!target) return "";
+  if (target.kind === "page" && target.slug) {
+    return ` [target page slug="${target.slug}" title="${target.pageTitle ?? ""}"]`;
+  }
+  if (target.kind === "doc" && target.docKind) {
+    return ` [target document kind="${target.docKind}" title="${target.docTitle ?? ""}"]`;
+  }
+  if (target.kind === "task" && target.taskTitle) {
+    return ` [target task "${target.taskTitle}" status="${target.taskStatus ?? ""}"]`;
+  }
+  return "";
+}
+
+/** One structured line per pinned quote, easy for the model to parse. */
 export function quoteLine(quote: ChatQuote): string {
   const where = quote.text ? `: "${quote.text}"` : "";
   const note = quote.comment.trim() ? ` — ${quote.comment.trim()}` : "";
-  return `- ${quote.label}${where}${note}`;
+  return `- ${quote.label}${where}${note}${targetLine(quote.target)}`;
 }

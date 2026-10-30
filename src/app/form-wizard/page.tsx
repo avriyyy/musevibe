@@ -60,11 +60,15 @@ import {
   MAX_LOGO_HISTORY,
   buildLogoPrompt,
   buildLogoSvgPrompt,
+  dedupeLogoSvgVariants,
   fileToLogoDataUrl,
+  paletteFromTokensCss,
   parseLogoSvgVariants,
   removeLogoBackground,
   sanitizeLogoSvg,
+  suggestLogoBrief,
   svgToDataUrl,
+  type LogoBriefContext,
   type LogoFormat,
   type LogoOrigin,
   type LogoStatus,
@@ -85,7 +89,12 @@ import {
   type StackRecommendation,
 } from "@/lib/stack-options";
 import { useVibe } from "@/lib/store";
+import type { Project } from "@/lib/types";
 import { createDraftProject } from "@/lib/draft";
+import {
+  resolveWizardFramework,
+  restoreWizardAnswers,
+} from "@/lib/wizard-hydration";
 
 const STEPS: Array<{ label: string; isOptional?: boolean }> = [
   { label: "Stack" },
@@ -138,9 +147,7 @@ export default function FormWizardPage() {
 
 function Wizard() {
   const router = useRouter();
-  const updateProject = useVibe((state) => state.updateProject);
   const setDraftIdea = useVibe((state) => state.setDraftIdea);
-  const isNarrow = useMediaQuery("(max-width: 640px)");
 
   // The chat creates the draft project before navigating here, so the wizard
   // always edits an existing project and can be left and resumed. A legacy
@@ -149,9 +156,6 @@ function Wizard() {
   const liveId = searchParams.get("id") ?? "";
   const [createdId, setCreatedId] = useState("");
   const projectId = liveId || createdId;
-  const project = useVibe((state) =>
-    projectId ? state.projects.find((p) => p.id === projectId) : undefined,
-  );
   const resolvingRef = useRef(false);
 
   useEffect(() => {
@@ -167,6 +171,51 @@ function Wizard() {
     });
   }, [projectId, router, setDraftIdea, searchParams]);
 
+  if (!projectId) {
+    return (
+      <Layout
+        height="fill"
+        contentWidth={720}
+        padding={5}
+        content={
+          <LayoutContent>
+            <VStack gap={3}>
+              <Heading level={1}>Project not found</Heading>
+              <Text type="supporting" color="secondary">
+                This setup link has no project behind it. Start from the home
+                screen by typing your idea into the chat.
+              </Text>
+              <HStack gap={3}>
+                <Button
+                  label="Back home"
+                  variant="primary"
+                  className="min-h-11 md:min-h-0"
+                  onClick={() => router.push("/")}
+                />
+              </HStack>
+            </VStack>
+          </LayoutContent>
+        }
+      />
+    );
+  }
+
+  // Keyed by project id so every project gets a fresh ephemeral state.
+  // Switching projects unmounts the previous body: in-flight question / stack
+  // / logo requests close over the old instance and can no longer write into
+  // the new one, and stale questions / answers / recommendations never leak.
+  return <WizardBody key={projectId} projectId={projectId} />;
+}
+
+function WizardBody({ projectId }: { projectId: string }) {
+  const router = useRouter();
+  const updateProject = useVibe((state) => state.updateProject);
+  const isNarrow = useMediaQuery("(max-width: 640px)");
+
+  const project = useVibe((state) =>
+    projectId ? state.projects.find((p) => p.id === projectId) : undefined,
+  );
+
   const idea = project?.idea ?? "";
   const name = project?.name ?? "";
   const projectModel = project?.model;
@@ -174,11 +223,12 @@ function Wizard() {
   const questionRefs = useRef<Record<string, HTMLElement | null>>({});
   const submitted = useRef(false);
   const hydratedRef = useRef("");
+  // Stable for the lifetime of this mount: the outer Wizard keys this body by
+  // project id, so a project switch unmounts the old body (dropping its
+  // in-flight request ids and ephemeral state) and mounts a fresh one.
   const projectIdRef = useRef(projectId);
-  useEffect(() => {
-    projectIdRef.current = projectId;
-  });
   const requestRef = useRef(0);
+  const questionInFlightRef = useRef("");
   const [step, setStep] = useState(0);
   const [attempted, setAttempted] = useState<ReadonlySet<number>>(new Set());
   const [generatedFor, setGeneratedFor] = useState("");
@@ -194,6 +244,7 @@ function Wizard() {
   const [stackSource, setStackSource] = useState<StackSource>(null);
   const [stackFor, setStackFor] = useState("");
   const stackRequestRef = useRef(0);
+  const stackInFlightRef = useRef("");
 
   const [questions, setQuestions] = useState<WizardQuestion[]>([]);
   const [questionStatus, setQuestionStatus] = useState<QuestionStatus>("loading");
@@ -216,40 +267,39 @@ function Wizard() {
   const designLoadedRef = useRef("");
   const logoRequestRef = useRef(0);
   const stackTouchedRef = useRef(false);
+  const answersRef = useRef<WizardAnswers>({});
+  const answersSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const logoBriefSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keep a live ref so the question generator (stable callback) can merge
+  // freshly typed answers that have not flushed to the store yet.
+  useEffect(() => {
+    answersRef.current = answers;
+  }, [answers]);
+
+  useEffect(
+    () => () => {
+      if (answersSaveTimerRef.current) clearTimeout(answersSaveTimerRef.current);
+      if (logoBriefSaveTimerRef.current) clearTimeout(logoBriefSaveTimerRef.current);
+    },
+    [],
+  );
 
   // Saved answers ride on the project so a resumed draft keeps its progress.
   // Match by question id first, then by label for older drafts. Reads from
   // the store directly so the generator callback never captures stale state.
+  // Pure helper keeps this scoped to the current project id only.
   const restoreAnswers = (list: WizardQuestion[]): WizardAnswers => {
     const saved =
       useVibe.getState().projects.find((p) => p.id === projectIdRef.current)?.answers ?? [];
-    if (!saved.length) return {};
-    const next: WizardAnswers = {};
-    for (const question of list) {
-      const entry =
-        saved.find((item) => item.qid === question.id) ??
-        saved.find((item) => item.question === question.label);
-      if (!entry) continue;
-      const value = entry.values ?? entry.answer;
-      if (Array.isArray(value)) {
-        const options = new Set(question.options ?? []);
-        const kept = value.filter((option) => options.has(option));
-        if (kept.length) next[question.id] = kept;
-      } else if (typeof value === "string" && value.trim()) {
-        if (question.type === "single") {
-          if ((question.options ?? []).includes(value)) next[question.id] = value;
-        } else {
-          next[question.id] = value;
-        }
-      }
-    }
-    return next;
+    return restoreWizardAnswers(list, saved);
   };
 
   const generateQuestions = useCallback(async (ideaText: string) => {
     const trimmed = ideaText.trim();
-    if (!trimmed) return;
+    if (!trimmed || questionInFlightRef.current === trimmed) return;
 
+    questionInFlightRef.current = trimmed;
     const requestId = requestRef.current + 1;
     requestRef.current = requestId;
     setGeneratedFor(trimmed);
@@ -291,31 +341,52 @@ function Wizard() {
     setQuestionSource(nextSource);
     setQuestionStatus("ready");
     // Cache the questionnaire on the project so a refresh reuses it instead
-    // of calling the AI again. Answers are matched back by question id.
+    // of calling the AI again. Preserve unmatched legacy answers (e.g. an
+    // old "feel" answer) instead of dropping them when the questionnaire
+    // is regenerated; existing cached drafts stay usable without migration.
     if (projectIdRef.current) {
-      useVibe.getState().updateProject(projectIdRef.current, {
+      const store = useVibe.getState();
+      const existing = store.projects.find((item) => item.id === projectIdRef.current);
+      const savedAnswers = existing?.answers ?? [];
+      const localAnswers = answersRef.current;
+      const merged: NonNullable<Project["answers"]> = [];
+      const seen = new Set<string>();
+      for (const question of nextQuestions) {
+        const localValue = localAnswers[question.id];
+        const hasLocal =
+          localValue !== undefined &&
+          (Array.isArray(localValue) ? localValue.length > 0 : String(localValue).trim().length > 0);
+        const restored = restoreWizardAnswers([question], savedAnswers)[question.id];
+        const value = hasLocal ? localValue : restored;
+        if (value === undefined) continue;
+        const text = answerToText(value);
+        if (!text) continue;
+        merged.push({ qid: question.id, question: question.label, answer: text, values: value });
+        seen.add(question.id);
+      }
+      for (const legacy of savedAnswers) {
+        if (seen.has(legacy.qid)) continue;
+        if (nextQuestions.some((question) => question.label === legacy.question)) continue;
+        merged.push(legacy);
+      }
+      store.updateProject(projectIdRef.current, {
         questions: nextQuestions,
         questionSource: nextSource,
+        answers: merged,
       });
+      // Merge freshly typed answers for matching ids so Regenerate never
+      // wipes what the user just typed before the debounced save flushed.
+      const restored = restoreWizardAnswers(nextQuestions, merged);
+      setAnswers(restored);
+    } else {
+      // Use only this project's restored answers. Never merge the previous
+      // local `answers` object: on a project switch matching question ids would
+      // otherwise leak the old project's answers into the new one.
+      setAnswers(restoreAnswers(nextQuestions));
     }
-    setAnswers((current) => {
-      const restored = restoreAnswers(nextQuestions);
-      const next: WizardAnswers = { ...restored };
-      for (const question of nextQuestions) {
-        if (next[question.id] !== undefined) continue;
-        const value = current[question.id];
-        if (value === undefined) continue;
-        if (Array.isArray(value)) {
-          const options = new Set(question.options ?? []);
-          next[question.id] = value.filter((option) => options.has(option));
-        } else if (question.type === "single") {
-          next[question.id] = (question.options ?? []).includes(value) ? value : "";
-        } else {
-          next[question.id] = value;
-        }
-      }
-      return next;
-    });
+    if (questionInFlightRef.current === trimmed) {
+      questionInFlightRef.current = "";
+    }
   }, []);
 
   useEffect(() => {
@@ -331,30 +402,35 @@ function Wizard() {
   }, [idea, generatedFor, generateQuestions]);
 
   // Hydrate local state from the project once it resolves: a resumed draft
-  // continues with its saved scope, logo, answers, and step.
+  // continues with its saved scope, logo, answers, and step. This body is
+  // keyed by project id, so initial useState values are already the reset for
+  // the new project; hydration only fills in this project's cached values and
+  // never touches generatedFor for uncached projects (which would invalidate
+  // the fresh question request started by the generator effect above).
   useEffect(() => {
     if (!project || hydratedRef.current === project.id) return;
     hydratedRef.current = project.id;
     if (project.platform || project.framework) stackTouchedRef.current = true;
     setPlatform(project.platform ?? "web");
     setTimeline(project.timeline ?? "two-weeks");
-    setFramework(
-      project.framework && isFrameworkFor(project.platform ?? "web", project.framework)
-        ? project.framework
-        : FRAMEWORKS[project.platform ?? "web"][0].value,
-    );
+    setFramework(resolveWizardFramework(project.platform ?? "web", project.framework));
     setLogoUrl(project.logoUrl ?? null);
-    setLogoOrigin(project.logoUrl ? "upload" : null);
+    setLogoOrigin(project.logoOrigin ?? null);
     setLogoStatus("idle");
     setLogoRemoveBg(project.logoRemoveBg ?? true);
     setLogoFormat(project.logoFormat ?? "svg");
     setLogoBgNote("");
+    // User-written logo direction persists across refresh/resume; the
+    // generated mark itself stays opt-in and is never auto-generated.
+    setLogoPrompt(project.logoBrief ?? "");
     // Unconditional so the effect keeps one straight hydration pass.
+    // A project with no saved system always falls back to Minimal — never a
+    // previous project's design (fresh mount starts from null by default).
     const savedDesign = project.designSystem ?? null;
     setDesign(savedDesign);
     if (savedDesign) {
       designLoadedRef.current = savedDesign.id + savedDesign.source;
-    } else if (!designLoadedRef.current) {
+    } else {
       // No saved choice yet: start from the quiet minimal template so the
       // review step and the canvas always have a system to render.
       designLoadedRef.current = "minimal:template";
@@ -399,19 +475,120 @@ function Wizard() {
       setGeneratedFor((project.idea ?? "").trim());
       setQuestionStatus("ready");
       setAnswers(restoreAnswers(project.questions));
+    } else {
+      // Uncached project: keep the fresh-mount reset (empty answers/questions)
+      // and leave generatedFor alone so the pending question request stays
+      // valid. Explicitly ensure the loading state for the fresh request.
+      setQuestions([]);
+      setQuestionSource(null);
+      setQuestionStatus("loading");
+      setAnswers({});
     }
     setStep(Math.min(project.wizardStep ?? 0, REVIEW_STEP));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project?.id]);
 
+  // Auto-save typed answers with a short debounce, guarded until the current
+  // project has hydrated. A refresh while still on the questionnaire keeps
+  // what was typed; the explicit step-save below remains the final flush.
+  useEffect(() => {
+    if (!projectId || hydratedRef.current !== projectId) return;
+    if (questionStatus !== "ready" || !questions.length) return;
+    if (answersSaveTimerRef.current) clearTimeout(answersSaveTimerRef.current);
+    answersSaveTimerRef.current = setTimeout(() => {
+      const store = useVibe.getState();
+      const existing = store.projects.find((item) => item.id === projectIdRef.current);
+      if (!existing) return;
+      const savedAnswers = existing.answers ?? [];
+      const current = answersRef.current;
+      const merged: NonNullable<Project["answers"]> = [];
+      const seen = new Set<string>();
+      for (const question of questions) {
+        const value = current[question.id];
+        const text = answerToText(value);
+        if (!text) continue;
+        merged.push({ qid: question.id, question: question.label, answer: text, values: value });
+        seen.add(question.id);
+      }
+      // Preserve legacy answers (e.g. old "feel") that have no current
+      // question instead of dropping them on every keystroke.
+      for (const legacy of savedAnswers) {
+        if (seen.has(legacy.qid)) continue;
+        if (questions.some((question) => question.label === legacy.question)) continue;
+        merged.push(legacy);
+      }
+      // Avoid no-op writes that would bump lastOpenedAt on every keystroke
+      // without changing content.
+      const before = JSON.stringify(savedAnswers);
+      if (before !== JSON.stringify(merged)) {
+        store.updateProject(projectIdRef.current, { answers: merged });
+      }
+    }, 600);
+    return () => {
+      if (answersSaveTimerRef.current) clearTimeout(answersSaveTimerRef.current);
+    };
+    // questions anchor the merge; answers flow via answersRef to avoid
+    // re-arming the timer on every keystroke render loop.
+  }, [answers, questions, questionStatus, projectId]);
+
+  // Debounce-save the user's logo brief alongside answers, same hydration guard.
+  useEffect(() => {
+    if (!projectId || hydratedRef.current !== projectId) return;
+    if (logoBriefSaveTimerRef.current) clearTimeout(logoBriefSaveTimerRef.current);
+    logoBriefSaveTimerRef.current = setTimeout(() => {
+      const store = useVibe.getState();
+      const existing = store.projects.find((item) => item.id === projectIdRef.current);
+      if (!existing) return;
+      if ((existing.logoBrief ?? "") === logoPrompt) return;
+      store.updateProject(projectIdRef.current, { logoBrief: logoPrompt });
+    }, 600);
+    return () => {
+      if (logoBriefSaveTimerRef.current) clearTimeout(logoBriefSaveTimerRef.current);
+    };
+  }, [logoPrompt, projectId]);
+
   const setAnswer = (id: string, value: WizardAnswerValue) => {
     setAnswers((current) => ({ ...current, [id]: value }));
   };
 
+  /** Compact product context forwarded into logo prompts. */
+  const logoBriefContext = (): LogoBriefContext => {
+    const byId = (id: string) => answerToText(answersRef.current[id] ?? answers[id]);
+    const saved = useVibe.getState().projects.find((item) => item.id === projectIdRef.current)?.answers ?? [];
+    const legacyFeel =
+      saved.find((entry) => entry.qid === "feel")?.answer?.trim() ||
+      (typeof answersRef.current["feel"] === "string" ? (answersRef.current["feel"] as string).trim() : "");
+    const palette = design?.tokensCss ? paletteFromTokensCss(design.tokensCss) : [];
+    const context: LogoBriefContext = {};
+    const audience = byId("audience");
+    if (audience) context.audience = audience;
+    const coreWorkflow = byId("core-action");
+    if (coreWorkflow) context.coreWorkflow = coreWorkflow;
+    const visual = legacyFeel || design?.name;
+    if (visual) context.visualDirection = visual;
+    if (palette.length) context.palette = palette;
+    return context;
+  };
+
+  /** User-written direction wins; otherwise suggest a grounded default. */
+  const effectiveLogoBrief = (): string => {
+    const typed = logoPrompt.trim();
+    if (typed) return typed;
+    const coreWorkflow = answerToText(answersRef.current["core-action"] ?? answers["core-action"]);
+    return suggestLogoBrief(name.trim() || "Untitled project", idea, coreWorkflow);
+  };
+
   const recommendStack = useCallback(async () => {
     const fingerprint = `${idea.trim()}${JSON.stringify(answers)}`;
-    if (!idea.trim() || fingerprint === stackFor) return;
+    if (
+      !idea.trim() ||
+      fingerprint === stackFor ||
+      fingerprint === stackInFlightRef.current
+    ) {
+      return;
+    }
 
+    stackInFlightRef.current = fingerprint;
     const requestId = stackRequestRef.current + 1;
     stackRequestRef.current = requestId;
     setStackFor(fingerprint);
@@ -467,7 +644,6 @@ function Wizard() {
   useEffect(() => {
     if (!idea.trim() || stackStatus !== "idle") return;
     // Fire-and-forget fetch on mount, same pattern as the questions loader.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void recommendStack();
   }, [idea, stackStatus, recommendStack]);
 
@@ -508,7 +684,7 @@ function Wizard() {
   };
 
   const generateLogo = async () => {
-    const description = logoPrompt.trim();
+    const description = effectiveLogoBrief().trim();
     if (!description || logoStatus === "loading") return;
 
     const requestId = logoRequestRef.current + 1;
@@ -522,7 +698,12 @@ function Wizard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind: "logo",
-          prompt: buildLogoPrompt(description, name.trim() || "Untitled project", idea),
+          prompt: buildLogoPrompt(
+            description,
+            name.trim() || "Untitled project",
+            idea,
+            logoBriefContext(),
+          ),
         }),
       });
       if (!response.ok) throw new Error(`Logo request failed: ${response.status}`);
@@ -532,7 +713,13 @@ function Wizard() {
 
       if (typeof data.image === "string" && data.image) {
         stashLogo(logoUrl);
-        setLogoUrl(await maybeRemoveBg(data.image));
+        const finalUrl = await maybeRemoveBg(data.image);
+        setLogoUrl(finalUrl);
+        // User chose to generate: persist the chosen output immediately so a
+        // refresh does not lose it. Never auto-replace without this click.
+        if (projectId) {
+          useVibe.getState().updateProject(projectId, { logoUrl: finalUrl, logoOrigin: "ai" });
+        }
         setLogoOrigin("ai");
         setLogoStatus("ready");
         return;
@@ -552,7 +739,7 @@ function Wizard() {
 
   /** Draw three vector variants with the text model; SVG has no backdrop. */
   const generateLogoSvg = async () => {
-    const description = logoPrompt.trim();
+    const description = effectiveLogoBrief().trim();
     if (!description || svgStatus === "loading") return;
 
     const requestId = logoRequestRef.current + 1;
@@ -566,21 +753,41 @@ function Wizard() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           kind: "logo-svg",
-          prompt: buildLogoSvgPrompt(description, name.trim() || "Untitled project", idea),
+          prompt: buildLogoSvgPrompt(
+            description,
+            name.trim() || "Untitled project",
+            idea,
+            logoBriefContext(),
+          ),
           ...(projectModel ? { model: projectModel } : {}),
         }),
       });
       if (!response.ok) throw new Error(`Logo request failed: ${response.status}`);
 
-      const data = (await response.json()) as { text?: unknown };
+      const data = (await response.json()) as { text?: unknown; source?: unknown };
       if (requestId !== logoRequestRef.current) return;
 
-      const variants = parseLogoSvgVariants(data.text);
-      if (variants.length) {
-        setSvgVariants(variants);
-        setLogoBgNote("");
+      // Local generic geometry is never a generated logo: only source ai
+      // may populate concepts, and the current mark stays untouched.
+      if (data.source !== "ai") {
+        setLogoError(
+          "Logo concepts are unavailable while the model is offline. Reconnect and try again. Your current mark is unchanged.",
+        );
       } else {
-        setLogoError("The model did not return usable SVG. Try a shorter description.");
+        const variants = dedupeLogoSvgVariants(parseLogoSvgVariants(data.text));
+        if (!variants.length) {
+          setLogoError("The model did not return usable SVG. Try a shorter description.");
+        } else {
+          setSvgVariants(variants);
+          setLogoError("");
+          if (variants.length < 3) {
+            setLogoBgNote(
+              `Only ${variants.length} of 3 concepts were usable. Regenerate or refine the description for more options.`,
+            );
+          } else {
+            setLogoBgNote("");
+          }
+        }
       }
     } catch {
       if (requestId !== logoRequestRef.current) return;
@@ -593,7 +800,12 @@ function Wizard() {
   /** Adopt one vector variant as the mark, stashing the current one. */
   const pickLogoSvg = (svg: string) => {
     stashLogo(logoUrl);
-    setLogoUrl(svgToDataUrl(svg));
+    const url = svgToDataUrl(svg);
+    setLogoUrl(url);
+    // Explicit user choice: persist immediately, never silently replace.
+    if (projectId) {
+      useVibe.getState().updateProject(projectId, { logoUrl: url, logoOrigin: "ai" });
+    }
     setLogoOrigin("ai");
     setLogoStatus("ready");
     setLogoError("");
@@ -605,7 +817,11 @@ function Wizard() {
     if (url === logoUrl) return;
     stashLogo(logoUrl);
     setLogoUrl(url);
-    setLogoOrigin(url.startsWith("data:image/svg") ? "ai" : "upload");
+    if (projectId) {
+      // Older marks do not store per-item provenance, so do not guess.
+      useVibe.getState().updateProject(projectId, { logoUrl: url, logoOrigin: undefined });
+    }
+    setLogoOrigin(null);
     setLogoBgNote("");
   };
 
@@ -618,7 +834,11 @@ function Wizard() {
         const clean = sanitizeLogoSvg(raw);
         if (!clean) throw new Error("That SVG could not be read. Pick a valid .svg file.");
         stashLogo(logoUrl);
-        setLogoUrl(svgToDataUrl(clean));
+        const url = svgToDataUrl(clean);
+        setLogoUrl(url);
+        if (projectId) {
+          useVibe.getState().updateProject(projectId, { logoUrl: url, logoOrigin: "upload" });
+        }
         setLogoOrigin("upload");
         setLogoStatus("ready");
         setLogoBgNote("Vector mark: transparent by construction, no removal needed.");
@@ -626,7 +846,11 @@ function Wizard() {
       }
       const dataUrl = await fileToLogoDataUrl(file);
       stashLogo(logoUrl);
-      setLogoUrl(await maybeRemoveBg(dataUrl));
+      const finalUrl = await maybeRemoveBg(dataUrl);
+      setLogoUrl(finalUrl);
+      if (projectId) {
+        useVibe.getState().updateProject(projectId, { logoUrl: finalUrl, logoOrigin: "upload" });
+      }
       setLogoOrigin("upload");
       setLogoStatus("ready");
     } catch (error) {
@@ -681,8 +905,8 @@ function Wizard() {
     return true;
   };
 
-  const answersList = () =>
-    questions
+  const answersList = () => {
+    const current: NonNullable<Project["answers"]> = questions
       .map((question) => ({
         qid: question.id,
         question: question.label,
@@ -690,16 +914,39 @@ function Wizard() {
         values: answers[question.id],
       }))
       .filter((entry) => entry.answer.length > 0);
+    // Preserve legacy answers (e.g. old "feel") that no longer have a
+    // question in the regenerated set instead of silently dropping them.
+    const seen = new Set(current.map((entry) => entry.qid));
+    const saved = project?.answers ?? [];
+    for (const legacy of saved) {
+      if (seen.has(legacy.qid)) continue;
+      if (questions.some((question) => question.label === legacy.question)) continue;
+      current.push(legacy);
+    }
+    return current;
+  };
 
   /** Persist wizard progress onto the project so leaving resumes cleanly. */
   const saveProgress = (nextStep: number) => {
     if (!projectId) return;
+    // Flush any pending debounced saves first: the explicit step-save is
+    // the final word and must include the latest keystrokes.
+    if (answersSaveTimerRef.current) {
+      clearTimeout(answersSaveTimerRef.current);
+      answersSaveTimerRef.current = null;
+    }
+    if (logoBriefSaveTimerRef.current) {
+      clearTimeout(logoBriefSaveTimerRef.current);
+      logoBriefSaveTimerRef.current = null;
+    }
     updateProject(projectId, {
       answers: answersList(),
       platform,
       timeline,
       framework,
       ...(logoUrl ? { logoUrl } : {}),
+      logoOrigin: logoOrigin ?? undefined,
+      logoBrief: logoPrompt,
       logoRemoveBg,
       logoFormat,
       ...(project?.logoHistory?.length ? { logoHistory: project.logoHistory } : {}),
@@ -865,35 +1112,6 @@ function Wizard() {
       />
     );
   };
-
-  if (!projectId) {
-    return (
-      <Layout
-        height="fill"
-        contentWidth={720}
-        padding={5}
-        content={
-          <LayoutContent>
-            <VStack gap={3}>
-              <Heading level={1}>Project not found</Heading>
-              <Text type="supporting" color="secondary">
-                This setup link has no project behind it. Start from the home
-                screen by typing your idea into the chat.
-              </Text>
-              <HStack gap={3}>
-                <Button
-                  label="Back home"
-                  variant="primary"
-                  className="min-h-11 md:min-h-0"
-                  onClick={() => router.push("/")}
-                />
-              </HStack>
-            </VStack>
-          </LayoutContent>
-        }
-      />
-    );
-  }
 
   if (!project) {
     return (
@@ -1170,6 +1388,11 @@ function Wizard() {
               logoOrigin={logoOrigin}
               logoPrompt={logoPrompt}
               onLogoPrompt={setLogoPrompt}
+              logoSuggestion={suggestLogoBrief(
+                name.trim() || "Untitled project",
+                idea,
+                answerToText(answers["core-action"]),
+              )}
               logoStatus={logoStatus}
               logoError={logoError}
               logoBgNote={logoBgNote}
@@ -1259,7 +1482,7 @@ function Wizard() {
                         height={28}
                         className="h-7 w-7 rounded-full object-cover"
                       />
-                      <span>{logoOrigin === "ai" ? (logoFormat === "svg" ? "Drawn as vector" : "Drawn by the image model") : "Uploaded"}{logoFormat === "svg" ? ", SVG" : ""}{logoRemoveBg && logoFormat === "png" ? ", background removed" : ""}{logoHistory.length ? `, ${logoHistory.length} previous kept` : ""}</span>
+                      <span>{logoOrigin === "ai" ? (logoFormat === "svg" ? "Drawn as vector" : "Drawn by the image model") : logoOrigin === "upload" ? "Uploaded" : "Saved mark, source unknown"}{logoFormat === "svg" ? ", SVG" : ""}{logoRemoveBg && logoFormat === "png" ? ", background removed" : ""}{logoHistory.length ? `, ${logoHistory.length} previous kept` : ""}</span>
                     </HStack>
                   ) : (
                     "Initials"

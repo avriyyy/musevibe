@@ -34,6 +34,10 @@ import {
   type CanvasShape,
   type Transform,
 } from "@/lib/canvas";
+import {
+  classifyPrototypeHref,
+  resolvePrototypeFrameId,
+} from "@/lib/design-system";
 export { FRAME_H, FRAME_W };
 
 /** Gap between frames on the shared canvas. */
@@ -70,6 +74,8 @@ interface DesignCanvasProps {
   frames: CanvasFrame[];
   /** Center the canvas on this frame; bump seq to re-trigger. */
   focusRequest?: { id: string; seq: number } | null;
+  /** Focus an existing frame by id (prototype intra-link navigation). */
+  onNavigateFrame?: (frameId: string) => void;
   onShapes: (shapesJson: string) => void;
   /** Quoted annotation text goes into the chat input (never auto-sent). */
   onQuoteToChat: (quote: ChatQuote) => void;
@@ -87,6 +93,7 @@ interface PickedComponent {
   text: string;
   box: PickBox;
   session: number;
+  target?: ChatQuote["target"];
 }
 
 type Gesture =
@@ -117,7 +124,8 @@ function GeneratingCard({ left, title }: { left: number; title: string }) {
       style={{ left, top: 0, width: FRAME_W, height: FRAME_H }}
     >
       <style>
-        {`@keyframes musevibe-scan { 0% { top: -18%; } 100% { top: 108%; } }`}
+        {`@keyframes musevibe-scan { 0% { top: -18%; } 100% { top: 108%; } }
+@media (prefers-reduced-motion: reduce) { .musevibe-scan-bar { animation: none !important; } }`}
       </style>
       <div className="pointer-events-none absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap">
         <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#c9cdd6]">
@@ -148,18 +156,18 @@ function GeneratingCard({ left, title }: { left: number; title: string }) {
         aria-label={`Generating the ${title} page`}
         className="relative h-full w-full overflow-hidden rounded-2xl border border-[#8ab4ff]/30 bg-[#8ab4ff]/[0.03]"
       >
-        <div
-          aria-hidden
-          className="absolute left-0 right-0 h-24 bg-gradient-to-b from-transparent via-[#8ab4ff]/25 to-transparent"
-          style={{ animation: "musevibe-scan 1.8s linear infinite" }}
-        />
-        <div className="absolute inset-0 grid place-items-center">
-          <p className="animate-pulse text-[13px] font-medium text-[#9aa0ae]">
-            Drawing {title}…
-          </p>
-        </div>
+      <div
+        aria-hidden
+        className="musevibe-scan-bar absolute left-0 right-0 h-24 bg-gradient-to-b from-transparent via-[#8ab4ff]/25 to-transparent"
+        style={{ animation: "musevibe-scan 1.8s linear infinite" }}
+      />
+      <div className="absolute inset-0 grid place-items-center">
+        <p className="animate-pulse text-[13px] font-medium text-[#9aa0ae]">
+          Drawing {title}…
+        </p>
       </div>
     </div>
+  </div>
   );
 }
 
@@ -167,6 +175,7 @@ export default function DesignCanvas({
   initialShapes,
   frames,
   focusRequest,
+  onNavigateFrame,
   onShapes,
   onQuoteToChat,
   picking,
@@ -188,6 +197,7 @@ export default function DesignCanvas({
   const [viewport, setViewport] = useState({ w: 0, h: 0 });
   const [hoverBox, setHoverBox] = useState<PickBox | null>(null);
   const [picked, setPicked] = useState<PickedComponent | null>(null);
+  const [linkNotice, setLinkNotice] = useState<string | null>(null);
 
   const shapesRef = useRef(shapes);
   const transformRef = useRef(transform);
@@ -204,6 +214,9 @@ export default function DesignCanvas({
   } | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const draftRef = useRef(draft);
+  const pickingRef = useRef(picking);
+  const navigateRef = useRef(onNavigateFrame);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const seedRef = useRef(
     JSON.stringify({ version: 1, shapes: initialShapes ?? [] }),
   );
@@ -213,6 +226,8 @@ export default function DesignCanvas({
     transformRef.current = transform;
     callbackRef.current = onShapes;
     draftRef.current = draft;
+    pickingRef.current = picking;
+    navigateRef.current = onNavigateFrame;
   });
 
   const zoomBy = useCallback((factor: number, cx?: number, cy?: number) => {
@@ -282,14 +297,65 @@ export default function DesignCanvas({
         const doc = el.contentDocument;
         if (!doc) return;
         // A frame shows exactly one generated page: links never leave it.
-        // Hash jumps stay, everything else is swallowed. Prototype scripts
-        // still run because this never stops propagation.
+        // Hash jumps stay, internal links to generated frames focus that
+        // frame, and everything else is swallowed. Prototype scripts still
+        // run because this never stops propagation.
+        const frameIds = frames.map((entry) => entry.id);
+        const announceLinkNotice = (message: string) => {
+          setLinkNotice(message);
+          if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+          noticeTimerRef.current = setTimeout(() => {
+            setLinkNotice(null);
+            noticeTimerRef.current = null;
+          }, 6000);
+        };
         const blockLink = (event: Event) => {
           const target = event.target as Element | null;
           const anchor = target?.closest?.("a[href]");
           if (!anchor) return;
           const href = anchor.getAttribute("href") || "";
-          if (!href.startsWith("#")) event.preventDefault();
+          // While picking, clicks become picks; never navigate.
+          if (pickingRef.current) {
+            event.preventDefault();
+            return;
+          }
+          const kind = classifyPrototypeHref(href);
+          if (kind.kind === "fragment") return;
+          if (kind.kind === "empty") {
+            event.preventDefault();
+            return;
+          }
+          if (kind.kind === "external") {
+            event.preventDefault();
+            announceLinkNotice("External links are disabled in this preview.");
+            return;
+          }
+          const match = resolvePrototypeFrameId(href, frameIds);
+          event.preventDefault();
+          if (match) {
+            if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+            noticeTimerRef.current = null;
+            setLinkNotice(null);
+            navigateRef.current?.(match);
+            const rawFragment = href.split("#", 2)[1] ?? "";
+            const fragment = rawFragment.trim();
+            if (fragment) {
+              try {
+                const targetEl = iframeRefs.current.get(match);
+                const targetDoc = targetEl?.contentDocument;
+                const id = decodeURIComponent(fragment);
+                const node =
+                  targetDoc?.getElementById(id) ??
+                  targetDoc?.querySelector(`[name="${CSS.escape(id)}"]`);
+                (node as Element | null)?.scrollIntoView?.();
+              } catch {
+                // Best effort only; focusing the frame is the navigation.
+              }
+            }
+            return;
+          }
+          const label = kind.candidate ? `\u201c${kind.candidate}\u201d` : "That link";
+          announceLinkNotice(`${label} has no generated frame yet.`);
         };
         // Forms never navigate away either; inline handlers still run.
         const blockSubmit = (event: Event) => event.preventDefault();
@@ -367,6 +433,11 @@ export default function DesignCanvas({
           event.preventDefault();
           event.stopPropagation();
           const target = targetOf(event);
+          // Only planned pages carry an exact slug; design-system previews
+          // and the showcase have none, so no target is invented for them.
+          const pageTarget = frame.slug
+            ? { kind: "page" as const, slug: frame.slug, pageTitle: frame.title }
+            : undefined;
           if (!target) {
             // Empty frame area: the whole frame becomes the context.
             setPicked({
@@ -374,12 +445,13 @@ export default function DesignCanvas({
               text: frame.subtitle,
               box: { x: originX, y: 0, w: FRAME_W, h: FRAME_H },
               session: pickSession,
+              target: pageTarget,
             });
             setHoverBox(null);
             return;
           }
           const { label, text } = describeElement(target);
-          setPicked({ label, text, box: shift(boxOf(target)), session: pickSession });
+          setPicked({ label, text, box: shift(boxOf(target)), session: pickSession, target: pageTarget });
           setHoverBox(null);
         };
         const onSubmit = (event: Event) => {
@@ -426,6 +498,14 @@ export default function DesignCanvas({
     // applyWheel is stable, so it never rebuilds the bindings on its own.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [framesKey, picking, pickSession, applyWheel]);
+
+  // Link notices clear themselves; never linger across unmounts.
+  useEffect(
+    () => () => {
+      if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    },
+    [],
+  );
 
   // Escape backs out one level: the comment card first, then the mode.
   useEffect(() => {
@@ -1012,7 +1092,7 @@ export default function DesignCanvas({
   // the chat drawer would cover it. Kept inside the canvas either way.
   const card = useMemo(() => {
     if (!activePick) return null;
-    const height = 172;
+    const height = 198;
     const gap = 10;
     const margin = 12;
     const width = Math.min(320, Math.max(220, viewport.w - margin * 2));
@@ -1102,6 +1182,9 @@ export default function DesignCanvas({
                             h: FRAME_H,
                           },
                           session: pickSession,
+                          target: frame.slug
+                            ? { kind: "page", slug: frame.slug, pageTitle: frame.title }
+                            : undefined,
                         });
                         setHoverBox(null);
                       }
@@ -1122,6 +1205,9 @@ export default function DesignCanvas({
                             h: FRAME_H,
                           },
                           session: pickSession,
+                          target: frame.slug
+                            ? { kind: "page", slug: frame.slug, pageTitle: frame.title }
+                            : undefined,
                         });
                         setHoverBox(null);
                       }
@@ -1364,6 +1450,7 @@ export default function DesignCanvas({
               label: activePick.label,
               text: activePick.text,
               comment: note,
+              ...(activePick.target ? { target: activePick.target } : {}),
             });
             setPicked(null);
           }}
@@ -1375,13 +1462,15 @@ export default function DesignCanvas({
           and swallows clicks, so the mode must be obvious and one click
           away from off. */}
       {picking && (
-        <div className="absolute left-3 top-3 z-10">
+        <div className="absolute left-3 top-3 z-10 max-w-[calc(100%-24px)]">
           <div
-            className="flex items-center gap-2 rounded-2xl border border-[#8ab4ff]/40 bg-[#17181d]/95 py-1.5 pl-3 pr-1.5 shadow-xl"
+            role="status"
+            aria-label="Component picking is on. Click a component or a frame, then describe the change."
+            className="flex max-w-[342px] items-center gap-2 rounded-2xl border border-[#8ab4ff]/40 bg-[#17181d]/95 py-1.5 pl-3 pr-1.5 shadow-xl"
             onPointerDown={(event) => event.stopPropagation()}
             onPointerUp={(event) => event.stopPropagation()}
           >
-            <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#c9cdd6]">
+            <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-[#c9cdd6]">
               <svg
                 aria-hidden
                 width="13"
@@ -1392,14 +1481,16 @@ export default function DesignCanvas({
                 strokeWidth="1.8"
                 strokeLinecap="round"
                 strokeLinejoin="round"
-                className="text-[#8ab4ff]"
+                className="shrink-0 text-[#8ab4ff]"
               >
                 <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
                 <circle cx="12" cy="12" r="4" />
               </svg>
-              Picking — click a component or a frame
+              <span className="truncate">
+                Picking is on: click a component or frame
+              </span>
             </span>
-            <kbd className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-[#9aa0ae]">
+            <kbd className="hidden shrink-0 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-[#9aa0ae] min-[390px]:inline">
               Esc
             </kbd>
             <button
@@ -1408,7 +1499,7 @@ export default function DesignCanvas({
               onPointerDown={(event) => event.stopPropagation()}
               aria-label="Stop picking"
               title="Stop picking"
-              className="flex h-6 w-6 items-center justify-center rounded-full text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+              className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#9aa0ae] hover:bg-white/10 hover:text-white"
             >
               <svg
                 aria-hidden
@@ -1424,6 +1515,23 @@ export default function DesignCanvas({
               </svg>
             </button>
           </div>
+        </div>
+      )}
+
+      {/* Prototype link notice: unresolved internal targets announce
+          instead of failing silently. */}
+      {linkNotice && (
+        <div
+          className="pointer-events-none absolute inset-x-0 z-10 flex justify-center px-4"
+          style={{ bottom: Math.max(16, bottomInset + 16) }}
+        >
+          <p
+            role="status"
+            aria-live="polite"
+            className="pointer-events-auto max-w-[min(420px,calc(100%-32px))] truncate rounded-2xl border border-white/15 bg-[#17181d]/95 px-3.5 py-2 text-center text-[12px] font-medium text-[#c9cdd6] shadow-xl"
+          >
+            {linkNotice}
+          </p>
         </div>
       )}
 

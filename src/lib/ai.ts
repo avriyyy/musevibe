@@ -1,6 +1,5 @@
 import type { Prd } from "./types";
 import { FALLBACK_QUESTIONS, deriveProjectName } from "./wizard";
-import { mockLogoSvgVariants } from "./logo";
 import { docFullName } from "./docs";
 
 // Abstraction AI agar bisa swap provider Meta (Muse Spark).
@@ -11,6 +10,12 @@ export type AiGenerateKind = "prd" | "tasks" | "brief" | "code" | "questions" | 
 export interface AiGenerateResult {
   text: string;
   source: "ai" | "local";
+  /** Why the local fallback was used. Absent or "ok" on a model answer. */
+  reason?: "ok" | "missing-key" | "http" | "timeout" | "network" | "empty";
+  /** HTTP status when the provider rejected the request. */
+  status?: number;
+  /** Model the server actually used, when known. */
+  model?: string;
 }
 
 export interface AiLogoResult {
@@ -33,11 +38,13 @@ export async function aiGenerate(
   const model =
     requestedModel && TEXT_MODEL.test(requestedModel) ? requestedModel : envModel;
 
-  if (!url || !key) return local(kind, prompt);
+  if (!url || !key) return local(kind, prompt, "missing-key", model);
 
-  const text = await providerText(url, key, model, prompt, kind);
-  if (text) return { text, source: "ai" };
-  return local(kind, prompt);
+  const reply = await providerText(url, key, model, prompt, kind);
+  if (reply.text) {
+    return { text: reply.text, source: "ai", reason: "ok", model };
+  }
+  return local(kind, prompt, reply.reason, model, reply.status);
 }
 
 /** POST a chat request to an OpenAI-compatible endpoint, else try legacy. */
@@ -47,7 +54,11 @@ async function providerText(
   model: string,
   prompt: string,
   kind?: AiGenerateKind,
-): Promise<string | null> {
+): Promise<{
+  text: string | null;
+  reason: "http" | "timeout" | "network" | "empty";
+  status?: number;
+}> {
   const base = url.replace(/\/+$/, "");
   // A full app screen is a long answer: reasoning plus a 6 to 9k token HTML
   // file. The shorter kinds keep the tighter budget and timeout.
@@ -73,12 +84,17 @@ async function providerText(
         choices?: Array<{ message?: { content?: unknown } }>;
       };
       const content = data?.choices?.[0]?.message?.content;
-      if (typeof content === "string" && content.trim()) return content.trim();
+      if (typeof content === "string" && content.trim()) {
+        return { text: content.trim(), reason: "empty" };
+      }
     } else if (res.status !== 404) {
-      return null;
+      return { text: null, reason: "http", status: res.status };
     }
-  } catch {
-    return null;
+  } catch (error) {
+    return {
+      text: null,
+      reason: isTimeout(error) ? "timeout" : "network",
+    };
   }
 
   try {
@@ -88,18 +104,44 @@ async function providerText(
       body: JSON.stringify({ model, kind: "text", prompt }),
       signal: AbortSignal.timeout(timeout),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      return { text: null, reason: "http", status: res.status };
+    }
 
     const data = (await res.json()) as { text?: unknown };
     const text = typeof data?.text === "string" ? data.text.trim() : "";
-    return text || null;
-  } catch {
-    return null;
+    return text
+      ? { text, reason: "empty" }
+      : { text: null, reason: "empty" };
+  } catch (error) {
+    return {
+      text: null,
+      reason: isTimeout(error) ? "timeout" : "network",
+    };
   }
 }
 
-function local(kind: AiGenerateKind, prompt: string): AiGenerateResult {
-  return { text: mockGenerate(kind, prompt), source: "local" };
+function isTimeout(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    (error.name === "TimeoutError" || error.name === "AbortError")
+  );
+}
+
+function local(
+  kind: AiGenerateKind,
+  prompt: string,
+  reason: AiGenerateResult["reason"] = "missing-key",
+  model?: string,
+  status?: number,
+): AiGenerateResult {
+  return {
+    text: mockGenerate(kind, prompt),
+    source: "local",
+    reason,
+    ...(model ? { model } : {}),
+    ...(status ? { status } : {}),
+  };
 }
 
 /**
@@ -162,7 +204,7 @@ function mockGenerate(kind: AiGenerateKind, prompt: string): string {
     return JSON.stringify({ questions: FALLBACK_QUESTIONS });
   }
   if (kind === "prd") {
-    return `# PRD draft (local)\n\nIdea: ${idea}\n\n## Problem\nIndie devs need one place for planning, design, and coding without switching tools.\n\n## Users\nSolo indie hackers, hackathon students.\n\n## Features\n- Auto Kanban from PRD\n- 3-screen wireframe\n- Code starter + preview\n\n## Out of scope\n- Realtime collaboration\n- One-click deploy (manual for now)`;
+    return `# PRD draft (local)\n\n> Local draft. The model is unavailable, so the section frame below is real but the detail is not finished. Generate again when the model is back; this draft is never presented as a model answer.\n\nIdea: ${idea}\n\n## Problem\nIndie devs need one place for planning, design, and coding without switching tools.\n\n## Who it is for\nSolo indie hackers starting their first project.\n\n## The core flow\n1. Open the app and see the main screen.\n2. Work through the core action.\n3. See the result and keep it for next time.\n\n## What ships first\n- The core screen that delivers the idea\n- A working path for the core action\n- Local data so a reload keeps the work\n- Empty, loading, and error states on every screen\n\n## Out of scope for v1\n- Accounts and team features\n- Payments and billing\n- Notifications and email\n\n## How we know it works\nA new person can finish the core flow without help.`;
   }
   if (kind === "tasks") {
     return JSON.stringify(
@@ -188,16 +230,15 @@ function mockGenerate(kind: AiGenerateKind, prompt: string): string {
     return deriveProjectName(prompt) || "Untitled project";
   }
   if (kind === "doc") {
-    const label = docFullName("prd");
+    const requested = prompt.match(/Write the (.+?) for this app/i)?.[1];
+    const label = requested?.trim() || docFullName("prd");
     return `# ${label} (local draft)\n\n> The model is unavailable, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${idea}\n\n## Overview\nFill in the product context from the brief.\n\n## Details\nExpand each required section with concrete, product-specific content.\n\n## Open questions\nList what still needs a decision before building.`;
   }
   if (kind === "logo-svg") {
-    return JSON.stringify({
-      variants: mockLogoSvgVariants("Logo").map((entry) => ({
-        svg: entry.svg,
-        rationale: entry.rationale,
-      })),
-    });
+    // Offline: no generic geometry. An empty variant list fails the SVG
+    // quality gate downstream, so local output can never be mistaken for
+    // generated concepts. The initials badge remains the explicit fallback.
+    return JSON.stringify({ variants: [] });
   }
   if (kind === "design-system") {
     return `Design system (local)\n\nThe model is unavailable, so the reference could not be converted. Pick a bundled template instead, or paste DESIGN.md content directly.\n\nIdea: ${idea}`;

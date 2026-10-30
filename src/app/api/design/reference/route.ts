@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { aiGenerate } from "@/lib/ai";
 import { parseDesignSystemResponse } from "@/lib/design-system";
+import { fetchPublicHttpUrl } from "@/lib/safe-fetch";
 
 const MAX_REF_CHARS = 6000;
 const FETCH_TIMEOUT = 20000;
@@ -57,27 +58,26 @@ export async function POST(req: Request) {
   if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
     return NextResponse.json({ error: "Only http and https links can be fetched." }, { status: 400 });
   }
+  if (url.length > 2048) {
+    return NextResponse.json({ error: "That link is too long. Paste a shorter page URL." }, { status: 400 });
+  }
 
   let html = "";
   try {
-    const res = await fetch(parsed.toString(), {
-      headers: { "User-Agent": "MuseVibe/1.0 (design reference fetch)" },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT),
-    });
-    if (!res.ok) {
+    const res = await fetchPublicHttpUrl(parsed, FETCH_TIMEOUT);
+    if (res.status < 200 || res.status >= 300) {
       return NextResponse.json(
         { error: `The link answered ${res.status}. Check it opens in a browser, or paste DESIGN.md text instead.` },
         { status: 422 },
       );
     }
-    const type = res.headers.get("content-type") ?? "";
-    if (!/text|html/i.test(type)) {
+    if (!/text|html/i.test(res.contentType)) {
       return NextResponse.json(
         { error: "That link is not a page (it looks like a file). Link a visible page, or paste DESIGN.md text instead." },
         { status: 422 },
       );
     }
-    html = await res.text();
+    html = res.body;
   } catch {
     return NextResponse.json({ error: "The link could not be fetched. Check the address, or paste DESIGN.md text instead." }, { status: 422 });
   }

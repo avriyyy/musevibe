@@ -6,10 +6,13 @@
 
 import type { Project, Task, TaskStatus } from "./types";
 import { answerToText } from "./wizard";
-import { platformLabel, timelineLabel } from "./project-options";
-import { frameworkLabel } from "./stack-options";
+import {
+  buildPrdFallback,
+  buildUnifiedPrdPrompt,
+  prdAnswersText,
+  prdStackText,
+} from "./prd-contract";
 
-const MAX_ANSWERS = 1600;
 const MAX_PRD_CONTEXT = 3200;
 const MAX_TASK_TITLE = 110;
 const MAX_TASK_NOTES = 160;
@@ -30,62 +33,15 @@ function sentence(value: string): string {
 
 /** Q&A pairs as one compact paragraph for prompts. */
 export function describeAnswers(project: Project): string {
-  const parts: string[] = [];
-  let total = 0;
-  for (const entry of project.answers ?? []) {
-    const value = answerToText(entry.values ?? entry.answer);
-    if (!value) continue;
-    const pair = `${entry.question} ${value}`;
-    parts.push(pair);
-    total += pair.length;
-    if (total >= MAX_ANSWERS) break;
-  }
-  return clampText(parts.join("; "), MAX_ANSWERS);
+  return prdAnswersText(project);
 }
 
 export function stackSummary(project: Project): string {
-  const bits: string[] = [];
-  if (project.platform) {
-    bits.push(platformLabel(project.platform));
-    if (project.framework) {
-      bits.push(frameworkLabel(project.platform, project.framework));
-    }
-  }
-  if (project.timeline) bits.push(timelineLabel(project.timeline));
-  return bits.join(" · ");
+  return prdStackText(project);
 }
 
 export function buildPrdPrompt(project: Project): string {
-  const idea = clampText(project.idea, 800);
-  const answers = describeAnswers(project);
-  const stack = stackSummary(project);
-
-  return [
-    "You are the planning partner in MuseVibe. Turn one app idea and the setup answers into a first-version PRD a solo developer can build from.",
-    `Project name: "${project.name}".`,
-    `The idea: "${idea}".`,
-    answers ? `What the user answered during setup: "${answers}".` : "",
-    stack ? `Chosen stack and timeline: ${stack}.` : "",
-    "",
-    "Write a markdown brief with exactly these sections, in this order:",
-    "## Problem",
-    "## Who it is for",
-    "## The core flow",
-    "## What ships first",
-    "## Out of scope for v1",
-    "## How we know it works",
-    "",
-    "Rules:",
-    "- 220 to 380 words total. Concrete and specific to this product.",
-    "- Use short paragraphs. Bullets only in 'What ships first' and 'Out of scope for v1', 4 to 6 items each.",
-    "- The core flow is numbered steps from first open to the value moment.",
-    "- 'How we know it works' is a manual check a developer can do, never a made-up metric.",
-    "- No em dashes. No pricing, growth numbers, testimonials, or invented research.",
-    "- Start with '# <project name>' and nothing else before it.",
-    "- Return only the markdown, no fences or commentary.",
-  ]
-    .filter(Boolean)
-    .join("\n");
+  return buildUnifiedPrdPrompt(project);
 }
 
 export function buildTasksPrompt(project: Project, prd: string): string {
@@ -210,57 +166,7 @@ export function parseTasks(raw: unknown, idPrefix: string): Task[] | null {
 
 /** Local brief built from the same fields the prompt uses, for offline demos. */
 export function fallbackPrd(project: Project): string {
-  const answers = (project.answers ?? [])
-    .map((entry) => ({
-      question: entry.question,
-      value: answerToText(entry.values ?? entry.answer),
-    }))
-    .filter((entry) => entry.value);
-
-  const core =
-    answers.find((entry) => /action|day one|core/i.test(entry.question))?.value ??
-    "work through the main screen and keep the result";
-  const audience =
-    answers.find((entry) => /who|audience|for/i.test(entry.question))?.value ??
-    "the first user";
-  const scopeOut = answers.find((entry) => /leave out|out of scope|skip/i.test(entry.question))?.value;
-
-  const ships = [
-    "The core screen that delivers the idea",
-    `A working path for: ${sentence(clampText(core, 160))}`,
-    "Local data so a reload keeps the work",
-    "Empty, loading, and error states on every screen",
-  ];
-  const excluded = [
-    scopeOut ? clampText(scopeOut, 160) : "Accounts and team features",
-    "Payments and billing",
-    "Notifications and email",
-  ];
-
-  const lines = [
-    `# ${project.name}`,
-    "",
-    "## Problem",
-    `${clampText(project.idea, 240)} is still just a note. The first version should prove the idea works before it grows a feature list.`,
-    "",
-    "## Who it is for",
-    `${sentence(clampText(audience, 160))}. They want the result without learning a new tool first.`,
-    "",
-    "## The core flow",
-    `1. Open the app and see the main screen.`,
-    `2. ${sentence(clampText(core, 200))}.`,
-    "3. See the result and keep it for next time.",
-    "",
-    "## What ships first",
-    ...ships.map((item) => `- ${item}`),
-    "",
-    "## Out of scope for v1",
-    ...excluded.map((item) => `- ${item}`),
-    "",
-    "## How we know it works",
-    `A new person can finish this check without help: ${sentence(clampText(core, 160))}.`,
-  ];
-  return lines.join("\n");
+  return buildPrdFallback(project);
 }
 
 /** Local task list that matches the fallback brief, so the demo never stalls. */

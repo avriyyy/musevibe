@@ -37,6 +37,7 @@ import DesignSidebar from "@/components/DesignSidebar";
 import type { CanvasFrame } from "@/components/DesignCanvas";
 import WorkspaceChat from "@/components/WorkspaceChat";
 import WorkspacePicker from "@/components/WorkspacePicker";
+import LoadingSticker from "@/stickers/LoadingSticker";
 import { FRAME_H, FRAME_W, parseCanvasShapes } from "@/lib/canvas";
 import { useVibe } from "@/lib/store";
 import {
@@ -51,8 +52,11 @@ import LogoModal from "@/components/LogoModal";
 import { formatModelLabel } from "@/lib/models";
 import {
   DOC_TYPES,
+  buildDocFallback,
+  buildDocRepairPrompt,
   buildDocPrompt,
   hasVisibleContent,
+  inspectDocMarkdown,
   looksLikeFrameworkCode,
   missingPageSections,
   normalizePrototypeHtml,
@@ -68,10 +72,12 @@ import {
 } from "@/lib/plan";
 import {
   buildActionPrompt,
+  checkPinnedDocIntegrity,
   parseActionResponse,
   type ChatAction,
 } from "@/lib/chat";
 import { DESIGN_SYSTEMS } from "@/lib/design-systems-catalog";
+import { downloadTextFile } from "@/lib/download";
 import {
   SHOWCASE_PATH,
   buildFallbackPageHtml,
@@ -80,13 +86,14 @@ import {
   buildPagePrompt,
   buildSamplePreviewHtmlFallback,
   buildShowcasePrompt,
+  buildShowcaseRepairPrompt,
   fallbackPagePlan,
   pageFilePath,
   parsePagePlan,
   resolveProjectDesignSystem,
   type PlannedPage,
 } from "@/lib/design-system";
-import type { CodeFile, ProjectDoc, Screen, Task, TaskStatus } from "@/lib/types";
+import type { CodeFile, Project, ProjectDoc, Screen, Task, TaskStatus } from "@/lib/types";
 
 const DesignCanvas = dynamic(() => import("@/components/DesignCanvas"), {
   ssr: false,
@@ -164,8 +171,6 @@ const COLUMNS: {
   },
 ];
 
-type Phase = "brief" | "tasks" | null;
-
 type View =
   | { kind: "documents" }
   | { kind: "tasks" }
@@ -186,6 +191,8 @@ function getHydratedOnServer() {
 interface AiReply {
   text: string;
   source: "ai" | "local";
+  reason?: string;
+  status?: number;
 }
 
 async function requestAi(
@@ -198,12 +205,87 @@ async function requestAi(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind, prompt, ...(model ? { model } : {}) }),
   });
-  if (!response.ok) throw new Error(`Plan request failed: ${response.status}`);
-  const data = (await response.json()) as { text?: unknown; source?: unknown };
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as {
+      error?: unknown;
+    } | null;
+    throw new Error(
+      typeof body?.error === "string"
+        ? body.error
+        : `The model request failed (${response.status}).`,
+    );
+  }
+  const data = (await response.json()) as {
+    text?: unknown;
+    source?: unknown;
+    reason?: unknown;
+    status?: unknown;
+  };
   return {
     text: typeof data.text === "string" ? data.text : "",
     source: data.source === "ai" ? "ai" : "local",
+    ...(typeof data.reason === "string" ? { reason: data.reason } : {}),
+    ...(typeof data.status === "number" ? { status: data.status } : {}),
   };
+}
+
+/**
+ * Validate-then-repair flow used by first-run preparation. One model attempt,
+ * one repair naming every failure,
+ * then the explicitly local fallback. Local provider responses never pass
+ * as AI: only source === "ai" with a passing inspection returns "ai".
+ */
+async function requestValidatedPrd(
+  project: Project,
+): Promise<{ markdown: string; source: 'ai' | 'local' }> {
+  let reply: AiReply;
+  try {
+    reply = await requestAi('prd', buildPrdPrompt(project), project.model);
+  } catch {
+    return { markdown: fallbackPrd(project), source: 'local' };
+  }
+  if (reply.source !== 'ai') {
+    return { markdown: fallbackPrd(project), source: 'local' };
+  }
+  const first = parseDocMarkdown(reply.text);
+  if (first.trim() && inspectDocMarkdown('prd', first).ok) {
+    return { markdown: first, source: 'ai' };
+  }
+  const firstCheck = inspectDocMarkdown('prd', first);
+  try {
+    const retry = await requestAi(
+      'prd',
+      buildDocRepairPrompt('prd', project, '', first, firstCheck.missing),
+      project.model,
+    );
+    const fixed = parseDocMarkdown(retry.text);
+    if (retry.source === 'ai' && fixed.trim() && inspectDocMarkdown('prd', fixed).ok) {
+      return { markdown: fixed, source: 'ai' };
+    }
+  } catch {
+    // Fall through to the local fallback below.
+  }
+  return { markdown: fallbackPrd(project), source: 'local' };
+}
+
+function aiFailureNote(reply: AiReply): string {
+  if (reply.reason === "missing-key") {
+    return "Muse isn't connected for this project yet.";
+  }
+  if (reply.reason === "timeout") {
+    return "Muse took too long to answer.";
+  }
+  if (reply.reason === "network") {
+    return "Muse couldn't be reached.";
+  }
+  if (reply.reason === "http") {
+    return "Muse couldn't complete the request.";
+  }
+  return "Muse didn't return a usable answer.";
+}
+
+function localDraftNote(reply: AiReply, item: string): string {
+  return `${aiFailureNote(reply)} I saved a local ${item} instead, so you can keep working. Use ⋯ → Regenerate to try again.`;
 }
 
 export default function IdeWorkspace({ projectId }: { projectId: string }) {
@@ -216,7 +298,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const project = useVibe((state) =>
     state.projects.find((entry) => entry.id === projectId),
   );
-  const prd = useVibe((state) => state.prdByProject[projectId] ?? "");
   const tasks = useVibe((state) => state.tasksByProject[projectId] ?? EMPTY_TASKS);
   const files = useVibe((state) => state.filesByProject[projectId] ?? EMPTY_FILES);
   const screens = useVibe(
@@ -257,11 +338,18 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     setChatDraft({ id: Date.now(), quote });
     setChatOpen(true);
   }, []);
-  const [phase, setPhase] = useState<Phase>(null);
   const [docBusy, setDocBusy] = useState<string | null>(null);
   const [showcaseBusy, setShowcaseBusy] = useState(false);
+  const [showcaseError, setShowcaseError] = useState("");
   const [suggesting, setSuggesting] = useState(false);
   const [generatingSlugs, setGeneratingSlugs] = useState<ReadonlySet<string>>(new Set());
+  const [pageErrors, setPageErrors] = useState<Record<string, string>>({});
+  const [allProgress, setAllProgress] = useState<{
+    done: number;
+    total: number;
+    currentTitle: string;
+  } | null>(null);
+  const [docErrors, setDocErrors] = useState<Record<string, string>>({});
   const showcaseRequestedRef = useRef("");
   type PrepStepId = "documents" | "tasks" | "design";
   const [prepActive, setPrepActive] = useState<PrepStepId | null>(null);
@@ -269,8 +357,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const preparedRef = useRef(false);
   const [tasksLocal, setTasksLocal] = useState(false);
   const [error, setError] = useState("");
-  const runningRef = useRef(false);
-  const startedRef = useRef(false);
   const isMobile = useMediaQuery("(max-width: 768px)");
 
   /** Which navbar tab the current view belongs to. */
@@ -280,89 +366,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       : view.kind === "tasks"
         ? "tasks"
         : "documents";
-
-  const runPlan = useCallback(
-    async (force: boolean) => {
-      if (runningRef.current) return;
-      const state = useVibe.getState();
-      const current = state.projects.find((entry) => entry.id === projectId);
-      if (!current) return;
-
-      const savedBrief = state.prdByProject[projectId] ?? "";
-      const savedTasks = state.tasksByProject[projectId] ?? EMPTY_TASKS;
-      if (!force && savedBrief.trim() && savedTasks.length) return;
-
-      runningRef.current = true;
-      startedRef.current = true;
-      setError("");
-      setTasksLocal(false);
-
-      let brief = savedBrief;
-
-      if (force || !brief.trim()) {
-        setPhase("brief");
-        try {
-          const reply = await requestAi(
-            "prd",
-            buildPrdPrompt(current),
-            current.model,
-          );
-          if (reply.source === "ai" && reply.text.trim()) {
-            brief = reply.text.trim();
-          } else {
-            brief = fallbackPrd(current);
-          }
-        } catch {
-          brief = fallbackPrd(current);
-          setError("The model did not answer, so this brief was drafted from your setup answers.");
-        }
-        useVibe.getState().setPrd(projectId, brief);
-        // Keep the PRD document in lockstep with the brief view.
-        const prdDoc = useVibe
-          .getState()
-          .docsByProject[projectId]?.find((entry) => entry.kind === "prd");
-        if (prdDoc && prdDoc.markdown !== brief) {
-          useVibe.getState().updateDoc(projectId, prdDoc.id, {
-            markdown: brief,
-            updatedAt: new Date().toISOString(),
-          });
-        }
-      }
-
-      if (force || !savedTasks.length) {
-        setPhase("tasks");
-        try {
-          const reply = await requestAi(
-            "tasks",
-            buildTasksPrompt(current, brief),
-            current.model,
-          );
-          const parsed =
-            reply.source === "ai"
-              ? parseTasks(reply.text, `task-${projectId.slice(0, 8)}`)
-              : null;
-          if (parsed) {
-            useVibe.getState().setTasks(projectId, parsed);
-          } else {
-            useVibe.getState().setTasks(projectId, fallbackTasks(current));
-            setTasksLocal(true);
-          }
-        } catch {
-          useVibe.getState().setTasks(projectId, fallbackTasks(current));
-          setTasksLocal(true);
-          setError((previous) =>
-            previous ||
-            "The model did not answer, so the task list was drafted locally.",
-          );
-        }
-      }
-
-      setPhase(null);
-      runningRef.current = false;
-    },
-    [projectId],
-  );
-
 
   // Design keeps exactly one canvas, named Prototype. An older multi-canvas
   // project adopts its first non-plan canvas; the rest stay orphaned in
@@ -395,16 +398,28 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
 
   /** Write a doc and keep the Product brief in sync when it is the PRD. */
   const saveDocMarkdown = useCallback(
-    (docId: string, markdown: string) => {
+    (docId: string, markdown: string, source?: ProjectDoc["source"]) => {
       const now = new Date().toISOString();
       const state = useVibe.getState();
-      state.updateDoc(projectId, docId, { markdown, updatedAt: now });
+      state.updateDoc(projectId, docId, {
+        markdown,
+        updatedAt: now,
+        ...(source ? { source } : {}),
+      });
       const doc = state.docsByProject[projectId]?.find(
         (entry) => entry.id === docId,
       );
       if (doc?.kind === "prd") state.setPrd(projectId, markdown);
     },
     [projectId],
+  );
+
+  /** Manual typing is never mistaken for model output. */
+  const handleManualMarkdown = useCallback(
+    (docId: string, markdown: string) => {
+      saveDocMarkdown(docId, markdown, "edited");
+    },
+    [saveDocMarkdown],
   );
 
   const generateDoc = useCallback(
@@ -415,26 +430,74 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         (entry) => entry.id === docId,
       );
       if (!current || !doc || doc.kind === "note" || docBusy) return;
+      const kind = doc.kind as DocKind;
+      const brief = state.prdByProject[projectId] ?? "";
+      if (kind === "prd") setError("");
       setDocBusy(docId);
+      setDocErrors((prev) => {
+        if (!(docId in prev)) return prev;
+        const next = { ...prev };
+        delete next[docId];
+        return next;
+      });
       try {
-        const reply = await requestAi(
-          "doc",
-          buildDocPrompt(doc.kind as DocKind, current, state.prdByProject[projectId] ?? ""),
-          current.model,
-        );
-        const markdown = parseDocMarkdown(reply.text);
-        if (markdown.trim()) saveDocMarkdown(docId, markdown);
-        else {
-          saveDocMarkdown(
-            docId,
-            `# ${doc.title} (local draft)\n\n> The model is unavailable, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${current.idea}\n`,
+        let reply: AiReply;
+        try {
+          reply = await requestAi(
+            "doc",
+            buildDocPrompt(kind, current, brief),
+            current.model,
           );
+        } catch {
+          const fallback = buildDocFallback(kind, current, brief);
+          saveDocMarkdown(docId, fallback, "local");
+          setDocErrors((prev) => ({
+            ...prev,
+            [docId]:
+              "Muse couldn't be reached, so I saved a local outline instead. You can keep editing it or use ⋯ → Regenerate later.",
+          }));
+          return;
         }
-      } catch {
-        saveDocMarkdown(
-          docId,
-          `# ${doc.title} (local draft)\n\n> The model did not answer, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${current.idea}\n`,
-        );
+        const first = parseDocMarkdown(reply.text);
+        const firstCheck = inspectDocMarkdown(kind, first);
+        if (reply.source === "ai" && firstCheck.ok) {
+          saveDocMarkdown(docId, first, "ai");
+          return;
+        }
+        if (reply.source === "ai") {
+          // One repair attempt naming the missing contract.
+          try {
+            const retry = await requestAi(
+              "doc",
+              buildDocRepairPrompt(kind, current, brief, first, firstCheck.missing),
+              current.model,
+            );
+            const fixed = parseDocMarkdown(retry.text);
+            if (
+              retry.source === "ai" &&
+              inspectDocMarkdown(kind, fixed).ok
+            ) {
+              saveDocMarkdown(docId, fixed, "ai");
+              return;
+            }
+          } catch {
+            // Fall through to the local outline below.
+          }
+          const fallback = buildDocFallback(kind, current, brief);
+          saveDocMarkdown(docId, fallback, "local");
+          setDocErrors((prev) => ({
+            ...prev,
+            [docId]:
+              "Muse's answer was incomplete, so I saved a local outline instead. Your document is still usable; choose ⋯ → Regenerate to try again.",
+          }));
+          return;
+        }
+        const fallback = buildDocFallback(kind, current, brief);
+        saveDocMarkdown(docId, fallback, "local");
+        setDocErrors((prev) => ({
+          ...prev,
+          [docId]: localDraftNote(reply, "outline"),
+        }));
       } finally {
         setDocBusy(null);
       }
@@ -444,13 +507,13 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
 
   /** Write one HTML file into the project files, replacing any same path. */
   const saveHtmlFile = useCallback(
-    (path: string, html: string) => {
+    (path: string, html: string, source?: CodeFile["source"]) => {
       const state = useVibe.getState();
       const existing = (state.filesByProject[projectId] ?? EMPTY_FILES).find(
         (file) => file.path === path,
       );
       if (existing) {
-        state.updateFile(projectId, existing.id, html);
+        state.updateFile(projectId, existing.id, html, source);
         return;
       }
       state.setFiles(projectId, [
@@ -463,8 +526,20 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           path,
           content: html,
           language: "html",
+          ...(source ? { source } : {}),
         },
       ]);
+    },
+    [projectId],
+  );
+
+  const downloadPage = useCallback(
+    (slug: string) => {
+      const file = (useVibe.getState().filesByProject[projectId] ?? EMPTY_FILES).find(
+        (entry) => entry.path === pageFilePath(slug),
+      );
+      if (!file) return;
+      downloadTextFile(`${slug}.html`, file.content, "text/html;charset=utf-8");
     },
     [projectId],
   );
@@ -491,31 +566,96 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     const current = state.projects.find((entry) => entry.id === projectId);
     if (!current || showcaseBusy) return;
     setShowcaseBusy(true);
+    setShowcaseError("");
     try {
       const system = await resolveProjectDesignSystem(current);
-      const reply = await requestAi(
-        "prototype",
-        buildShowcasePrompt(
-          current.name,
-          current.idea,
-          system.designMd,
-          system.tokensCss,
-        ),
-        current.model,
+      let reply: AiReply;
+      try {
+        reply = await requestAi(
+          "prototype",
+          buildShowcasePrompt(
+            current.name,
+            current.idea,
+            system.designMd,
+            system.tokensCss,
+          ),
+          current.model,
+        );
+      } catch {
+        saveHtmlFile(
+          SHOWCASE_PATH,
+          buildSamplePreviewHtmlFallback(current, system),
+          "local",
+        );
+        setShowcaseError(
+          "Muse couldn't finish the style preview, so I saved a local preview instead. Use ⋯ → Regenerate to try again.",
+        );
+        return;
+      }
+      let html = normalizePrototypeHtml(reply.text);
+      const showcaseValid = (value: string) =>
+        hasVisibleContent(value) && !looksLikeFrameworkCode(value);
+      if (reply.source === "ai" && !showcaseValid(html)) {
+        // One repair attempt before the local fallback.
+        try {
+          const retry = await requestAi(
+            "prototype",
+            buildShowcaseRepairPrompt(
+              current.name,
+              current.idea,
+              system.designMd,
+              system.tokensCss,
+            ),
+            current.model,
+          );
+          const fixed = normalizePrototypeHtml(retry.text);
+          if (retry.source === "ai" && showcaseValid(fixed)) {
+            html = fixed;
+            saveHtmlFile(SHOWCASE_PATH, html, "ai");
+            return;
+          }
+        } catch {
+          // Keep the first attempt below.
+        }
+      }
+      if (reply.source === "ai" && showcaseValid(html)) {
+        saveHtmlFile(SHOWCASE_PATH, html, "ai");
+        return;
+      }
+      if (reply.source === "local") {
+        saveHtmlFile(
+          SHOWCASE_PATH,
+          buildSamplePreviewHtmlFallback(current, system),
+          "local",
+        );
+        setShowcaseError(localDraftNote(reply, "style preview"));
+        return;
+      }
+      saveHtmlFile(
+        SHOWCASE_PATH,
+        buildSamplePreviewHtmlFallback(current, system),
+        "local",
       );
-      const html =
-        normalizePrototypeHtml(reply.text) ||
-        buildSamplePreviewHtmlFallback(current, system);
-      saveHtmlFile(SHOWCASE_PATH, html);
+      setShowcaseError(
+        "Muse returned an incomplete style preview, so I saved a local preview instead. Use ⋯ → Regenerate to try again.",
+      );
     } catch {
       const stateNow = useVibe.getState();
       const currentNow = stateNow.projects.find((entry) => entry.id === projectId);
       if (currentNow) {
-        const system = await resolveProjectDesignSystem(currentNow);
-        saveHtmlFile(
-          SHOWCASE_PATH,
-          buildSamplePreviewHtmlFallback(currentNow, system),
-        );
+        try {
+          const system = await resolveProjectDesignSystem(currentNow);
+          saveHtmlFile(
+            SHOWCASE_PATH,
+            buildSamplePreviewHtmlFallback(currentNow, system),
+            "local",
+          );
+          setShowcaseError(
+            "Muse couldn't finish the style preview, so I saved a local preview instead. Use ⋯ → Regenerate to try again.",
+          );
+        } catch {
+          setShowcaseError("Muse couldn't draw the style preview. Use ⋯ → Regenerate to try again.");
+        }
       }
     } finally {
       setShowcaseBusy(false);
@@ -570,15 +710,31 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     }
   }, [projectId, suggesting]);
 
-  /** Generate one planned page in the chosen design system. */
+  /**
+   * Generate one planned page in the chosen design system. Returns true when
+   * the page file was written, false when an edit left the existing page
+   * untouched so the caller can restore the chat request.
+   */
   const generatePage = useCallback(
-    async (slug: string, note?: string) => {
+    async (slug: string, note?: string): Promise<boolean> => {
       const state = useVibe.getState();
       const current = state.projects.find((entry) => entry.id === projectId);
       const plan: PlannedPage[] = current?.pagePlan ?? [];
       const page = plan.find((entry) => entry.slug === slug);
-      if (!current || !page || generatingSlugs.has(slug)) return;
+      if (!current || !page || generatingSlugs.has(slug)) return false;
+      const existingHtml = (
+        useVibe.getState().filesByProject[projectId] ?? []
+      ).find((file) => file.path === pageFilePath(slug))?.content;
+      // A chat-requested edit must never replace a real page with a local
+      // fallback: on failure the current page stays and the call reports it.
+      const isEdit = Boolean(note?.trim() && existingHtml);
       setGeneratingSlugs((prev) => new Set(prev).add(slug));
+      setPageErrors((prev) => {
+        if (!(slug in prev)) return prev;
+        const next = { ...prev };
+        delete next[slug];
+        return next;
+      });
       try {
         const system = await resolveProjectDesignSystem(current);
         // Earlier screens in plan order, so the new page reuses their
@@ -609,12 +765,36 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           priorPages,
           userNote: note,
           logoUrl: current.logoUrl,
+          ...(existingHtml ? { existingHtml } : {}),
         };
-        const reply = await requestAi(
-          "prototype",
-          buildPagePrompt(context),
-          current.model,
-        );
+        let reply: AiReply;
+        try {
+          reply = await requestAi(
+            "prototype",
+            buildPagePrompt(context),
+            current.model,
+          );
+        } catch {
+          if (isEdit) {
+            setPageErrors((prev) => ({
+              ...prev,
+              [slug]:
+                `Muse couldn't be reached. The existing "${page.title}" page is unchanged; use ⋯ → Regenerate to try again.`,
+            }));
+            return false;
+          }
+          saveHtmlFile(
+            pageFilePath(slug),
+            buildFallbackPageHtml(context),
+            "local",
+          );
+          setPageErrors((prev) => ({
+            ...prev,
+            [slug]:
+              "Muse couldn't finish this page, so I saved a local preview instead. Your page is usable; use ⋯ → Regenerate to try again.",
+          }));
+          return true;
+        }
         let html = normalizePrototypeHtml(reply.text);
         const plannedSections = page.sections ?? [];
         const thin = (value: string) =>
@@ -623,7 +803,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           (plannedSections.length > 0 &&
             missingPageSections(value, plannedSections).length >=
               Math.ceil(plannedSections.length / 2));
-        if (thin(html)) {
+        if (reply.source === "ai" && thin(html)) {
           // One repair attempt: the last output would have rendered blank,
           // hidden its content, or is framework code instead of plain HTML.
           try {
@@ -633,17 +813,66 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               current.model,
             );
             const fixed = normalizePrototypeHtml(retry.text);
-            if (!thin(fixed)) html = fixed;
+            if (retry.source === "ai" && !thin(fixed)) html = fixed;
           } catch {
             // Keep the first attempt below.
           }
         }
-        if (!hasVisibleContent(html) || looksLikeFrameworkCode(html)) {
-          // Two failed attempts: draw the screen locally from the tokens
-          // and the plan so the frame is never a blank white page.
-          html = buildFallbackPageHtml(context);
+        if (reply.source !== "ai") {
+          if (isEdit) {
+            setPageErrors((prev) => ({
+              ...prev,
+              [slug]:
+                `${aiFailureNote(reply)} The existing "${page.title}" page is unchanged; try again later.`,
+            }));
+            return false;
+          }
+          saveHtmlFile(
+            pageFilePath(slug),
+            buildFallbackPageHtml(context),
+            "local",
+          );
+          setPageErrors((prev) => ({
+            ...prev,
+            [slug]: localDraftNote(reply, "page preview"),
+          }));
+          return true;
         }
-        saveHtmlFile(pageFilePath(slug), html);
+        if (thin(html)) {
+          if (isEdit) {
+            // Never replace a real page with a local fallback for an edit.
+            setPageErrors((prev) => ({
+              ...prev,
+              [slug]:
+                `Muse returned an incomplete page, so the existing "${page.title}" page is unchanged. Use ⋯ → Regenerate to try again.`,
+            }));
+            return false;
+          }
+          // Two failed attempts (including missing planned sections): draw
+          // the screen locally from the tokens and the plan so the frame is
+          // never a blank white page, and never save thin content as AI.
+          saveHtmlFile(
+            pageFilePath(slug),
+            buildFallbackPageHtml(context),
+            "local",
+          );
+          setPageErrors((prev) => ({
+            ...prev,
+            [slug]:
+              "Muse returned an incomplete page, so I saved a local preview instead. Your page is usable; use ⋯ → Regenerate to try again.",
+          }));
+          return true;
+        }
+        saveHtmlFile(pageFilePath(slug), html, "ai");
+        return true;
+      } catch {
+        setPageErrors((prev) => ({
+          ...prev,
+          [slug]: existingHtml
+            ? "This page couldn't be updated, so your existing preview is unchanged. Use ⋯ → Regenerate to try again."
+            : "This page couldn't be created. Use ⋯ → Generate to try again.",
+        }));
+        return false;
       } finally {
         setGeneratingSlugs((prev) => {
           const next = new Set(prev);
@@ -656,7 +885,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   );
 
   /** Generate every planned page that still lacks a frame, in plan order. */
+  const allRunningRef = useRef(false);
   const generateAllPages = useCallback(async () => {
+    if (allRunningRef.current) return;
     const state = useVibe.getState();
     const current = state.projects.find((entry) => entry.id === projectId);
     const plan: PlannedPage[] = current?.pagePlan ?? [];
@@ -664,11 +895,26 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     const missing = plan.filter(
       (page) => !files.some((file) => file.path === pageFilePath(page.slug)),
     );
-    for (const page of missing) {
-      // Sequential on purpose: one model call at a time keeps long
-      // reasoning generations from colliding.
-      // eslint-disable-next-line no-await-in-loop
-      await generatePage(page.slug);
+    if (!missing.length) return;
+    allRunningRef.current = true;
+    setAllProgress({
+      done: 0,
+      total: missing.length,
+      currentTitle: missing[0].title,
+    });
+    try {
+      let done = 0;
+      for (const page of missing) {
+        setAllProgress({ done, total: missing.length, currentTitle: page.title });
+        // Sequential on purpose: one model call at a time keeps long
+        // reasoning generations from colliding. A failure records itself
+        // in pageErrors and the loop continues with the next page.
+        await generatePage(page.slug);
+        done += 1;
+      }
+    } finally {
+      allRunningRef.current = false;
+      setAllProgress(null);
     }
   }, [projectId, generatePage]);
 
@@ -680,7 +926,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const runChatAction = useCallback(
     async (
       message: string,
-      pins: Array<{ label: string; text: string; comment: string }>,
+      pins: Array<ChatQuote>,
     ): Promise<{ ok: boolean; note: string }> => {
       const state = useVibe.getState();
       const current = state.projects.find((entry) => entry.id === projectId);
@@ -723,7 +969,25 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       if (!parsed) {
         return { ok: false, note: "The model did not answer with actions." };
       }
+      // An empty action list is a no-op, not a success: keep the input and
+      // pins so the user can rephrase instead of losing their context.
+      if (!parsed.actions.length) {
+        return { ok: false, note: parsed.note || "The model returned no actions, so nothing changed." };
+      }
       const applied: string[] = [];
+      const failures: string[] = [];
+      let rejectedTarget = false;
+      const pinnedDocKinds = pins
+        .map((pin) => (pin.target?.kind === "doc" ? pin.target.docKind : undefined))
+        .filter((kind): kind is string => Boolean(kind));
+      const pinnedPageSlugs = pins
+        .map((pin) => (pin.target?.kind === "page" ? pin.target.slug : undefined))
+        .filter((slug): slug is string => Boolean(slug));
+      const pinnedTaskTitles = pins
+        .map((pin) => (pin.target?.kind === "task" ? pin.target.taskTitle : undefined))
+        .filter((title): title is string => Boolean(title))
+        .map((title) => title.trim().toLowerCase())
+        .filter(Boolean);
       const taskStatusOf = (value: string): TaskStatus | null => {
         const normalized = value.trim().toLowerCase().replace(/[\s-]+/g, "");
         if (normalized === "todo" || normalized === "todoo") return "todo";
@@ -734,17 +998,42 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         if (normalized === "cancelled" || normalized === "canceled") return "cancelled";
         return null;
       };
+      const normalizeTitle = (value: string) => value.trim().toLowerCase();
       for (const action of parsed.actions as ChatAction[]) {
         if (action.type === "update_doc") {
+          if (pinnedDocKinds.length && !pinnedDocKinds.includes(action.kind)) {
+            rejectedTarget = true;
+            failures.push(`document "${action.kind}" did not match the pinned document`);
+            continue;
+          }
           const doc = useVibe
             .getState()
             .docsByProject[projectId]?.find(
               (entry) => entry.kind === action.kind,
             );
-          if (doc && action.markdown.trim()) {
-            saveDocMarkdown(doc.id, action.markdown.trim());
-            applied.push(doc.title || doc.kind);
+          if (!doc) {
+            failures.push(`document "${action.kind}" was not found`);
+            continue;
           }
+          const replacement = action.markdown.trim();
+          if (!replacement) {
+            failures.push(`"${doc.title || doc.kind}" was left unchanged because the replacement was empty`);
+            continue;
+          }
+          // Fail closed on pinned edits: a blank or truncated model reply
+          // must never overwrite the stored document.
+          if (pinnedDocKinds.includes(action.kind) || pinnedDocKinds.length) {
+            const integrity = checkPinnedDocIntegrity(doc.markdown, replacement, message, pins);
+            if (!integrity.ok) {
+              failures.push(`"${doc.title || doc.kind}" was left unchanged (${integrity.reason})`);
+              continue;
+            }
+          } else if (replacement.length < 80) {
+            failures.push(`"${doc.title || doc.kind}" was left unchanged (the replacement was too short to be complete)`);
+            continue;
+          }
+          saveDocMarkdown(doc.id, replacement);
+          applied.push(doc.title || doc.kind);
         } else if (action.type === "add_task") {
           const entry: Task = {
             id:
@@ -764,21 +1053,38 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           applied.push(`task "${entry.title}"`);
         } else if (action.type === "move_task") {
           const next = taskStatusOf(action.status);
-          const list = useVibe.getState().tasksByProject[projectId] ?? [];
-          const hit = list.find((entry) =>
-            entry.title.toLowerCase().includes(action.title.toLowerCase().slice(0, 24)),
-          );
-          if (hit && next) {
-            useVibe
-              .getState()
-              .setTasks(
-                projectId,
-                list.map((entry) =>
-                  entry.id === hit.id ? { ...entry, status: next } : entry,
-                ),
-              );
-            applied.push(`"${hit.title}" to ${next}`);
+          if (!next) {
+            failures.push(`task "${action.title}" was left unchanged (unknown status "${action.status}")`);
+            continue;
           }
+          const wanted = normalizeTitle(action.title);
+          if (!wanted) {
+            failures.push("a task move was missing its target title, so nothing changed");
+            continue;
+          }
+          const list = useVibe.getState().tasksByProject[projectId] ?? [];
+          // Exact target only: a pinned task must match verbatim, and an
+          // unpinned move must still match the full title. Never fall back
+          // to a substring that could move the wrong task.
+          const hit = list.find((entry) => normalizeTitle(entry.title) === wanted);
+          if (!hit) {
+            failures.push(`task "${action.title}" was not found, so nothing moved`);
+            continue;
+          }
+          if (pinnedTaskTitles.length && !pinnedTaskTitles.includes(normalizeTitle(hit.title))) {
+            rejectedTarget = true;
+            failures.push(`task "${hit.title}" did not match the pinned task, so nothing moved`);
+            continue;
+          }
+          useVibe
+            .getState()
+            .setTasks(
+              projectId,
+              list.map((entry) =>
+                entry.id === hit.id ? { ...entry, status: next } : entry,
+              ),
+            );
+          applied.push(`"${hit.title}" to ${next}`);
         } else if (action.type === "generate_page") {
           const st = useVibe.getState();
           const plan = st.projects.find((e) => e.id === projectId)?.pagePlan ?? [];
@@ -787,19 +1093,43 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             plan.find((entry) =>
               entry.title.toLowerCase().includes(action.slug.toLowerCase()),
             );
-          if (hit) {
-            // Sequential on purpose: one model call at a time keeps long
-            // reasoning generations from colliding.
-            // eslint-disable-next-line no-await-in-loop
-            await generatePage(hit.slug, action.note);
-            applied.push(`page "${hit.title}"`);
+          if (!hit) {
+            failures.push(`page "${action.slug}" was not found, so nothing changed`);
+            continue;
           }
+          if (pinnedPageSlugs.length && !pinnedPageSlugs.includes(hit.slug)) {
+            rejectedTarget = true;
+            failures.push(`page "${hit.title}" did not match the pinned page, so nothing changed`);
+            continue;
+          }
+          // Sequential on purpose: one model call at a time keeps long
+          // reasoning generations from colliding.
+          const wrote = await generatePage(hit.slug, action.note);
+          if (!wrote) {
+            failures.push(`the "${hit.title}" page was left unchanged`);
+            continue;
+          }
+          applied.push(`page "${hit.title}"`);
         } else if (action.type === "rename_project") {
           useVibe.getState().updateProject(projectId, { name: action.name });
           applied.push("project name");
         }
       }
-      if (!applied.length) return { ok: true, note: parsed.note };
+      if (!applied.length) {
+        if (rejectedTarget) {
+          return { ok: false, note: "The model targeted a different document, page, or task than the pinned one, so nothing changed." };
+        }
+        const reason = failures.length ? ` ${failures[0][0].toUpperCase()}${failures[0].slice(1)}.` : "";
+        return { ok: false, note: `${parsed.note}${reason} Nothing changed.`.trim() };
+      }
+      // Partial completion is consumed (the chat clears): resubmitting the
+      // same prompt would re-apply what already succeeded. Name both sides.
+      if (failures.length) {
+        return {
+          ok: true,
+          note: `${parsed.note} Changed: ${applied.join("; ")}. Could not finish: ${failures.join("; ")}.`,
+        };
+      }
       return {
         ok: true,
         note: `${parsed.note} Changed: ${applied.join("; ")}.`,
@@ -819,8 +1149,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     const state0 = useVibe.getState();
     const current0 = state0.projects.find((entry) => entry.id === projectId);
     if (!current0) return;
-    const localDraft = (doc: ProjectDoc) =>
-      `# ${doc.title} (local draft)\n\n> The model is unavailable, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${current0.idea}\n`;
     setPrepDoneIds([]);
     setPrepActive("documents");
     try {
@@ -848,46 +1176,90 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         ]);
       }
       // Product brief (PRD), then the other five documents in parallel.
+      // Use the same validate -> one repair -> local fallback flow as first run.
       let brief = useVibe.getState().prdByProject[projectId] ?? "";
+      let briefSource: ProjectDoc["source"];
       if (!brief.trim()) {
+        briefSource = "local";
         try {
-          const reply = await requestAi(
-            "prd",
-            buildPrdPrompt(current0),
-            current0.model,
-          );
-          brief =
-            reply.source === "ai" && reply.text.trim()
-              ? reply.text.trim()
-              : fallbackPrd(current0);
+          const result = await requestValidatedPrd(current0);
+          brief = result.markdown;
+          briefSource = result.source;
+          if (result.source === 'local') {
+            setError(
+              "Muse couldn't finish your product brief, so I saved a local draft from your setup answers. You can keep editing it. Choose ⋯ → Regenerate in Documents to try again.",
+            );
+          }
         } catch {
           brief = fallbackPrd(current0);
+          briefSource = 'local';
           setError(
-            "The model did not answer, so this brief was drafted from your setup answers.",
+            "Muse couldn't finish your product brief, so I saved a local draft from your setup answers. You can keep editing it. Choose ⋯ → Regenerate in Documents to try again.",
           );
         }
         useVibe.getState().setPrd(projectId, brief);
       }
-      saveDocMarkdown("doc-prd", brief);
+      saveDocMarkdown(
+        "doc-prd",
+        brief,
+        briefSource ?? useVibe.getState().docsByProject[projectId]?.find((entry) => entry.id === "doc-prd")?.source ?? 'local',
+      );
       const rest = (
         useVibe.getState().docsByProject[projectId] ?? []
       ).filter((doc) => doc.kind !== "prd" && doc.kind !== "note");
       await Promise.all(
         rest.map(async (doc) => {
+          const kind = doc.kind as DocKind;
+          let reply: AiReply;
           try {
-            const reply = await requestAi(
+            reply = await requestAi(
               "doc",
-              buildDocPrompt(doc.kind as DocKind, current0, brief),
+              buildDocPrompt(kind, current0, brief),
               current0.model,
             );
-            const markdown = parseDocMarkdown(reply.text);
+          } catch {
             saveDocMarkdown(
               doc.id,
-              markdown.trim() ? markdown : localDraft(doc),
+              buildDocFallback(kind, current0, brief),
+              "local",
             );
-          } catch {
-            saveDocMarkdown(doc.id, localDraft(doc));
+            return;
           }
+          const first = parseDocMarkdown(reply.text);
+          if (reply.source === "ai" && inspectDocMarkdown(kind, first).ok) {
+            saveDocMarkdown(doc.id, first, "ai");
+            return;
+          }
+          if (reply.source === "ai") {
+            try {
+              const retry = await requestAi(
+                "doc",
+                buildDocRepairPrompt(
+                  kind,
+                  current0,
+                  brief,
+                  first,
+                  inspectDocMarkdown(kind, first).missing,
+                ),
+                current0.model,
+              );
+              const fixed = parseDocMarkdown(retry.text);
+              if (
+                retry.source === "ai" &&
+                inspectDocMarkdown(kind, fixed).ok
+              ) {
+                saveDocMarkdown(doc.id, fixed, "ai");
+                return;
+              }
+            } catch {
+              // Fall through to the local outline below.
+            }
+          }
+          saveDocMarkdown(
+            doc.id,
+            buildDocFallback(kind, current0, brief),
+            "local",
+          );
         }),
       );
       setPrepDoneIds(["documents"]);
@@ -950,28 +1322,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     }
   }, [projectId, saveDocMarkdown]);
 
-  // Pages drawn before the HTML guards can hold blank or framework output.
-  // Drop them once per project so the sidebar offers Generate instead of
-  // leaving a white frame on the canvas.
-  const sweptPagesRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!hydrated || !project || sweptPagesRef.current === projectId) return;
-    const state = useVibe.getState();
-    const files = state.filesByProject[projectId];
-    if (!files?.length) return;
-    sweptPagesRef.current = projectId;
-    const invalid = files.filter(
-      (file) =>
-        file.path.startsWith("page-") &&
-        (!hasVisibleContent(file.content) ||
-          looksLikeFrameworkCode(file.content)),
-    );
-    if (!invalid.length) return;
-    state.setFiles(
-      projectId,
-      files.filter((file) => !invalid.includes(file)),
-    );
-  }, [hydrated, project, projectId]);
+  // Saved page files are never deleted automatically: even output that
+  // fails the HTML quality guards stays in the store so no user data is
+  // lost. Regeneration replaces a frame explicitly via its Generate /
+  // Regenerate button.
 
   // Fresh projects prepare once behind the blur overlay. Anything already
   // seeded keeps the old lazy path: the effects below fill the gaps.
@@ -1026,7 +1380,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     (url: string) => {
       if (!project || url === project.logoUrl) return;
       stashWorkspaceLogo(project.logoUrl ?? null);
-      useVibe.getState().updateProject(projectId, { logoUrl: url });
+      useVibe.getState().updateProject(projectId, { logoUrl: url, logoOrigin: undefined });
     },
     [projectId, project, stashWorkspaceLogo],
   );
@@ -1042,7 +1396,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           stashWorkspaceLogo(project.logoUrl ?? null);
           useVibe
             .getState()
-            .updateProject(projectId, { logoUrl: svgToDataUrl(clean) });
+            .updateProject(projectId, { logoUrl: svgToDataUrl(clean), logoOrigin: "upload" });
           return;
         }
         const dataUrl = await fileToLogoDataUrl(file);
@@ -1056,7 +1410,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           }
         }
         stashWorkspaceLogo(project.logoUrl ?? null);
-        useVibe.getState().updateProject(projectId, { logoUrl: finalUrl });
+        useVibe.getState().updateProject(projectId, { logoUrl: finalUrl, logoOrigin: "upload" });
       } catch {
         // Unreadable files change nothing.
       }
@@ -1249,8 +1603,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     );
   }
 
-  const running = phase !== null;
-
   return (
     <div className="relative flex h-dvh flex-col bg-[#0b0c10] text-[#f5f6f8]">
       <header className="relative flex h-14 shrink-0 items-center gap-3 border-b border-white/10 px-4">
@@ -1287,7 +1639,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               alt=""
               width={36}
               height={36}
-              className="h-9 w-9 rounded-full bg-white/[0.04] object-contain ring-1 ring-transparent transition group-hover:ring-white/30"
+              className="h-9 w-9 rounded-full bg-white p-1 object-contain ring-1 ring-transparent transition group-hover:ring-white/30"
             />
           ) : (
             <span
@@ -1400,16 +1752,18 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       {error && (
         <div
           role="alert"
-          className="mx-4 mt-3 flex shrink-0 flex-wrap items-center justify-between gap-3 rounded-xl border border-[#f0a6a6]/30 bg-[#f0a6a6]/10 px-4 py-3 text-[12px] text-[#f0a6a6]"
+          className="mx-3 mt-2 flex shrink-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-[#f0a6a6]/30 bg-[#f0a6a6]/10 px-3 py-2.5 text-[12px] leading-relaxed text-[#f0a6a6] sm:mx-4 sm:mt-3 sm:gap-3 sm:px-4 sm:py-3"
         >
-          <span>{error}</span>
+          <span className="min-w-0 flex-1">{error}</span>
           <button
             type="button"
-            onClick={() => void runPlan(true)}
-            disabled={running}
-            className="rounded-full border border-[#f0a6a6]/40 px-3 py-1 font-medium hover:bg-[#f0a6a6]/10 disabled:opacity-50"
+            onClick={() => {
+              setSelectedDocKey("doc-prd");
+              changeView({ kind: "documents" });
+            }}
+            className="min-h-10 shrink-0 rounded-full border border-[#f0a6a6]/40 px-3 font-medium hover:bg-[#f0a6a6]/10"
           >
-            Try again
+            Open product brief
           </button>
         </div>
       )}
@@ -1428,8 +1782,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               modelLabel={
                 project.model ? formatModelLabel(project.model) : "Muse"
               }
+              docError={activeDoc ? (docErrors[activeDoc.id] ?? "") : ""}
               onMarkdown={(markdown) =>
-                activeDoc && saveDocMarkdown(activeDoc.id, markdown)
+                activeDoc && handleManualMarkdown(activeDoc.id, markdown)
               }
               onGenerate={() => activeDoc && void generateDoc(activeDoc.id)}
             />
@@ -1440,7 +1795,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden px-4 pb-4 pt-4">
                 {tasksLocal && (
                   <p className="mb-3 shrink-0 text-[11px] text-[#9aa0ae]">
-                    Tasks were drafted locally, without the model.
+                    Muse could not finish the task list, so I saved starter tasks from your brief. You can edit them here.
                   </p>
                 )}
 
@@ -1450,7 +1805,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                       key={column.status}
                       status={column.status}
                       tasks={tasks.filter((task) => task.status === column.status)}
-                      loading={phase === "tasks" && tasks.length === 0}
+                    loading={prepActive === "tasks"}
                       selectedId={selectedTaskId}
                       onOpen={(task) => setSelectedTaskId(task.id)}
                       onMoveById={moveTaskById}
@@ -1481,6 +1836,11 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                         label: `Task: ${selectedTask.title || "Untitled task"} (${selectedTask.status})`,
                         text: (selectedTask.notes ?? "").slice(0, 200),
                         comment: "",
+                        target: {
+                          kind: "task",
+                          taskTitle: selectedTask.title || "Untitled task",
+                          taskStatus: selectedTask.status,
+                        },
                       })
                     }
                   />
@@ -1490,10 +1850,11 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           )}
 
           {view.kind === "design" && (
-            <div className="flex min-h-0 flex-1">
+            <div className="flex min-h-0 flex-1 flex-col md:flex-row">
               <DesignSidebar
-                dsFrames={designFrames.filter((frame) =>
-                  frame.id.startsWith("ds-"),
+                dsFrames={designFrames.filter(
+                  (frame) =>
+                    frame.id.startsWith("ds-") || frame.id === SHOWCASE_PATH,
                 )}
                 pages={pagePlan ?? []}
                 doneSlugs={doneSlugs}
@@ -1501,14 +1862,30 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 focusedId={focusedFrame}
                 onFocus={focusFrame}
                 onGenerate={(slug) => void generatePage(slug)}
+                onDownloadPage={downloadPage}
                 onGenerateAll={() => void generateAllPages()}
                 onSuggest={() => void suggestPages()}
                 suggesting={suggesting}
                 pendingCount={pendingPageCount}
                 planDone={planDone}
                 planTotal={pagePlan?.length ?? 0}
+                pageErrors={pageErrors}
+                pageSources={Object.fromEntries(
+                  files
+                    .filter((file) => file.path.startsWith("page-"))
+                    .map((file) => {
+                      const slug = file.path
+                        .replace(/^page-/, "")
+                        .replace(/\.html$/, "");
+                      return [slug, file.source] as const;
+                    }),
+                )}
+                showcaseError={showcaseError}
+                showcaseBusy={showcaseBusy}
+                onRetryShowcase={() => void generateShowcase()}
+                allProgress={allProgress}
               />
-              <div className="relative min-h-0 min-w-0 flex-1">
+              <div className="relative min-h-[40vh] min-w-0 flex-1 md:min-h-0">
                 <div className="h-full min-h-0">
                   <DesignCanvas
                     key={prototypeScreen?.id ?? "canvas"}
@@ -1519,6 +1896,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                         ? { id: focusedFrame, seq: focusSeq }
                         : null
                     }
+                    onNavigateFrame={focusFrame}
                     onShapes={(shapesJson) =>
                       prototypeScreen &&
                       handleShapes(prototypeScreen.id, shapesJson)
@@ -1551,9 +1929,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       <WorkspaceChat
         key={projectId}
         project={project}
-        brief={prd}
-        docs={docs}
-        tasks={tasks}
         open={chatOpen}
         onOpenChange={changeChatOpen}
         draft={chatDraft}
@@ -1575,18 +1950,24 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           className="fixed inset-0 z-50 grid place-items-center bg-[#0b0c10]/70 px-5 backdrop-blur-md"
         >
           <div className="w-[min(360px,calc(100vw-3rem))] rounded-2xl border border-white/10 bg-[#17181d] p-5 shadow-2xl">
+            <div aria-hidden="true" className="mb-3 flex justify-center">
+              <LoadingSticker
+                size={104}
+                label="A folder opening while your project is prepared"
+              />
+            </div>
             <p className="text-[15px] font-semibold text-[#f5f6f8]">
-              Preparing your project
+              Setting up your workspace
             </p>
             <p className="mt-1 text-[12px] leading-5 text-[#9aa0ae]">
-              Generating the plan documents, tasks, and design frames.
+              Setting up plan documents, your task list, and page suggestions. Each step updates as it finishes.
             </p>
             <ul className="mt-4 space-y-2.5">
               {(
                 [
                   { id: "documents", label: "Plan documents" },
-                  { id: "tasks", label: "Tasks" },
-                  { id: "design", label: "Design canvas" },
+                  { id: "tasks", label: "Task list" },
+                  { id: "design", label: "Page suggestions" },
                 ] as const
               ).map((step) => {
                 const done = prepDoneIds.includes(step.id);
@@ -1626,7 +2007,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                     </span>
                     {active && (
                       <span className="ml-auto text-[11px] text-[#9aa0ae]">
-                        Generating…
+                        {step.id === "design" ? "Suggesting…" : "Preparing…"}
                       </span>
                     )}
                   </li>
@@ -1993,6 +2374,8 @@ function TaskColumn({
             role="button"
             tabIndex={0}
             data-pick-card
+            data-task-title={task.title}
+            data-task-status={task.status}
             aria-label={`Open details for ${task.title}`}
             className={`group cursor-grab active:cursor-grabbing focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-white/50 ${draggingId === task.id ? "opacity-50" : ""}`}
           >
@@ -2018,4 +2401,3 @@ function TaskColumn({
     </Card>
   );
 }
-

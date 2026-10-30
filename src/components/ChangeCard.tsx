@@ -88,9 +88,12 @@ export default function ChangeCard({
           disabled={!comment.trim()}
           className="h-7 rounded-full bg-white px-3 text-[12px] font-medium text-[#0b0c10] hover:bg-white/90 disabled:opacity-40"
         >
-          Add
+          Add to chat
         </button>
       </div>
+      <p className="mt-1.5 px-1 text-[11px] leading-4 text-[#5b6472]">
+        Staged in chat. Review and send to apply, nothing changes yet.
+      </p>
     </div>
   );
 }

@@ -51,9 +51,9 @@ export default function LogoModal({
         onClick={(event) => event.stopPropagation()}>
         <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
           <div className="min-w-0 flex-1">
-            <Heading level={3}>Choose a logo</Heading>
+            <Heading level={3}>Choose a symbol mark</Heading>
             <Text type="supporting" color="secondary">
-              Current, fresh variants, and every previous mark.
+              Symbol only, never a wordmark. Picking adopts it; nothing changes until you pick.
             </Text>
           </div>
           {shownVariants.length > 0 && onPickVariant && (
@@ -83,10 +83,10 @@ export default function LogoModal({
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {tab === "variants" && shownVariants.length > 0 && onPickVariant ? (
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
               {shownVariants.map((variant, index) => {
-                const url = svgToDataUrl(variant.svg);
-                const active = current === url;
+                const url = svgToDataUrl(variant.svg, "#111827");
+                const active = current === svgToDataUrl(variant.svg);
                 return (
                   <button
                     key={index}
@@ -96,18 +96,32 @@ export default function LogoModal({
                       onPickVariant(variant.svg);
                       onClose();
                     }}
-                    className={`group flex flex-col items-center gap-1.5 rounded-xl border p-3 transition-colors ${
+                    className={`group flex flex-col items-stretch gap-2 rounded-xl border p-3 text-left transition-colors ${
                       active
                         ? "border-[#8ab4ff]/60 bg-[#8ab4ff]/[0.08]"
                         : "border-white/10 bg-white/[0.02] hover:border-white/30"
                     }`}>
-                    <img
-                      src={url}
-                      alt={`Logo variant ${index + 1}`}
-                      className="size-16 text-white [color-scheme:dark]"
-                    />
-                    <span className="line-clamp-2 text-center text-[11px] leading-4 text-[#9aa0ae]">
-                      {active ? "In use" : (variant.rationale || `Variant ${index + 1}`)}
+                    <span className="flex items-center justify-center gap-4 rounded-lg bg-white p-3">
+                      <img
+                        src={url}
+                        alt={`Logo concept ${index + 1} at large size`}
+                        width={64}
+                        height={64}
+                        className="size-16 object-contain"
+                      />
+                      <span className="flex flex-col items-center gap-1">
+                        <img
+                          src={url}
+                          alt={`Logo concept ${index + 1} at 16 pixels`}
+                          width={16}
+                          height={16}
+                          className="size-4 object-contain"
+                        />
+                        <span className="text-[10px] text-[#4b5563]">16px</span>
+                      </span>
+                    </span>
+                    <span className="text-[11px] leading-4 text-[#9aa0ae]">
+                      {active ? "In use" : (variant.rationale || `Concept ${index + 1}`)}
                     </span>
                   </button>
                 );
@@ -200,7 +214,7 @@ function LogoTile({
         alt=""
         width={64}
         height={64}
-        className="size-16 rounded-lg bg-white/[0.04] object-contain [color-scheme:dark]"
+        className="size-16 rounded-lg bg-white object-contain p-1"
       />
       <span className="text-[11px] text-[#9aa0ae]">{active ? "In use" : label}</span>
     </button>

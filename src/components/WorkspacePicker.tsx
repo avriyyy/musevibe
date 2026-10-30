@@ -30,6 +30,7 @@ interface Picked {
   text: string;
   box: PickBox;
   session: number;
+  target?: ChatQuote["target"];
 }
 
 export default function WorkspacePicker({
@@ -91,7 +92,18 @@ export default function WorkspacePicker({
       if (!el) return;
       const { label, text } = describeElement(el, false);
       pickedElRef.current = el;
-      setPicked({ label, text, box: boxOf(el), session: pickSession });
+      let target: ChatQuote["target"];
+      if (scopeRef.current === "tasks") {
+        const title = (el.getAttribute("data-task-title") || "").trim();
+        const status = (el.getAttribute("data-task-status") || "").trim();
+        if (title) target = { kind: "task", taskTitle: title, ...(status ? { taskStatus: status } : {}) };
+      } else {
+        const scopeEl = el.closest("[data-pick-scope]");
+        const docKind = (scopeEl?.getAttribute("data-doc-kind") || "").trim();
+        const docTitle = (scopeEl?.getAttribute("data-doc-title") || "").trim();
+        if (docKind) target = { kind: "doc", docKind, ...(docTitle ? { docTitle } : {}) };
+      }
+      setPicked({ label, text, box: boxOf(el), session: pickSession, ...(target ? { target } : {}) });
       setHover(null);
     };
     root.addEventListener("mousemove", onMove, true);
@@ -153,7 +165,7 @@ export default function WorkspacePicker({
 
   const margin = 12;
   const width = Math.min(320, Math.max(220, window.innerWidth - margin * 2));
-  const height = 172;
+  const height = 198;
   const gap = 10;
   const left = activePick
     ? Math.min(
@@ -172,8 +184,24 @@ export default function WorkspacePicker({
       : Math.max(margin, Math.min(activePick.box.y - height - gap, maxTop))
     : 0;
 
+  const hint = scope === "tasks" ? "Picking is on: click a task card" : "Picking is on: click part of the document";
   return (
     <>
+      <div className="pointer-events-none fixed left-3 top-3 z-40 max-w-[calc(100vw-24px)]">
+        <div
+          role="status"
+          aria-label={`${hint}, then describe the change. Press Escape to stop.`}
+          className="pointer-events-auto flex max-w-[342px] items-center gap-2 rounded-2xl border border-[#8ab4ff]/40 bg-[#17181d]/95 py-1.5 pl-3 pr-1.5 shadow-xl"
+        >
+          <span className="flex min-w-0 items-center gap-1.5 text-[12px] font-medium text-[#c9cdd6]">
+            <span aria-hidden className="size-2 shrink-0 rounded-full bg-[#8ab4ff]" />
+            <span className="truncate">{hint}</span>
+          </span>
+          <span aria-hidden className="hidden shrink-0 rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-[#9aa0ae] min-[390px]:inline">
+            Esc
+          </span>
+        </div>
+      </div>
       {hoverBox && (
         <div
           aria-hidden
@@ -211,6 +239,7 @@ export default function WorkspacePicker({
                 label: activePick.label,
                 text: activePick.text,
                 comment: note,
+                ...(activePick.target ? { target: activePick.target } : {}),
               });
               pickedElRef.current = null;
               setPicked(null);

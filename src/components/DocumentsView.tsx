@@ -8,7 +8,7 @@
  * Only the center column scrolls; the page itself stays fixed.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import DocView from "@/components/DocView";
 import { extractHeadings } from "@/components/Markdown";
 import { docFullName, docLabel } from "@/lib/docs";
@@ -23,6 +23,8 @@ interface DocumentsViewProps {
   generating: boolean;
   modelLabel: string;
   bottomPad?: number;
+  /** Per-document generation notice keyed by the active doc id. */
+  docError?: string;
   onMarkdown: (markdown: string) => void;
   onGenerate: () => void;
 }
@@ -36,6 +38,7 @@ export default function DocumentsView({
   generating,
   modelLabel,
   bottomPad = 0,
+  docError = "",
   onMarkdown,
   onGenerate,
 }: DocumentsViewProps) {
@@ -191,6 +194,7 @@ export default function DocumentsView({
                 canGenerate={canGenerate}
                 generating={generating}
                 modelLabel={modelLabel}
+                error={docError}
                 onMarkdown={onMarkdown}
                 onGenerate={onGenerate}
               />

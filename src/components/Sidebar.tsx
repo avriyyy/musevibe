@@ -9,7 +9,10 @@
 
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useVibe } from "@/lib/store";
+import { supabaseBrowser } from "@/lib/supabase/client";
+import { useAuthSession } from "@/lib/supabase/use-auth-session";
 import { initials } from "@/lib/logo";
 import { platformLabel } from "@/lib/project-options";
 import { frameworkLabel } from "@/lib/stack-options";
@@ -54,6 +57,8 @@ export default function Sidebar({
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
   const profileRef = useRef<HTMLDivElement>(null);
+  const auth = useAuthSession();
+  const [authError, setAuthError] = useState("");
 
   useEffect(() => {
     if (!profileOpen) return;
@@ -69,9 +74,20 @@ export default function Sidebar({
     document.addEventListener("keydown", onKeyDown);
     return () => {
       document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
+    document.removeEventListener("keydown", onKeyDown);
+  };
   }, [profileOpen]);
+
+  const signOut = async () => {
+    setAuthError("");
+    try {
+      const { error } = await supabaseBrowser().auth.signOut();
+      if (error) throw error;
+      setProfileOpen(false);
+    } catch {
+      setAuthError("Could not sign out. Please try again.");
+    }
+  };
 
   const visible = [...projects]
     .sort((a, b) => (b.lastOpenedAt || "").localeCompare(a.lastOpenedAt || ""))
@@ -308,10 +324,12 @@ export default function Sidebar({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-semibold text-[#f5f6f8]">
-                  Local workspace
+                  {auth.ready ? (auth.user?.email ?? "Local workspace") : "Checking account…"}
                 </span>
                 <span className="mt-0.5 block truncate text-[11px] text-[#9aa0ae]">
-                  {projects.length} {projects.length === 1 ? "project" : "projects"}
+                  {auth.user
+                    ? "Signed in · projects stay local"
+                    : `${projects.length} ${projects.length === 1 ? "project" : "projects"} · saved here`}
                 </span>
               </span>
               <svg
@@ -337,12 +355,40 @@ export default function Sidebar({
               >
                 <div className="px-3 py-2.5">
                   <p className="text-[13px] font-semibold text-[#f5f6f8]">
-                    Local workspace
+                    {auth.user?.email ?? "Local workspace"}
                   </p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-[#9aa0ae]">
-                    Projects live in this tab only and reset when you reload.
+                    Projects are saved in this browser. Sign-in is optional; cloud sync is not enabled yet.
                   </p>
                 </div>
+                {auth.configured ? (
+                  <Link
+                    href="/account"
+                    onClick={() => setProfileOpen(false)}
+                    className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white"
+                  >
+                    {auth.user ? "Account settings" : "Sign in or create account"}
+                    <span aria-hidden className="text-[#5b6472]">→</span>
+                  </Link>
+                ) : (
+                  <p className="px-3 py-2 text-[12px] text-[#7f8795]">
+                    Account sign-in is not configured in this build.
+                  </p>
+                )}
+                {auth.user && (
+                  <button
+                    type="button"
+                    onClick={() => void signOut()}
+                    className="w-full rounded-xl px-3 py-2 text-left text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white"
+                  >
+                    Sign out
+                  </button>
+                )}
+                {authError && (
+                  <p role="alert" className="px-3 py-2 text-[12px] text-[#ff9c9c]">
+                    {authError}
+                  </p>
+                )}
                 <div aria-hidden className="my-1 h-px bg-white/10" />
                 <a
                   href="https://github.com/avriyyy/musevibe"

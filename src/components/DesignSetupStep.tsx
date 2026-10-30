@@ -123,6 +123,7 @@ interface DesignSetupStepProps {
   logoOrigin: LogoOrigin;
   logoPrompt: string;
   onLogoPrompt: (value: string) => void;
+  logoSuggestion?: string;
   logoStatus: LogoStatus;
   logoError: string;
   logoBgNote: string;
@@ -148,6 +149,7 @@ export default function DesignSetupStep({
   logoOrigin,
   logoPrompt,
   onLogoPrompt,
+  logoSuggestion,
   logoStatus,
   logoError,
   logoBgNote,
@@ -348,10 +350,12 @@ export default function DesignSetupStep({
       </VStack>
 
       <VStack gap={2}>
-        <Heading level={3}>Give it a mark</Heading>
+        <Heading level={3}>Logo mark (optional)</Heading>
         <Text type="supporting" color="secondary">
-          Describe the logo, pick vector or raster, and generate it — or
-          upload your own. Skip to keep your initials as the mark.
+          This step designs a small symbol mark for the project — not a
+          wordmark, mockup, or full logo lockup. The project name stays
+          separate as text. Generate a few concepts and pick one, upload your
+          own, or skip and keep your initials.
         </Text>
         <HStack gap={4} vAlign="center">
           <button
@@ -364,10 +368,10 @@ export default function DesignSetupStep({
             {logoUrl ? (
               <img
                 src={logoUrl}
-                alt={`Logo for ${projectName.trim() || "the new project"}`}
+                alt={`Logo mark for ${projectName.trim() || "the new project"}`}
                 width={72}
                 height={72}
-                className="h-[72px] w-[72px] rounded-2xl bg-white/[0.04] object-contain ring-1 ring-transparent transition group-hover:ring-white/30"
+                className="h-[72px] w-[72px] rounded-2xl bg-white object-contain p-1 ring-1 ring-transparent transition group-hover:ring-white/30"
               />
             ) : (
               <span
@@ -386,26 +390,28 @@ export default function DesignSetupStep({
             <Text type="label">
               {logoUrl
                 ? logoOrigin === "ai"
-                  ? "Drawn from your description"
-                  : "Uploaded by you"
+                  ? "Symbol mark from your direction"
+                  : logoOrigin === "upload"
+                    ? "Uploaded by you"
+                    : "Saved mark, source unknown"
                 : "Initials for now"}
             </Text>
             <Text type="supporting" color="secondary">
               {logoBgNote ||
                 (logoUrl
-                  ? "This is the mark stored on the project."
-                  : "Generate or upload to replace it. Skipping is fine.")}
+                  ? "This is the mark stored on the project. Generating more concepts never replaces it until you pick one."
+                  : "Generate concepts and pick one to adopt it. Skipping is fine.")}
             </Text>
           </VStack>
         </HStack>
 
         <TextArea
-          label="Describe the logo"
+          label="Describe the mark"
           rows={3}
           value={logoPrompt}
           onChange={onLogoPrompt}
-          placeholder="A calm circle with a small sprout, deep green on transparent"
-          description="One or two sentences: motif, colors, mood. Flat and minimal reads best at small sizes."
+          placeholder={logoSuggestion || "A calm circle with a small sprout, deep green on transparent"}
+          description="Optional. One or two sentences: motif, colors, mood. Your words win over the suggested direction. Leave it empty to use the suggestion. Flat and minimal reads best at small sizes."
         />
 
         <div
@@ -414,8 +420,8 @@ export default function DesignSetupStep({
           className="flex gap-1 self-start rounded-full bg-white/5 p-1">
           {(
             [
-              { value: "svg", label: "SVG · vector" },
-              { value: "png", label: "PNG · raster" },
+              { value: "svg", label: "SVG · vector · Recommended" },
+              { value: "png", label: "PNG · image concept" },
             ] as Array<{ value: LogoFormat; label: string }>
           ).map((option) => (
             <button
@@ -434,17 +440,17 @@ export default function DesignSetupStep({
         </div>
         <Text type="supporting" color="secondary">
           {logoFormat === "svg"
-            ? "Vector from the text model: transparent by construction, sharp at any size."
-            : "Raster from the image model. Use remove-background when the mark arrives on a solid field."}
+            ? "Vector from the text model (recommended): transparent by construction, sharp at any size, best for a recognizable icon. Produces 3 concepts to pick from."
+            : "Raster image concept from the image model: a single illustration to judge the idea, not a scalable vector. Use remove-background when it arrives on a solid field."}
         </Text>
 
         {logoFormat === "svg" ? (
           <HStack gap={3} vAlign="center">
             <Button
-              label={svgStatus === "loading" ? "Drawing…" : "Generate 3 variants"}
+              label={svgStatus === "loading" ? "Drawing…" : "Generate 3 concepts"}
               variant="primary"
               className="min-h-11 md:min-h-0"
-              isDisabled={!logoPrompt.trim() || svgStatus === "loading"}
+              isDisabled={svgStatus === "loading"}
               onClick={onGenerateSvg}
             />
             <Button
@@ -457,10 +463,10 @@ export default function DesignSetupStep({
         ) : (
           <HStack gap={3} vAlign="center">
             <Button
-              label={logoStatus === "loading" ? "Drawing…" : "Generate logo"}
+              label={logoStatus === "loading" ? "Drawing…" : "Generate concept"}
               variant="primary"
               className="min-h-11 md:min-h-0"
-              isDisabled={!logoPrompt.trim() || logoStatus === "loading"}
+              isDisabled={logoStatus === "loading"}
               onClick={onGenerateLogo}
             />
             <Button
@@ -484,26 +490,61 @@ export default function DesignSetupStep({
         />
 
         {svgVariants.length > 0 && (
-          <div className="grid grid-cols-3 gap-2">
-            {svgVariants.map((variant, index) => (
-              <button
-                key={index}
-                type="button"
-                onClick={() => onPickSvg(variant.svg)}
-                className="group flex flex-col items-center gap-1.5 rounded-xl border border-white/10 bg-white/[0.02] p-3 transition-colors hover:border-white/30 hover:bg-white/[0.04]">
-                <img
-                  src={svgToDataUrl(variant.svg)}
-                  alt={`Logo variant ${index + 1}${variant.rationale ? `: ${variant.rationale}` : ""}`}
-                  className="size-16 text-white [color-scheme:dark]"
-                />
-                {!!variant.rationale && (
-                  <span className="line-clamp-2 text-center text-[11px] leading-4 text-[#9aa0ae]">
-                    {variant.rationale}
-                  </span>
-                )}
-              </button>
-            ))}
-          </div>
+          <VStack gap={2}>
+            <Text type="label">
+              Concepts ({svgVariants.length}). Pick one to adopt it — nothing changes until you pick.
+            </Text>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+              {svgVariants.map((variant, index) => {
+                const previewUrl = svgToDataUrl(variant.svg, "#111827");
+                const darkPreviewUrl = svgToDataUrl(variant.svg, "#f5f6f8");
+                return (
+                  <button
+                    key={index}
+                    type="button"
+                    onClick={() => onPickSvg(variant.svg)}
+                    aria-label={`Adopt concept ${index + 1}${variant.rationale ? `: ${variant.rationale}` : ""}`}
+                    className="group flex flex-col items-stretch gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-left transition-colors hover:border-white/30 hover:bg-white/[0.04]">
+                    <span className="flex items-center justify-center gap-4 rounded-lg bg-white p-3">
+                      <img
+                        src={previewUrl}
+                        alt={`Logo concept ${index + 1} at large size`}
+                        width={64}
+                        height={64}
+                        className="size-16 object-contain"
+                      />
+                      <span className="flex flex-col items-center gap-1">
+                        <img
+                          src={previewUrl}
+                          alt={`Logo concept ${index + 1} at 16 pixels`}
+                          width={16}
+                          height={16}
+                          className="size-4 object-contain"
+                        />
+                        <span className="text-[10px] text-[#4b5563]">16px</span>
+                      </span>
+                    </span>
+                    <span className="flex items-center justify-center gap-3 rounded-lg bg-[#0b0c10] p-2 ring-1 ring-white/10">
+                      <img
+                        src={darkPreviewUrl}
+                        alt=""
+                        aria-hidden
+                        width={24}
+                        height={24}
+                        className="size-6 object-contain"
+                      />
+                      <span className="text-[11px] text-[#9aa0ae]">one-colour check</span>
+                    </span>
+                    {!!variant.rationale && (
+                      <span className="text-[11px] leading-4 text-[#9aa0ae]">
+                        {variant.rationale}
+                      </span>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </VStack>
         )}
 
         {logoFormat === "png" && (

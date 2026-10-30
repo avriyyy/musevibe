@@ -20,7 +20,12 @@ interface VibeState {
   removeTask: (projectId: string, taskId: string) => void;
   setScreens: (projectId: string, screens: Screen[]) => void;
   setFiles: (projectId: string, files: CodeFile[]) => void;
-  updateFile: (projectId: string, fileId: string, content: string) => void;
+  updateFile: (
+    projectId: string,
+    fileId: string,
+    content: string,
+    source?: CodeFile["source"],
+  ) => void;
   seedDocs: (projectId: string, docs: ProjectDoc[]) => void;
   addDoc: (projectId: string, doc: ProjectDoc) => void;
   updateDoc: (
@@ -140,12 +145,14 @@ const vibeState: StateCreator<VibeState> = (set) => ({
     set((s) => ({ screensByProject: { ...s.screensByProject, [projectId]: screens } })),
   setFiles: (projectId, files) =>
     set((s) => ({ filesByProject: { ...s.filesByProject, [projectId]: files } })),
-  updateFile: (projectId, fileId, content) =>
+  updateFile: (projectId, fileId, content, source) =>
     set((s) => ({
       filesByProject: {
         ...s.filesByProject,
         [projectId]: (s.filesByProject[projectId] || []).map((f) =>
-          f.id === fileId ? { ...f, content } : f
+          f.id === fileId
+            ? { ...f, content, ...(source ? { source } : {}) }
+            : f,
         ),
       },
     })),

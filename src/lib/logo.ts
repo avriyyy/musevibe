@@ -1,8 +1,10 @@
 /**
- * Project logo helpers. The wizard offers three paths: describe a logo and let
- * the image model draw it, upload an existing file, or skip and keep an
- * initials badge. Skipping is honest: the home screen renders initials as a
- * placeholder instead of a fabricated mark.
+ * Project logo helpers. The wizard offers three paths: describe a symbol mark
+ * and let the model draw it (vector first), upload an existing file, or skip
+ * and keep an initials badge. Generated output is always a symbol mark, never
+ * a wordmark, mockup, or full logo lockup: the project name stays separate
+ * as text. Skipping is honest: initials render as a placeholder instead of a
+ * fabricated mark.
  */
 
 export type LogoStatus = "idle" | "loading" | "ready" | "error";
@@ -10,6 +12,69 @@ export type LogoOrigin = "ai" | "upload" | null;
 
 const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const LOGO_SIZE = 256;
+
+/** Compact product context forwarded into logo prompts. */
+export interface LogoBriefContext {
+  /** The core workflow the mark should evoke, in the user's words. */
+  coreWorkflow?: string;
+  /** Who the product is for, in the user's words. */
+  audience?: string;
+  /** Visual direction from the questionnaire or design step. */
+  visualDirection?: string;
+  /** Hex or named colors from the selected design-system palette. */
+  palette?: string[];
+}
+
+/** One-line summary of product context for logo prompts, bounded. */
+export function buildLogoContextSummary(context: LogoBriefContext): string {
+  const bits: string[] = [];
+  if (context.audience?.trim()) {
+    bits.push(`Audience: ${context.audience.replace(/\s+/g, " ").trim().slice(0, 160)}`);
+  }
+  if (context.coreWorkflow?.trim()) {
+    bits.push(`Core workflow: ${context.coreWorkflow.replace(/\s+/g, " ").trim().slice(0, 200)}`);
+  }
+  if (context.visualDirection?.trim()) {
+    bits.push(`Visual direction: ${context.visualDirection.replace(/\s+/g, " ").trim().slice(0, 160)}`);
+  }
+  if (context.palette?.length) {
+    bits.push(`Palette: ${context.palette.slice(0, 4).join(", ")}`);
+  }
+  return bits.join(" | ").slice(0, 600);
+}
+
+/**
+ * Sensible starting direction so novices can generate without inventing a
+ * prompt. The caller may prefill the textarea with this; user-written text
+ * always takes precedence at generation time.
+ */
+export function suggestLogoBrief(
+  projectName: string,
+  idea: string,
+  coreWorkflow?: string,
+): string {
+  const workflow = coreWorkflow?.replace(/\s+/g, " ").trim().slice(0, 120);
+  const fallbackIdea = idea.replace(/\s+/g, " ").trim().slice(0, 120);
+  const subject = workflow || fallbackIdea || projectName.trim() || "the app";
+  return `A minimal geometric symbol for ${subject}: one solid abstract motif, high contrast, centered with breathing room`;
+}
+
+/** Pull up to 4 paint colors out of a tokens.css block for logo prompts. */
+export function paletteFromTokensCss(tokensCss: string): string[] {
+  const found: string[] = [];
+  const seen = new Set<string>();
+  const pattern = /--(?:accent|bg|surface|fg|primary|background)\s*:\s*([^;\n]+)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(tokensCss)) !== null && found.length < 4) {
+    const value = match[1].trim();
+    if (!/^(#[0-9a-f]{3,8}|rgba?\(|hsla?\()|(white|black)/i.test(value)) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    found.push(value);
+  }
+  return found;
+}
 
 /** First letters of the first two words, uppercased. "Habit Tracker" -> "HT". */
 export function initials(name: string): string {
@@ -26,28 +91,32 @@ export function initials(name: string): string {
 /**
  * The brief sent to the image model. It names the product so the mark stays
  * specific, then constrains the style against generic AI-logo tropes: no
- * gradients, glow, 3D, or sparkle/star/lightning/robot filler icons.
+ * gradients, glow, 3D, or sparkle/star/lightning/robot filler icons. Output
+ * is a single symbol mark (PNG concept), never a wordmark, mockup, or lockup.
  */
 export function buildLogoPrompt(
   description: string,
   projectName: string,
   idea: string,
+  context?: LogoBriefContext,
 ): string {
   const trimmed = description.replace(/\s+/g, " ").trim().slice(0, 500);
-  const context = idea.replace(/\s+/g, " ").trim().slice(0, 200);
+  const contextText = idea.replace(/\s+/g, " ").trim().slice(0, 200);
+  const summary = context ? buildLogoContextSummary(context) : "";
 
   return [
-    `Design a logo for an app called "${projectName}".`,
-    context ? `The app does this: "${context}".` : "",
-    `The user describes the logo they want as: "${trimmed}".`,
+    `Design a single symbol mark (not a wordmark, lockup, or mockup) for an app called "${projectName}". The project name stays separate as text; never render it in the mark.`,
+    contextText ? `The app does this: "${contextText}".` : "",
+    summary ? `Product context: ${summary}.` : "",
+    `The user describes the mark they want as: "${trimmed}". Honor any explicit colors they named; otherwise default to a restrained high-contrast palette (near-black on transparent, or one accent plus near-black).`,
     "",
     "Style rules (follow all of them):",
-    "- Flat minimal vector mark, one simple motif tied to what the app does.",
-    "- At most two solid colors on a transparent background. No gradients, no glow, no shadows, no 3D, no photorealism.",
-    "- No generic filler icons: no sparkle, star, lightning bolt, robot, cube, diamond, or magic wand.",
-    "- No text or letters in the mark unless the user explicitly asked for it.",
-    "- Geometric and neat: it must stay readable at 64 pixels.",
-    "- Square composition, the mark centered with breathing room.",
+    "- A flat minimal symbol mark: one simple abstract motif tied to the app's core workflow above, not a generic icon.",
+    "- At most two solid colors on a transparent background. No gradients, no glow, no shadows, no 3D, no photorealism, no mockup scene.",
+    "- No invented wordmark, letters, or text in the mark unless the user explicitly asked for letters.",
+    "- No generic filler or industry cliches: no sparkle, star, lightning bolt, robot, cube, diamond, magic wand, checkmark badge, chat bubble, or house icon unless the product literally is that thing.",
+    "- Geometric and neat: a clean transparent symbol, centered with breathing room, legible at 16 pixels and suitable as a standalone app icon.",
+    "- Square composition, the mark occupying roughly 60% of the canvas.",
   ]
     .filter(Boolean)
     .join("\n");
@@ -180,6 +249,8 @@ export const MAX_LOGO_HISTORY = 6;
  * currentColor, no backdrop) plus the antislop bans: flat fills, no
  * gradients, no generic filler icons, no text unless asked.
  *
+ * The user description takes precedence over the product context summary;
+ * the summary only grounds the motif in the app's core workflow and palette.
  * The description is repeated as numbered hard requirements with a
  * self-check, because a bare style brief lets the model drift into
  * generic marks that ignore what the user actually asked for.
@@ -188,35 +259,132 @@ export function buildLogoSvgPrompt(
   description: string,
   projectName: string,
   idea: string,
+  context?: LogoBriefContext,
 ): string {
   const trimmed = description.replace(/\s+/g, " ").trim().slice(0, 500);
-  const context = idea.replace(/\s+/g, " ").trim().slice(0, 200);
+  const contextText = idea.replace(/\s+/g, " ").trim().slice(0, 200);
+  const summary = context ? buildLogoContextSummary(context) : "";
 
   return [
-    `Design 3 logo variants for an app called "${projectName}".`,
-    context ? `The app does this: "${context}".` : "",
+    `Design 3 genuinely different symbol-mark concepts (not wordmarks, lockups, or mockups) for an app called "${projectName}". The project name stays separate as text; never render it in the marks.`,
+    contextText ? `The app does this: "${contextText}".` : "",
+    summary ? `Product context (ground the motifs here; the user description below wins on conflicts): ${summary}.` : "",
     "",
     "Hard requirements from the user (every variant must satisfy all of them):",
-    `R1 motif: "${trimmed}". Build the mark around exactly what this says.`,
-    "R2 palette: use the exact colors the user named, translated to close hex values (deep green ~ #166534, forest ~ #14532d, navy ~ #1e3a8a, sky ~ #0284c7, amber ~ #d97706, terracotta ~ #c2410c, plum ~ #7e22ce, charcoal ~ #1f2937). At most two solid fills: currentColor plus one fixed hex.",
-    "R3 construction: one dominant motif filling ~60% of the 100x100 canvas, centered with breathing room, readable at 16 pixels.",
+    `R1 motif: "${trimmed}". Build the mark around exactly what this says; it takes precedence over the product context.`,
+    "R2 palette: honor the exact colors the user named, translated to close hex values (deep green ~ #166534, forest ~ #14532d, navy ~ #1e3a8a, sky ~ #0284c7, amber ~ #d97706, terracotta ~ #c2410c, plum ~ #7e22ce, charcoal ~ #1f2937). When the user named no colors, default to a restrained high-contrast palette: currentColor plus at most one fixed hex (near-black #1f2937 or the product accent). At most two solid fills total.",
+    "R3 construction: one dominant motif filling ~60% of the 100x100 canvas, centered with breathing room, a clean transparent symbol legible at 16 pixels and suitable as a standalone app icon.",
     "",
     "Return ONLY a JSON object with this shape, no fences, no commentary:",
-    '{"variants":[{"svg":"<svg viewBox=\"0 0 100 100\">...</svg>","rationale":"one sentence"}]}',
+    '{"variants":[{"svg":"<svg viewBox=\\"0 0 100 100\\">...</svg>","rationale":"one sentence"}]}',
     "",
     "Rules for every variant:",
-    "- One <svg> with viewBox=\"0 0 100 100\", no width or height attributes.",
+    "- One <svg> with a square viewBox (exactly \"0 0 100 100\"), no width or height attributes.",
     "- Transparent by construction: never draw a background rect or page fill.",
-    "- Geometric primitives (circle, rect, polygon, path) grouped in <g>; flat fills only.",
-    "- No text or letters unless the user explicitly asked for them.",
-    "- No gradients, glow, shadows, filters, scripts, event handlers, or external references.",
-    "- No sparkle, star, lightning bolt, robot, cube, diamond, or magic wand filler.",
-    "- Valid XML that parses on its own. The three variants must feel distinctly different, not parameter tweaks.",
+    "- Geometric primitives (circle, rect, polygon, path, ellipse) grouped in <g>; flat fills only.",
+    "- No text, letters, wordmark, or mockup unless the user explicitly asked for letters.",
+    "- No gradients, glow, shadows, filters, scripts, event handlers, animations, or external references.",
+    "- No generic filler or industry cliches: no sparkle, star, lightning bolt, robot, cube, diamond, magic wand, checkmark badge, chat bubble, or house icon unless the product literally is that thing.",
+    "- Valid XML that parses on its own. The three variants must be genuinely different directions (different motif/geometry), not parameter tweaks, each with a one-sentence rationale naming which part of R1 it answers.",
     "",
     "Self-check before returning: re-read R1-R3 for each variant and drop any variant that misses one. Each rationale must name which part of the description it answers.",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/** Lightweight quality gate for a sanitized logo mark. */
+export function validateLogoMark(svg: string): { ok: boolean; reason?: string } {
+  const text = svg.trim();
+  if (!text) return { ok: false, reason: "empty" };
+  const open = text.match(/<svg\b[^>]*>/i)?.[0] ?? "";
+  if (!open) return { ok: false, reason: "missing svg tag" };
+  const viewBox = open.match(/viewBox\s*=\s*["']([^"']+)["']/i)?.[1] ?? "";
+  const parts = viewBox.split(/[\s,]+/).map(Number);
+  if (parts.length !== 4 || parts.some((n) => !Number.isFinite(n))) {
+    return { ok: false, reason: "missing square viewBox" };
+  }
+  const [, , w, h] = parts;
+  if (!(w > 0 && h > 0 && Math.abs(w - h) < 0.001)) {
+    return { ok: false, reason: "viewBox is not square" };
+  }
+  const lowered = text.toLowerCase();
+  // Unsafe or non-symbol content: text/wordmarks, rasters, scripts,
+  // filters/gradients, animations, and external references.
+  const banned = [
+    "<text",
+    "<image",
+    "<script",
+    "<foreignobject",
+    "<iframe",
+    "<embed",
+    "<object",
+    "<filter",
+    "<lineargradient",
+    "<radialgradient",
+    "<pattern",
+    "<animate",
+    "<set",
+    "javascript:",
+    "<fe",
+  ];
+  for (const token of banned) {
+    if (lowered.includes(token)) return { ok: false, reason: `banned element ${token}` };
+  }
+  if (/\son[a-z]+\s*=/i.test(text)) return { ok: false, reason: "event handler" };
+  if (/url\s*\(/i.test(text)) return { ok: false, reason: "paint-server reference" };
+  // External hrefs (anything but a same-document #fragment) are unsafe.
+  const hrefs = [...text.matchAll(/(?:href|xlink:href)\s*=\s*("[^"]*"|'[^']*')/gi)];
+  for (const match of hrefs) {
+    const url = match[1].slice(1, -1).trim();
+    if (url && !url.startsWith("#")) return { ok: false, reason: "external reference" };
+  }
+  // Full-canvas background rects defeat transparency: a rect covering the
+  // whole viewBox with a solid fill is a page fill, not a mark.
+  const bgRect =
+    /<rect\b[^>]*>/gi;
+  let rectMatch: RegExpExecArray | null;
+  while ((rectMatch = bgRect.exec(text)) !== null) {
+    const tag = rectMatch[0];
+    const get = (name: string) => tag.match(new RegExp(`${name}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1] ?? "";
+    const x = parseFloat(get("x") || "0");
+    const y = parseFloat(get("y") || "0");
+    const rw = get("width");
+    const rh = get("height");
+    const fill = (get("fill") || "").toLowerCase();
+    const covers =
+      (rw === "100" || rw === "100%" || rw === `${w}`) &&
+      (rh === "100" || rh === "100%" || rh === `${h}`) &&
+      (Number.isNaN(x) || x <= 0) &&
+      (Number.isNaN(y) || y <= 0);
+    if (covers && fill && fill !== "none" && fill !== "transparent") {
+      return { ok: false, reason: "full-canvas background" };
+    }
+  }
+  // A real mark needs at least one vector shape; plain groups or empty svg
+  // are blank marks.
+  const shapes = text.match(/<(circle|rect|polygon|path|ellipse|line|polyline)\b/gi) ?? [];
+  if (!shapes.length) return { ok: false, reason: "no vector shapes" };
+  if (text.length < 80) return { ok: false, reason: "blank mark" };
+  return { ok: true };
+}
+
+/** True when a sanitized SVG passes the lightweight mark quality gate. */
+export function isValidLogoMark(svg: string): boolean {
+  return validateLogoMark(svg).ok;
+}
+
+/** Collapse byte/whitespace-equivalent duplicates, keeping the first copy. */
+export function dedupeLogoSvgVariants(variants: LogoSvgVariant[]): LogoSvgVariant[] {
+  const seen = new Set<string>();
+  const unique: LogoSvgVariant[] = [];
+  for (const variant of variants) {
+    const key = variant.svg.replace(/\s+/g, "").trim();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(variant);
+  }
+  return unique;
 }
 
 /** Pull variant SVGs out of a model response; falls back to raw svg blocks. */
@@ -226,6 +394,17 @@ export function parseLogoSvgVariants(raw: unknown): LogoSvgVariant[] {
   if (!text) return [];
   const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)\s*```/i);
   if (fenced) text = fenced[1].trim();
+  const collect = (svg: string, rationale: string): LogoSvgVariant | null => {
+    const clean = sanitizeLogoSvg(svg);
+    if (!clean) return null;
+    // Quality gate after sanitization: drop unsafe, blank, background-filled,
+    // or non-square marks without rejecting valid simple marks.
+    if (!isValidLogoMark(clean)) return null;
+    return {
+      svg: clean,
+      rationale: rationale.trim().slice(0, 160),
+    };
+  };
   const first = text.indexOf("{");
   const last = text.lastIndexOf("}");
   if (first !== -1 && last > first) {
@@ -234,26 +413,26 @@ export function parseLogoSvgVariants(raw: unknown): LogoSvgVariant[] {
         variants?: Array<{ svg?: unknown; rationale?: unknown }>;
       };
       const variants = (data.variants ?? [])
-        .map((entry) => ({
-          svg: sanitizeLogoSvg(typeof entry.svg === "string" ? entry.svg : ""),
-          rationale: (
-            typeof entry.rationale === "string" ? entry.rationale : ""
-          )
-            .trim()
-            .slice(0, 160),
-        }))
-        .filter((entry) => entry.svg);
-      if (variants.length) return variants.slice(0, 4);
+        .map((entry) =>
+          collect(
+            typeof entry.svg === "string" ? entry.svg : "",
+            typeof entry.rationale === "string" ? entry.rationale : "",
+          ),
+        )
+        .filter((entry): entry is LogoSvgVariant => Boolean(entry));
+      if (variants.length) return dedupeLogoSvgVariants(variants).slice(0, 4);
     } catch {
       // Fall through to raw block extraction below.
     }
   }
-  return text
-    .match(/<svg[\s\S]*?<\/svg>/gi)
-    ?.map((svg) => sanitizeLogoSvg(svg))
-    .filter(Boolean)
-    .slice(0, 4)
-    .map((svg) => ({ svg, rationale: "" })) ?? [];
+  return (
+    dedupeLogoSvgVariants(
+      text
+        .match(/<svg[\s\S]*?<\/svg>/gi)
+        ?.map((svg) => collect(svg, ""))
+        .filter((entry): entry is LogoSvgVariant => Boolean(entry)) ?? [],
+    ).slice(0, 4) ?? []
+  );
 }
 
 /** Strip scripts, handlers, and external references from a logo SVG. */
@@ -276,11 +455,18 @@ export function sanitizeLogoSvg(raw: string): string {
 }
 
 /** Encode a sanitized SVG as a data URL for <img> and storage. */
-export function svgToDataUrl(svg: string): string {
+export function svgToDataUrl(svg: string, explicitColor?: string): string {
   // <img> decodes the data URL as a standalone document: it needs the SVG
   // namespace and intrinsic dimensions, or naturalWidth stays zero and
   // nothing paints.
   let framed = svg;
+  // Previews on dark surfaces turn currentColor marks invisible (black on
+  // near-black). An explicit color pins the preview to a visible tone while
+  // the stored SVG keeps currentColor for theming.
+  if (explicitColor && explicitColor.trim()) {
+    const safe = explicitColor.trim().slice(0, 24);
+    framed = framed.split("currentColor").join(safe);
+  }
   if (!/xmlns\s*=/i.test(framed)) {
     framed = framed.replace(/<svg\b/i, '<svg xmlns="http://www.w3.org/2000/svg"');
   }
