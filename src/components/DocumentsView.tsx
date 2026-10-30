@@ -197,13 +197,6 @@ export default function DocumentsView({
                           {!filled ? " · empty" : ""}
                         </span>
                       </span>
-                      <span
-                        aria-hidden
-                        title={filled ? "Generated" : "Not generated yet"}
-                        className={`size-1.5 shrink-0 rounded-full ${
-                          filled ? "bg-[#7ee2a8]" : "bg-white/20"
-                        }`}
-                      />
                     </button>
                   </li>
                 );

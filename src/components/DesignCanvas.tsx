@@ -1052,7 +1052,7 @@ export default function DesignCanvas({
         {picking && pickBox && (
           <div
             aria-hidden
-            className="pointer-events-none absolute rounded-lg border-2 border-[#8ab4ff] bg-[#8ab4ff]/10"
+            className="pointer-events-none absolute border-2 border-[#8ab4ff] bg-[#8ab4ff]/10"
             style={{
               left: pickBox.x,
               top: pickBox.y,

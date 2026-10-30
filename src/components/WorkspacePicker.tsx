@@ -173,7 +173,7 @@ export default function WorkspacePicker({
       {hoverBox && (
         <div
           aria-hidden
-          className="pointer-events-none fixed z-40 rounded-lg border-2 border-[#8ab4ff] bg-[#8ab4ff]/10"
+          className="pointer-events-none fixed z-40 border-2 border-[#8ab4ff] bg-[#8ab4ff]/10"
           style={{
             left: hoverBox.x,
             top: hoverBox.y,
@@ -186,7 +186,7 @@ export default function WorkspacePicker({
         <>
           <div
             aria-hidden
-            className="pointer-events-none fixed z-40 rounded-lg border-2 border-[#8ab4ff] bg-[#8ab4ff]/10"
+            className="pointer-events-none fixed z-40 border-2 border-[#8ab4ff] bg-[#8ab4ff]/10"
             style={{
               left: activePick.box.x,
               top: activePick.box.y,
