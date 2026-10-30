@@ -17,7 +17,7 @@ import ChangeCard from "./ChangeCard";
 import {
   boxOf,
   describeElement,
-  quoteFor,
+  type ChatQuote,
   type PickBox,
 } from "@/lib/pick";
 import {
@@ -72,7 +72,7 @@ interface DesignCanvasProps {
   focusRequest?: { id: string; seq: number } | null;
   onShapes: (shapesJson: string) => void;
   /** Quoted annotation text goes into the chat input (never auto-sent). */
-  onQuoteToChat: (text: string) => void;
+  onQuoteToChat: (quote: ChatQuote) => void;
   /** Whether the chat's component picker is armed. */
   picking: boolean;
   /** Bumped on every arm so a previous pick never resurfaces. */
@@ -321,9 +321,15 @@ export default function DesignCanvas({
           event.preventDefault();
           event.stopPropagation();
         };
-        // No cursor override inside frames: the page keeps its own cursors
-        // and pick mode already shows through the blue highlight, the
-        // composer state, and the picking pill.
+        // Crosshair inside frames, but only while picking is armed. The
+        // effect rebinds when picking toggles, so the override never
+        // lingers after the mode is off.
+        const cursorStyle = picking ? doc.createElement("style") : null;
+        if (cursorStyle) {
+          cursorStyle.textContent =
+            "*, *::before, *::after { cursor: crosshair !important; }";
+          doc.head.appendChild(cursorStyle);
+        }
         if (picking) {
           doc.addEventListener("mousemove", onMove, true);
           doc.addEventListener("mouseleave", onLeave, true);
@@ -333,6 +339,7 @@ export default function DesignCanvas({
         }
         unbind = () => {
           baseUnbind();
+          cursorStyle?.remove();
           doc.removeEventListener("mousemove", onMove, true);
           doc.removeEventListener("mouseleave", onLeave, true);
           doc.removeEventListener("mousedown", onDown, true);
@@ -1227,7 +1234,11 @@ export default function DesignCanvas({
           top={card.top}
           width={card.width}
           onAdd={(note) => {
-            onQuoteToChat(quoteFor(activePick.label, activePick.text, note));
+            onQuoteToChat({
+              label: activePick.label,
+              text: activePick.text,
+              comment: note,
+            });
             setPicked(null);
           }}
           onClose={() => setPicked(null)}

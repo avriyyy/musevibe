@@ -18,6 +18,7 @@ import {
 } from "@/lib/models";
 import { useVibe } from "@/lib/store";
 import type { Project, ProjectDoc, Task } from "@/lib/types";
+import { quoteLine, type ChatQuote } from "@/lib/pick";
 
 interface WorkspaceChatProps {
   project: Project;
@@ -28,7 +29,7 @@ interface WorkspaceChatProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Quoted selections appended into the input, newest wins. */
-  draft: { id: number; text: string } | null;
+  draft: { id: number; quote: ChatQuote } | null;
   onDraftConsumed?: () => void;
   /** Armed component picker, available while the design canvas is open. */
   canPick?: boolean;
@@ -58,6 +59,7 @@ export default function WorkspaceChat({
 }: WorkspaceChatProps) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
+  const [chips, setChips] = useState<Array<{ id: number; quote: ChatQuote }>>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [micState, setMicState] = useState<MicState>("idle");
@@ -84,19 +86,17 @@ export default function WorkspaceChat({
     heightRef.current = onHeightChange;
   });
 
-  // A quoted selection lands in the input (appended, never sent
+  // A quoted selection lands as a chip above the input (never sent
   // automatically) so several picks can stack before sending.
   useEffect(() => {
     if (!draft || draftSeenRef.current === draft.id) return;
     draftSeenRef.current = draft.id;
     onOpenChange(true);
-    setInput((prev) => {
-      const trimmed = prev.trim();
-      const piece = draft.text.trim();
-      if (!piece) return prev;
-      if (trimmed.endsWith(piece)) return prev;
-      return trimmed ? `${trimmed}\n${piece}` : piece;
-    });
+    setChips((prev) =>
+      prev.some((chip) => chip.id === draft.id)
+        ? prev
+        : [...prev, { id: draft.id, quote: draft.quote }],
+    );
     inputRef.current?.focus();
     onDraftConsumed?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -193,14 +193,25 @@ export default function WorkspaceChat({
   }, [open, turns.length, busy]);
 
   const send = async (text?: string) => {
-    const message = (text ?? input).trim();
+    const typed = (text ?? input).trim();
+    const context = chips
+      .map((chip) => quoteLine(chip.quote))
+      .join("\n");
+    const message = [
+      context ? `[Pinned context]\n${context}` : "",
+      typed,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     if (!message || busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError("");
+    const sentChips = chips;
     const next: ChatTurn[] = [...turns, { role: "user", content: message }];
     setTurns(next);
     setInput("");
+    setChips([]);
     try {
       const {
         project: currentProject,
@@ -242,7 +253,8 @@ export default function WorkspaceChat({
         err instanceof Error ? err.message : "The chat request failed.",
       );
       setTurns((prev) => prev.slice(0, -1));
-      setInput(message);
+      setInput(typed);
+      setChips(sentChips);
     } finally {
       busyRef.current = false;
       setBusy(false);
@@ -435,6 +447,73 @@ export default function WorkspaceChat({
               void send();
             }}
           >
+            {chips.length > 0 && (
+              <div
+                role="list"
+                aria-label="Pinned context"
+                className="flex flex-wrap gap-1.5 pb-1.5 pt-1"
+              >
+                {chips.map((chip) => (
+                  <span
+                    key={chip.id}
+                    role="listitem"
+                    className="group relative inline-flex max-w-full items-center gap-1.5 rounded-full border border-[#8ab4ff]/40 bg-[#8ab4ff]/10 py-1 pl-2.5 pr-1.5"
+                  >
+                    <span className="min-w-0 truncate font-mono text-[11px] text-[#8ab4ff]">
+                      {chip.quote.label}
+                    </span>
+                    {!!chip.quote.comment.trim() && (
+                      <span className="min-w-0 truncate text-[11px] text-[#c9cdd6]">
+                        {chip.quote.comment.trim()}
+                      </span>
+                    )}
+                    <span className="pointer-events-none absolute bottom-full left-0 z-10 mb-1.5 hidden w-64 rounded-xl border border-white/15 bg-[#17181d] p-2.5 text-left shadow-2xl group-hover:block group-focus-within:block">
+                      <span className="block font-mono text-[11px] text-[#8ab4ff]">
+                        {chip.quote.label}
+                      </span>
+                      {!!chip.quote.text && (
+                        <span className="mt-1 block text-[12px] leading-5 text-[#c9cdd6]">
+                          &ldquo;{chip.quote.text}&rdquo;
+                        </span>
+                      )}
+                      {!!chip.quote.comment.trim() && (
+                        <span className="mt-1 block text-[12px] leading-5 text-[#f5f6f8]">
+                          {chip.quote.comment.trim()}
+                        </span>
+                      )}
+                      {!chip.quote.text && !chip.quote.comment.trim() && (
+                        <span className="mt-1 block text-[12px] leading-5 text-[#9aa0ae]">
+                          Pinned for context.
+                        </span>
+                      )}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setChips((prev) =>
+                          prev.filter((entry) => entry.id !== chip.id),
+                        )
+                      }
+                      aria-label={`Remove ${chip.quote.label} from chat`}
+                      className="flex size-5 shrink-0 items-center justify-center rounded-full text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+                    >
+                      <svg
+                        aria-hidden
+                        width="10"
+                        height="10"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                      >
+                        <path d="M6 6l12 12M18 6L6 18" />
+                      </svg>
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
             <textarea
               ref={inputRef}
               rows={1}
@@ -606,7 +685,7 @@ export default function WorkspaceChat({
               </button>
               <button
                 type="submit"
-                disabled={busy || !input.trim()}
+                disabled={busy || (!input.trim() && chips.length === 0)}
                 aria-label="Send message"
                 className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-white text-[#0b0c10] hover:bg-white/90 disabled:opacity-40"
               >

@@ -18,6 +18,7 @@ import {
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
+import type { ChatQuote } from "@/lib/pick";
 import {
   SegmentedControl,
   SegmentedControlItem,
@@ -220,7 +221,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [chatHeight, setChatHeight] = useState(0);
   const [chatOpen, setChatOpen] = useState(false);
-  const [chatDraft, setChatDraft] = useState<{ id: number; text: string } | null>(null);
+  const [chatDraft, setChatDraft] = useState<{ id: number; quote: ChatQuote } | null>(null);
   const [picking, setPicking] = useState(false);
   const [pickSession, setPickSession] = useState(0);
   const [logoPickerOpen, setLogoPickerOpen] = useState(false);
@@ -241,10 +242,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
 
   // Quote something into the chat input (appended, never auto-sent) and
   // reveal the composer so the user sees it land.
-  const quoteToChat = useCallback((text: string) => {
-    const piece = text.trim();
-    if (!piece) return;
-    setChatDraft({ id: Date.now(), text: piece });
+  const quoteToChat = useCallback((quote: ChatQuote) => {
+    if (!quote.label && !quote.text && !quote.comment) return;
+    setChatDraft({ id: Date.now(), quote });
     setChatOpen(true);
   }, []);
   const [phase, setPhase] = useState<Phase>(null);
@@ -1252,9 +1252,11 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                     }}
                     onClose={() => setSelectedTaskId(null)}
                     onQuote={() =>
-                      quoteToChat(
-                        `[Task: ${selectedTask.title || "Untitled task"} (${selectedTask.status})]${selectedTask.notes ? ` ${selectedTask.notes.slice(0, 200)}` : ""}`,
-                      )
+                      quoteToChat({
+                        label: `Task: ${selectedTask.title || "Untitled task"} (${selectedTask.status})`,
+                        text: (selectedTask.notes ?? "").slice(0, 200),
+                        comment: "",
+                      })
                     }
                   />
                 </>

@@ -68,8 +68,24 @@ export function boxOf(el: Element): PickBox {
   return { x: rect.x, y: rect.y, w: rect.width, h: rect.height };
 }
 
+/** A picked component (or task) pinned into the chat, never sent on its own. */
+export interface ChatQuote {
+  label: string;
+  text: string;
+  /** The user's change request; empty for bare context pins like tasks. */
+  comment: string;
+}
+
 /** The quote that lands in the chat input, never sent on its own. */
 export function quoteFor(label: string, text: string, comment: string): string {
   const where = text ? ` "${text}"` : "";
-  return `[${label}${where}] ${comment.trim()}`;
+  const note = comment.trim() ? ` ${comment.trim()}` : "";
+  return `[${label}${where}]${note}`;
+}
+
+/** One structured line per pinned quote, easy for the model to parse. */
+export function quoteLine(quote: ChatQuote): string {
+  const where = quote.text ? `: "${quote.text}"` : "";
+  const note = quote.comment.trim() ? ` — ${quote.comment.trim()}` : "";
+  return `- ${quote.label}${where}${note}`;
 }

@@ -9,7 +9,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import ChangeCard from "./ChangeCard";
-import { boxOf, describeElement, quoteFor, type PickBox } from "@/lib/pick";
+import { boxOf, describeElement, type ChatQuote, type PickBox } from "@/lib/pick";
 
 interface WorkspacePickerProps {
   /** The view the picker is allowed to touch. */
@@ -21,7 +21,7 @@ interface WorkspacePickerProps {
   pickSession: number;
   /** Height covered by the chat drawer, kept clear of the card. */
   bottomInset: number;
-  onQuoteToChat: (text: string) => void;
+  onQuoteToChat: (quote: ChatQuote) => void;
   onPickingChange: (picking: boolean) => void;
 }
 
@@ -55,6 +55,9 @@ export default function WorkspacePicker({
   useEffect(() => {
     const root = rootRef.current;
     if (!root || !picking) return;
+    // Crosshair over the view while picking, restored when the mode ends.
+    const previousCursor = root.style.cursor;
+    root.style.cursor = "crosshair";
     // Documents only allow the rendered markdown, tasks only whole cards.
     // Anything else in the view is not a component for this tab.
     const targetOf = (event: Event) => {
@@ -96,6 +99,7 @@ export default function WorkspacePicker({
     root.addEventListener("mousedown", block, true);
     root.addEventListener("click", onClick, true);
     return () => {
+      root.style.cursor = previousCursor;
       root.removeEventListener("mousemove", onMove, true);
       root.removeEventListener("mouseleave", onLeave, true);
       root.removeEventListener("mousedown", block, true);
@@ -203,7 +207,11 @@ export default function WorkspacePicker({
             top={top}
             width={width}
             onAdd={(note) => {
-              onQuoteToChat(quoteFor(activePick.label, activePick.text, note));
+              onQuoteToChat({
+                label: activePick.label,
+                text: activePick.text,
+                comment: note,
+              });
               pickedElRef.current = null;
               setPicked(null);
             }}
