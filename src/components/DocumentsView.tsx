@@ -150,34 +150,66 @@ export default function DocumentsView({
         {/* Document list. */}
         <aside
           aria-label="Document list"
-          className="hidden min-h-0 flex-col gap-1 overflow-y-auto border-r border-white/10 p-3 lg:flex"
+          className="hidden min-h-0 flex-col border-r border-white/10 bg-[#0b0c10] lg:flex"
         >
-          <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.12em] text-[#5b6472]">
-            Documents · {docs.length}
-          </p>
-          {docs.map((entry) => {
-            const selected = selectedKey === entry.id;
-            return (
-              <button
-                key={entry.id}
-                type="button"
-                onClick={() => onSelect(entry.id)}
-                aria-current={selected || undefined}
-                className={`w-full rounded-xl border px-3 py-2.5 text-left transition-colors ${
-                  selected
-                    ? "border-white/25 bg-white/10"
-                    : "border-transparent hover:border-white/10 hover:bg-white/5"
-                }`}
-              >
-                <span className="block truncate text-[13px] font-semibold text-[#f5f6f8]">
-                  {entry.title || docLabel(entry.kind)}
-                </span>
-                <span className="mt-0.5 block truncate text-[11px] text-[#5b6472]">
-                  {docFullName(entry.kind)}
-                </span>
-              </button>
-            );
-          })}
+          <div className="min-h-0 flex-1 overflow-y-auto p-3">
+            <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.12em] text-[#5b6472]">
+              Documents · {docs.length}
+            </p>
+            <ul className="space-y-0.5">
+              {docs.map((entry) => {
+                const selected = selectedKey === entry.id;
+                const filled = entry.markdown.trim().length > 0;
+                return (
+                  <li key={entry.id}>
+                    <button
+                      type="button"
+                      onClick={() => onSelect(entry.id)}
+                      aria-current={selected || undefined}
+                      title={docFullName(entry.kind)}
+                      className={`flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-colors ${
+                        selected
+                          ? "bg-white/10 text-white"
+                          : "text-[#c9cdd6] hover:bg-white/5 hover:text-white"
+                      }`}
+                    >
+                      <svg
+                        aria-hidden
+                        width="13"
+                        height="13"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="shrink-0 text-[#8ab4ff]"
+                      >
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                        <path d="M14 2v6h6" />
+                      </svg>
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[13px] font-medium">
+                          {entry.title || docLabel(entry.kind)}
+                        </span>
+                        <span className="mt-0.5 block truncate text-[11px] text-[#5b6472]">
+                          {docFullName(entry.kind)}
+                          {!filled ? " · empty" : ""}
+                        </span>
+                      </span>
+                      <span
+                        aria-hidden
+                        title={filled ? "Generated" : "Not generated yet"}
+                        className={`size-1.5 shrink-0 rounded-full ${
+                          filled ? "bg-[#7ee2a8]" : "bg-white/20"
+                        }`}
+                      />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
         </aside>
 
         {/* Preview. Only this column scrolls; it pads its bottom edge
