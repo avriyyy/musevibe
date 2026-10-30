@@ -358,16 +358,26 @@ export default function DesignCanvas({
         };
         const onLeave = () => setHoverBox(null);
         const onDown = (event: MouseEvent) => {
-          if (!targetOf(event)) return;
-          // Block the prototype's own handlers for the duration of the pick.
+          // Block the prototype's own handlers for the duration of the pick,
+          // including empty frame areas that pick the whole frame.
           event.preventDefault();
           event.stopPropagation();
         };
         const onClick = (event: MouseEvent) => {
-          const target = targetOf(event);
-          if (!target) return;
           event.preventDefault();
           event.stopPropagation();
+          const target = targetOf(event);
+          if (!target) {
+            // Empty frame area: the whole frame becomes the context.
+            setPicked({
+              label: `Frame: ${frame.title}`,
+              text: frame.subtitle,
+              box: { x: originX, y: 0, w: FRAME_W, h: FRAME_H },
+              session: pickSession,
+            });
+            setHoverBox(null);
+            return;
+          }
           const { label, text } = describeElement(target);
           setPicked({ label, text, box: shift(boxOf(target)), session: pickSession });
           setHoverBox(null);
@@ -1067,7 +1077,62 @@ export default function DesignCanvas({
               className="absolute"
               style={{ left: frameLeft(index), top: 0, width: FRAME_W, height: FRAME_H }}
             >
-              <div className="pointer-events-none absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap">
+              <div
+                role={picking ? "button" : undefined}
+                tabIndex={picking ? 0 : undefined}
+                aria-label={picking ? `Pick the ${frame.title} frame` : undefined}
+                onPointerDown={
+                  picking
+                    ? (event) => {
+                        event.stopPropagation();
+                      }
+                    : undefined
+                }
+                onClick={
+                  picking
+                    ? (event) => {
+                        event.stopPropagation();
+                        setPicked({
+                          label: `Frame: ${frame.title}`,
+                          text: frame.subtitle,
+                          box: {
+                            x: frameLeft(index),
+                            y: 0,
+                            w: FRAME_W,
+                            h: FRAME_H,
+                          },
+                          session: pickSession,
+                        });
+                        setHoverBox(null);
+                      }
+                    : undefined
+                }
+                onKeyDown={
+                  picking
+                    ? (event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        setPicked({
+                          label: `Frame: ${frame.title}`,
+                          text: frame.subtitle,
+                          box: {
+                            x: frameLeft(index),
+                            y: 0,
+                            w: FRAME_W,
+                            h: FRAME_H,
+                          },
+                          session: pickSession,
+                        });
+                        setHoverBox(null);
+                      }
+                    : undefined
+                }
+                className={`absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap ${
+                  picking
+                    ? "cursor-crosshair rounded-lg px-1 hover:bg-white/5"
+                    : "pointer-events-none"
+                }`}
+              >
                 <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#c9cdd6]">
                   <svg
                     aria-hidden
@@ -1332,7 +1397,7 @@ export default function DesignCanvas({
                 <path d="M12 3v3M12 18v3M3 12h3M18 12h3" />
                 <circle cx="12" cy="12" r="4" />
               </svg>
-              Picking a component
+              Picking — click a component or a frame
             </span>
             <kbd className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 font-mono text-[10px] text-[#9aa0ae]">
               Esc

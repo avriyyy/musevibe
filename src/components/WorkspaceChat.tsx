@@ -531,7 +531,7 @@ export default function WorkspaceChat({
               }}
               placeholder={
                 picking
-                  ? "Pick a component, then say what should change…"
+                  ? "Pick a component or a whole frame, then say what should change…"
                   : "Ask or change anything…"
               }
               aria-label="Ask about this project"
