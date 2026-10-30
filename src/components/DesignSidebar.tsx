@@ -133,33 +133,25 @@ export default function DesignSidebar({
                   <span className="min-w-0 flex-1 truncate text-[13px] font-medium">
                     {page.title}
                   </span>
-                  {!done && (
-                    <span className="shrink-0 font-mono text-[10px] text-[#5b6472]">
-                      {busy ? "drawing" : "todo"}
-                    </span>
-                  )}
                 </button>
                 {!done && (
                   <button
                     type="button"
                     disabled={busy}
                     onClick={() => onGenerate(page.slug)}
-                    aria-label={`Generate the ${page.title} page`}
-                    title={`Generate the ${page.title} page`}
-                    className="mr-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg border border-white/10 text-[#c9cdd6] transition-colors hover:border-white/30 hover:text-white disabled:opacity-40"
+                    aria-label={
+                      busy
+                        ? `${page.title} is generating`
+                        : `Generate the ${page.title} page`
+                    }
+                    title={
+                      busy
+                        ? `${page.title} is generating`
+                        : `Generate the ${page.title} page`
+                    }
+                    className="mr-1 inline-flex h-7 shrink-0 items-center rounded-lg border border-white/10 px-2.5 text-[11px] font-medium text-[#c9cdd6] transition-colors hover:border-white/30 hover:text-white disabled:opacity-40"
                   >
-                    <svg
-                      aria-hidden
-                      width="12"
-                      height="12"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                    >
-                      <path d="M12 5v14M5 12h14" />
-                    </svg>
+                    {busy ? "Drawing…" : "Generate"}
                   </button>
                 )}
               </li>

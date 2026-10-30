@@ -108,6 +108,61 @@ type Gesture =
 
 const GRID = 28;
 
+/** Transparent placeholder shown while a page generates, with a looping
+    scan bar so the wait reads as progress instead of a blank frame. */
+function GeneratingCard({ left, title }: { left: number; title: string }) {
+  return (
+    <div
+      className="absolute"
+      style={{ left, top: 0, width: FRAME_W, height: FRAME_H }}
+    >
+      <style>
+        {`@keyframes musevibe-scan { 0% { top: -18%; } 100% { top: 108%; } }`}
+      </style>
+      <div className="pointer-events-none absolute -top-9 left-0 flex items-center gap-2 whitespace-nowrap">
+        <span className="flex items-center gap-1.5 text-[12px] font-medium text-[#c9cdd6]">
+          <svg
+            aria-hidden
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className="animate-pulse text-[#8ab4ff]"
+          >
+            <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
+            <path d="M3.5 9h17" />
+          </svg>
+          {title}
+        </span>
+        <span aria-hidden className="h-3 w-px bg-white/15" />
+        <span className="font-mono text-[11px] tabular-nums text-[#5b6472]">
+          drawing…
+        </span>
+      </div>
+      <div
+        role="status"
+        aria-label={`Generating the ${title} page`}
+        className="relative h-full w-full overflow-hidden rounded-2xl border border-[#8ab4ff]/30 bg-[#8ab4ff]/[0.03]"
+      >
+        <div
+          aria-hidden
+          className="absolute left-0 right-0 h-24 bg-gradient-to-b from-transparent via-[#8ab4ff]/25 to-transparent"
+          style={{ animation: "musevibe-scan 1.8s linear infinite" }}
+        />
+        <div className="absolute inset-0 grid place-items-center">
+          <p className="animate-pulse text-[13px] font-medium text-[#9aa0ae]">
+            Drawing {title}…
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function DesignCanvas({
   initialShapes,
   frames,
@@ -1052,6 +1107,12 @@ export default function DesignCanvas({
                 />
               </div>
             </div>
+          ) : frame.busy ? (
+            <GeneratingCard
+              key={frame.id}
+              left={frameLeft(index)}
+              title={frame.title}
+            />
           ) : null,
         )}
 

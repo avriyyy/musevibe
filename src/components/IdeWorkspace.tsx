@@ -910,19 +910,31 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         });
       }
     }
-    // Only generated pages take a frame. Pending pages live in the
-    // sidebar with their own Generate buttons.
+    // Generated pages take a frame. Pages being drawn take a
+    // transparent scan placeholder at their plan position, so the wait
+    // reads as progress and the finished page lands in place.
     for (const page of pagePlan ?? []) {
       const file = files.find((entry) => entry.path === pageFilePath(page.slug));
-      if (!file) continue;
-      list.push({
-        id: pageFilePath(page.slug),
-        slug: page.slug,
-        title: page.title,
-        subtitle: `${FRAME_W} × ${FRAME_H}`,
-        html: file.content,
-        kind: "page",
-      });
+      if (file) {
+        list.push({
+          id: pageFilePath(page.slug),
+          slug: page.slug,
+          title: page.title,
+          subtitle: `${FRAME_W} × ${FRAME_H}`,
+          html: file.content,
+          kind: "page",
+        });
+      } else if (generatingSlugs.has(page.slug)) {
+        list.push({
+          id: pageFilePath(page.slug),
+          slug: page.slug,
+          title: page.title,
+          subtitle: "drawing…",
+          html: null,
+          kind: "page",
+          busy: true,
+        });
+      }
     }
     return list;
   }, [
@@ -931,6 +943,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     useTemplatePreviews,
     dsEntry,
     project?.designSystem,
+    generatingSlugs,
   ]);
   const [focusedFrame, setFocusedFrame] = useState<string | null>(null);
   const [focusSeq, setFocusSeq] = useState(0);
