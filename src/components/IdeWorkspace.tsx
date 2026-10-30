@@ -1198,9 +1198,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
               onSelect={setSelectedDocKey}
               activeDoc={activeDoc}
               bottomPad={chatHeight}
-              onQuote={(label, text) =>
-                quoteToChat(`> "${text}" — ${label}`)
-              }
               canGenerate={!!activeDoc && activeDoc.kind !== "note"}
               generating={!!activeDoc && docBusy === activeDoc.id}
               modelLabel={

@@ -23,7 +23,6 @@ interface DocumentsViewProps {
   generating: boolean;
   modelLabel: string;
   bottomPad?: number;
-  onQuote?: (label: string, text: string) => void;
   onMarkdown: (markdown: string) => void;
   onGenerate: () => void;
 }
@@ -37,13 +36,11 @@ export default function DocumentsView({
   generating,
   modelLabel,
   bottomPad = 0,
-  onQuote,
   onMarkdown,
   onGenerate,
 }: DocumentsViewProps) {
   const centerRef = useRef<HTMLDivElement>(null);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [quote, setQuote] = useState<{ text: string; x: number; y: number } | null>(null);
 
   const shownMarkdown = activeDoc?.markdown ?? "";
   const headings = useMemo(
@@ -51,44 +48,13 @@ export default function DocumentsView({
     [shownMarkdown],
   );
 
-  // Start each document at the top with no stale highlight or quote button.
+  // Start each document at the top with no stale highlight.
   useEffect(() => {
     centerRef.current?.scrollTo({ top: 0 });
     // Resetting the highlight is part of switching documents.
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveId(null);
-    setQuote(null);
   }, [selectedKey]);
-
-  const quoteLabel = activeDoc
-    ? activeDoc.title || docLabel(activeDoc.kind)
-    : "Document";
-
-  const onSelectText = useCallback(() => {
-    const container = centerRef.current;
-    const selection = typeof window === "undefined" ? null : window.getSelection();
-    if (!container || !selection || selection.isCollapsed || selection.rangeCount === 0) {
-      setQuote(null);
-      return;
-    }
-    const range = selection.getRangeAt(0);
-    if (!container.contains(range.commonAncestorContainer)) {
-      setQuote(null);
-      return;
-    }
-    const text = selection.toString().trim().replace(/\s+/g, " ");
-    if (text.length < 3) {
-      setQuote(null);
-      return;
-    }
-    const rect = range.getBoundingClientRect();
-    const outer = container.getBoundingClientRect();
-    setQuote({
-      text: text.length > 500 ? `${text.slice(0, 500)}…` : text,
-      x: Math.min(Math.max(8, rect.left - outer.left), Math.max(8, outer.width - 160)),
-      y: rect.bottom - outer.top + 8,
-    });
-  }, []);
 
   // Scroll spy: the last heading at or above the viewport edge wins.
   useEffect(() => {
@@ -212,8 +178,6 @@ export default function DocumentsView({
         <div className="relative min-h-0 min-w-0">
           <div
             ref={centerRef}
-            onMouseUp={onSelectText}
-            onScroll={() => setQuote(null)}
             className="h-full min-h-0 min-w-0 overflow-y-auto"
             style={
               bottomPad > 0
@@ -239,36 +203,6 @@ export default function DocumentsView({
               </p>
             )}
           </div>
-          {quote && onQuote && (
-            <button
-              type="button"
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() => {
-                onQuote(quoteLabel, quote.text);
-                window.getSelection()?.removeAllRanges();
-                setQuote(null);
-              }}
-              aria-label="Add selection to chat"
-              title="Add selection to chat"
-              className="absolute z-10 flex h-8 items-center gap-1.5 rounded-full border border-white/15 bg-[#17181d] px-3 text-[12px] font-medium text-[#f5f6f8] shadow-xl hover:border-white/30"
-              style={{ left: quote.x, top: quote.y }}
-            >
-              <svg
-                aria-hidden
-                width="12"
-                height="12"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              >
-                <path d="M12 5v14M5 12h14" />
-              </svg>
-              Chat
-            </button>
-          )}
         </div>
 
         {/* Table of contents. */}
