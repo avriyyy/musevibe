@@ -267,6 +267,29 @@ export function buildPagePrompt(
     .join("\n");
 }
 
+/** Second chance after a blank render: demand visible content, same system. */
+export function buildPageRepairPrompt(
+  projectName: string,
+  page: PlannedPage,
+  designMd: string,
+  tokensCss: string,
+): string {
+  return [
+    `Your last output for the "${page.title}" screen rendered as a blank white page. Return ONLY the complete, corrected, self-contained HTML file for it.`,
+    `Project: "${projectName}". This screen: ${page.brief || page.title}.`,
+    "",
+    "Paste this token block verbatim as the FIRST thing in the single <style> tag, then reference every value via var(--*):",
+    `${tokensCss.slice(0, 3000)}`,
+    "",
+    "Non-negotiable fixes:",
+    "- Real headline plus real paragraphs, buttons, or cards inside <body>, visible without scrolling.",
+    "- No external requests, no web fonts, no remote images; system fonts and inline SVG only.",
+    "- No empty <body>, no splash overlay that hides content, no JavaScript required to show the first paint.",
+    ANTISLOP_DESIGN_RULES,
+    "- Return ONLY the HTML, no fences or commentary.",
+  ].join("\n");
+}
+
 /** Local fallback page plan when the model is offline: core flow screens. */
 export function fallbackPagePlan(): PlannedPage[] {
   return [

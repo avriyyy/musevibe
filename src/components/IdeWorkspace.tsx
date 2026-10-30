@@ -52,6 +52,7 @@ import { formatModelLabel } from "@/lib/models";
 import {
   DOC_TYPES,
   buildDocPrompt,
+  hasVisibleContent,
   parseDocMarkdown,
   parsePrototypeHtml,
   type DocKind,
@@ -67,6 +68,7 @@ import { DESIGN_SYSTEMS } from "@/lib/design-systems-catalog";
 import {
   SHOWCASE_PATH,
   buildPagePlanPrompt,
+  buildPageRepairPrompt,
   buildPagePrompt,
   buildSamplePreviewHtmlFallback,
   buildShowcasePrompt,
@@ -594,9 +596,29 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           ),
           current.model,
         );
-        const html =
-          parsePrototypeHtml(reply.text) ||
-          `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8" />\n<title>${page.title}</title>\n</head>\n<body>\n<h1>${page.title}</h1>\n<p>${page.brief}</p>\n</body>\n</html>`;
+        let html = parsePrototypeHtml(reply.text);
+        if (!hasVisibleContent(html)) {
+          // One repair attempt: the last output would have rendered blank.
+          try {
+            const retry = await requestAi(
+              "prototype",
+              buildPageRepairPrompt(
+                current.name,
+                page,
+                system.designMd,
+                system.tokensCss,
+              ),
+              current.model,
+            );
+            const fixed = parsePrototypeHtml(retry.text);
+            if (hasVisibleContent(fixed)) html = fixed;
+          } catch {
+            // Keep the first attempt below.
+          }
+        }
+        if (!hasVisibleContent(html)) {
+          html = `<!DOCTYPE html>\n<html lang="en">\n<head>\n<meta charset="utf-8" />\n<title>${page.title}</title>\n</head>\n<body>\n<h1>${page.title}</h1>\n<p>${page.brief}</p>\n</body>\n</html>`;
+        }
         saveHtmlFile(pageFilePath(slug), html);
       } finally {
         setGeneratingSlugs((prev) => {

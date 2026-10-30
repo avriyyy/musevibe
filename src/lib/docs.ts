@@ -270,12 +270,34 @@ export function parseDocMarkdown(raw: unknown): string {
   return text;
 }
 
-/** Strip fences so the prototype file holds raw HTML. */
+/** Strip fences so the prototype file holds raw HTML. Models often wrap
+ *  the file in prose ("Here's your page: ... Let me know ..."), so the
+ *  fence is extracted wherever it sits; otherwise the document slice
+ *  from <!doctype>/<html> to the last </html> is used. */
 export function parsePrototypeHtml(raw: unknown): string {
   if (typeof raw !== "string") return "";
-  let text = raw.trim();
+  const text = raw.trim();
   if (!text) return "";
-  const outer = text.match(/^```(?:html)?\s*\n?([\s\S]*?)\s*```$/i);
-  if (outer) text = outer[1].trim();
+  const fenced = text.match(/```(?:html)?\s*\n?([\s\S]*?)\s*```/i);
+  if (fenced && fenced[1].trim()) return fenced[1].trim();
+  const start = text.search(/<!doctype html|<html[\s>]/i);
+  if (start !== -1) {
+    const end = text.toLowerCase().lastIndexOf("</html>");
+    const slice =
+      end > start ? text.slice(start, end + "</html>".length) : text.slice(start);
+    if (slice.trim()) return slice.trim();
+  }
   return text;
+}
+
+/** True when the HTML holds enough visible copy to not render blank. */
+export function hasVisibleContent(html: string): boolean {
+  const text = html
+    .replace(/<script[\s>][\s\S]*?<\/script\s*>/gi, " ")
+    .replace(/<style[\s>][\s\S]*?<\/style\s*>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text.length >= 120;
 }
