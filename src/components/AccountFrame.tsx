@@ -1,10 +1,9 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-export type AccountSection = "account" | "profile" | "settings";
+export type AccountSection = "profile" | "settings";
 
 const sections: { href: string; id: AccountSection; label: string }[] = [
-  { href: "/account", id: "account", label: "Account" },
   { href: "/profile", id: "profile", label: "Profile" },
   { href: "/settings", id: "settings", label: "Settings" },
 ];

@@ -2,10 +2,9 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import { authRedirectUrl } from "@/lib/supabase/redirect-url";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useAuthSession } from "@/lib/supabase/use-auth-session";
-import { useCloudSyncStatus } from "@/lib/supabase/sync";
-import { useVibe } from "@/lib/store";
 import LoadingSticker from "@/stickers/LoadingSticker";
 
 type Mode = "sign-in" | "create-account";
@@ -32,16 +31,6 @@ function friendlyAuthError(error: unknown, mode: Mode) {
 
 export default function AuthForm({ initialMode }: { initialMode: Mode }) {
   const auth = useAuthSession();
-  const syncStatus = useCloudSyncStatus();
-  const conflictCount = useVibe((state) =>
-    auth.user
-      ? state.projects.filter(
-          (project) =>
-            state.cloudOwnerByProject[project.id] === auth.user?.id &&
-            state.cloudConflictByProject[project.id] === true,
-        ).length
-      : 0,
-  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -65,18 +54,18 @@ export default function AuthForm({ initialMode }: { initialMode: Mode }) {
           password,
         });
         if (error) throw error;
-        setNotice({ kind: "success", text: "You are signed in. Account workspaces sync to Neon; guest projects stay local." });
+        setNotice({ kind: "success", text: "Signed in. Opening your workspace…" });
       } else {
         const { data, error } = await client.auth.signUp({
           email: email.trim(),
           password,
-          options: { emailRedirectTo: `${window.location.origin}/account` },
+          options: { emailRedirectTo: authRedirectUrl("/sign-in?next=%2F") },
         });
         if (error) throw error;
         setNotice({
           kind: "success",
           text: data.session
-            ? "Your account is ready. Account workspaces sync to Neon; guest projects stay local."
+            ? "Your account is ready. Opening your workspace…"
             : "If this address can be registered, a confirmation link is on its way. Check your inbox to continue.",
         });
       }
@@ -87,60 +76,34 @@ export default function AuthForm({ initialMode }: { initialMode: Mode }) {
     }
   };
 
-  const signOut = async () => {
-    setBusy(true);
-    setNotice(null);
-    try {
-      const { error } = await supabaseBrowser().auth.signOut({ scope: "local" });
-      if (error) throw error;
-      setNotice({ kind: "success", text: "You are signed out on this device. Guest projects remain in this browser." });
-    } catch (error) {
-      setNotice({ kind: "error", text: friendlyAuthError(error, "sign-in") });
-    } finally {
-      setBusy(false);
-    }
-  };
-
   if (!auth.configured) {
     return (
-      <div className="rounded-3xl border border-amber-300/20 bg-amber-300/[0.05] p-5 sm:p-6">
-        <h2 className="text-[16px] font-semibold">Account sign-in is not configured</h2>
-        <p className="mt-2 text-[13px] leading-6 text-[#b8bdc8]">This deployment is missing the public Supabase Auth URL or key. Guest workspaces still work locally; account sign-in becomes available after the deployment is configured.</p>
-        <Link href="/" className="mt-4 inline-flex rounded-full border border-white/15 px-4 py-2 text-[13px] text-white hover:bg-white/5">Back to MuseVibe</Link>
-      </div>
+      <section className="rounded-3xl border border-amber-300/20 bg-amber-300/[0.05] p-5 shadow-2xl sm:p-7">
+        <h1 className="text-[20px] font-semibold">Sign-in is unavailable</h1>
+        <p className="mt-2 text-[13px] leading-6 text-[#b8bdc8]">This deployment is missing its public Supabase Auth URL or key. App access requires a configured account.</p>
+      </section>
     );
   }
 
   if (auth.user) {
     return (
-      <div className="rounded-3xl border border-white/10 bg-[#13151a] p-5 shadow-2xl sm:p-7">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7ee2a8]">Account connected</p>
-        <h2 className="mt-2 break-all text-[21px] font-semibold tracking-tight">{auth.user.email ?? "Signed-in account"}</h2>
-        <p className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-[13px] leading-6 text-[#b5bbc6]">New projects created while signed in sync to your account. Guest projects remain in this browser and are never imported automatically.</p>
-        <p role="status" className={`mt-3 text-[12px] ${syncStatus === "error" ? "text-[#ff9c9c]" : "text-[#9aa0ae]"}`}>
-          Workspace sync: {syncStatus === "syncing" ? "Syncing…" : syncStatus === "synced" ? "Up to date" : syncStatus === "error" ? "Could not sync; your local recovery copy is safe" : "Waiting for connection"}
-        </p>
-        {conflictCount > 0 && <p role="alert" className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/[0.06] p-3 text-[12px] leading-5 text-[#e7c88b]">{conflictCount} workspace{conflictCount === 1 ? " has" : "s have"} a local recovery copy that differs from Neon. It will not overwrite server data automatically.</p>}
-        {notice && <p role={notice.kind === "error" ? "alert" : "status"} className={`mt-4 text-[13px] ${notice.kind === "error" ? "text-[#ff9c9c]" : "text-[#9fe6bc]"}`}>{notice.text}</p>}
-        <div className="mt-6 flex flex-wrap gap-2">
-          <Link href="/profile" className="flex h-10 items-center rounded-full bg-meta px-4 text-[13px] font-semibold text-white hover:bg-meta-hover">Profile</Link>
-          <Link href="/settings" className="flex h-10 items-center rounded-full border border-white/15 px-4 text-[13px] font-medium text-[#d4d8e0] hover:bg-white/5">Settings</Link>
-          <button type="button" onClick={signOut} disabled={busy} className="flex h-10 items-center rounded-full border border-white/15 px-4 text-[13px] font-medium text-[#d4d8e0] hover:bg-white/5 disabled:opacity-50">{busy ? "Signing out…" : "Sign out on this device"}</button>
-        </div>
-      </div>
+      <section className="rounded-3xl border border-white/10 bg-[#13151a] p-5 shadow-2xl sm:p-7">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7ee2a8]">Signed in</p>
+        <h1 className="mt-2 break-all text-[20px] font-semibold tracking-tight">{auth.user.email ?? "Your account"}</h1>
+        <p className="mt-3 text-[13px] leading-6 text-[#9aa0ae]">Opening your workspace…</p>
+      </section>
     );
   }
 
   const isSignIn = initialMode === "sign-in";
   return (
-    <div className="rounded-3xl border border-white/10 bg-[#13151a] p-5 shadow-2xl sm:p-7">
+    <section className="rounded-3xl border border-white/10 bg-[#13151a] p-5 shadow-2xl sm:p-7">
       <div className="mb-5 grid grid-cols-2 rounded-full border border-white/10 bg-black/20 p-1" aria-label="Account action">
         <Link href="/sign-in" aria-current={isSignIn ? "page" : undefined} className={`flex h-9 items-center justify-center rounded-full text-[13px] font-medium transition-colors ${isSignIn ? "bg-white text-black" : "text-[#9aa0ae] hover:text-white"}`}>Sign in</Link>
         <Link href="/register" aria-current={!isSignIn ? "page" : undefined} className={`flex h-9 items-center justify-center rounded-full text-[13px] font-medium transition-colors ${!isSignIn ? "bg-white text-black" : "text-[#9aa0ae] hover:text-white"}`}>Create account</Link>
       </div>
-      <h2 className="text-[20px] font-semibold tracking-tight">{isSignIn ? "Welcome back" : "Create your account"}</h2>
-      <p className="mt-2 text-[13px] leading-6 text-[#9aa0ae]">{isSignIn ? "Sign in to sync new workspaces across devices." : "Create an account with your email and a password."}</p>
-      {!auth.ready && <p role="status" className="mt-3 text-[11px] text-[#7c8493]">Checking for an existing session; you can use the form now.</p>}
+      <h1 className="text-[20px] font-semibold tracking-tight">{isSignIn ? "Welcome back" : "Create your account"}</h1>
+      <p className="mt-2 text-[13px] leading-6 text-[#9aa0ae]">{isSignIn ? "Sign in to continue to MuseVibe." : "Register with your email and password to get started."}</p>
       <form onSubmit={submit} className="mt-5 flex flex-col gap-4">
         <label className="flex flex-col gap-2 text-[13px] font-medium text-[#d4d8e0]">
           Email address
@@ -158,7 +121,7 @@ export default function AuthForm({ initialMode }: { initialMode: Mode }) {
         </button>
       </form>
       {isSignIn && <Link href="/forgot-password" className="mt-4 inline-flex text-[12px] text-[#aeb6c4] underline decoration-white/20 underline-offset-4 hover:text-white">Forgot your password?</Link>}
-      <p className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-[12px] leading-5 text-[#9aa0ae]">Guest projects stay in this browser. Only workspaces created while signed in are stored in your account.</p>
-    </div>
+      <p className="mt-5 text-[11px] leading-5 text-[#77808e]">A verified account is required to enter MuseVibe.</p>
+    </section>
   );
 }

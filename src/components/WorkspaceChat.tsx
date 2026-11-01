@@ -9,6 +9,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { blobToWav } from "@/lib/audio";
+import { authFetch } from "@/lib/supabase/client";
 import {
   FALLBACK_MODELS,
   formatModelLabel,
@@ -107,7 +108,7 @@ export default function WorkspaceChat({
     let cancelled = false;
     (async () => {
       try {
-        const response = await fetch("/api/ai/models", { cache: "no-store" });
+        const response = await authFetch("/api/ai/models", { cache: "no-store" });
         if (!response.ok) return;
         const data = (await response.json()) as {
           models?: Array<{ id?: unknown; label?: unknown; hint?: unknown }>;
@@ -254,7 +255,7 @@ export default function WorkspaceChat({
       const wav = await blobToWav(blob);
       const body = new FormData();
       body.append("audio", wav, "prompt.wav");
-      const response = await fetch("/api/ai/transcribe", { method: "POST", body });
+      const response = await authFetch("/api/ai/transcribe", { method: "POST", body });
       const data = (await response.json()) as {
         transcript?: unknown;
         text?: unknown;

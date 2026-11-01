@@ -19,6 +19,7 @@ import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
 import type { ChatQuote } from "@/lib/pick";
+import { authFetch } from "@/lib/supabase/client";
 import {
   SegmentedControl,
   SegmentedControlItem,
@@ -233,7 +234,7 @@ async function requestAi(
   model?: string,
   signal?: AbortSignal,
 ): Promise<AiReply> {
-  const response = await fetch("/api/ai/generate", {
+  const response = await authFetch("/api/ai/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind, prompt, ...(model ? { model } : {}) }),

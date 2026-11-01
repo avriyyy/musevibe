@@ -305,16 +305,6 @@ export default function Sidebar({
               )}
             </>
           )}
-          {!auth.user && (
-            <div className="shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
-              <p className="text-[12px] font-semibold text-[#f5f6f8]">Save work across devices</p>
-              <p className="mt-1 text-[11px] leading-5 text-[#9aa0ae]">Guest projects stay here. Sign in to sync new workspaces.</p>
-              <div className="mt-2 grid grid-cols-2 gap-2">
-                <Link href="/sign-in" className="flex h-8 items-center justify-center rounded-full border border-white/15 text-[11px] font-medium text-[#d4d8e0] hover:bg-white/5">Sign in</Link>
-                <Link href="/register" className="flex h-8 items-center justify-center rounded-full bg-meta text-[11px] font-semibold text-white hover:bg-meta-hover">Register</Link>
-              </div>
-            </div>
-          )}
           <div ref={profileRef} className="relative mt-auto shrink-0 border-t border-white/10 pt-3">
             <button
               type="button"
@@ -343,12 +333,10 @@ export default function Sidebar({
               </span>
               <span className="min-w-0 flex-1">
                 <span className="block truncate text-[13px] font-semibold text-[#f5f6f8]">
-                  {auth.ready ? (auth.user?.email ?? "Local workspace") : "Checking account…"}
+                  {auth.ready ? (auth.user?.email ?? "Account") : "Checking account…"}
                 </span>
                 <span className="mt-0.5 block truncate text-[11px] text-[#9aa0ae]">
-                  {auth.user
-                    ? "Signed in · projects sync to cloud"
-                    : `${accountProjects.length} ${accountProjects.length === 1 ? "project" : "projects"} · saved here`}
+                  {auth.user ? "Signed in · account workspaces" : "Account session required"}
                 </span>
               </span>
               <svg
@@ -374,22 +362,16 @@ export default function Sidebar({
               >
                 <div className="px-3 py-2.5">
                   <p className="text-[13px] font-semibold text-[#f5f6f8]">
-                    {auth.user?.email ?? "Local workspace"}
+                    {auth.user?.email ?? "Account"}
                   </p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-[#9aa0ae]">
-                    Projects sync to your account while signed in. Signed-out work stays in this browser.
+                    Workspace access is tied to your signed-in account.
                   </p>
                 </div>
-                {auth.user ? (
+                {auth.user && (
                   <>
                     <Link href="/profile" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Profile<span aria-hidden className="text-[#5b6472]">→</span></Link>
                     <Link href="/settings" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Settings<span aria-hidden className="text-[#5b6472]">→</span></Link>
-                    <Link href="/account" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Account &amp; sync<span aria-hidden className="text-[#5b6472]">→</span></Link>
-                  </>
-                ) : (
-                  <>
-                    <Link href="/sign-in" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Sign in<span aria-hidden className="text-[#5b6472]">→</span></Link>
-                    <Link href="/register" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Create account<span aria-hidden className="text-[#5b6472]">→</span></Link>
                   </>
                 )}
                 {auth.user && (

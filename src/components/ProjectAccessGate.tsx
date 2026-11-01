@@ -25,13 +25,13 @@ export default function ProjectAccessGate({
       <section className="max-w-md">
         <h1 className="text-[22px] font-semibold">This workspace is not available</h1>
         <p className="mt-3 text-[14px] leading-6 text-[#9aa0ae]">
-          Sign in with the account that owns this workspace. Guest projects remain local to this browser.
+          This workspace is not linked to the signed-in account. Its saved browser data has been left untouched.
         </p>
         <Link
-          href="/account"
+          href="/projects"
           className="mt-6 inline-flex h-10 items-center justify-center rounded-full bg-white px-5 text-[13px] font-semibold text-[#0b0c10] hover:bg-white/90"
         >
-          Go to account
+          Back to your projects
         </Link>
       </section>
     </main>

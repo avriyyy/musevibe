@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import { Figtree, JetBrains_Mono } from "next/font/google";
+import AuthRouteGate, { AuthRouteGateFallback } from "@/components/AuthRouteGate";
 import StoreHydrator from "@/components/StoreHydrator";
 import "./globals.css";
 
@@ -16,7 +18,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html lang="en" className="h-full antialiased" data-theme="dark">
       <body className={`${figtree.className} ${mono.variable} min-h-full flex flex-col`}>
         <StoreHydrator />
-        {children}
+        <Suspense fallback={<AuthRouteGateFallback />}>
+          <AuthRouteGate>{children}</AuthRouteGate>
+        </Suspense>
       </body>
     </html>
   );

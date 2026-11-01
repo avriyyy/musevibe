@@ -10,6 +10,7 @@ import {
 } from "@/lib/models";
 import AccountShortcut from "@/components/AccountShortcut";
 import Sidebar from "@/components/Sidebar";
+import { authFetch } from "@/lib/supabase/client";
 
 const PHRASES = [
   "A habit tracker that never guilt-trips",
@@ -56,7 +57,7 @@ export default function Home() {
     let alive = true;
     void (async () => {
       try {
-        const response = await fetch("/api/ai/models");
+        const response = await authFetch("/api/ai/models");
         if (!response.ok) return;
         const data = (await response.json()) as {
           models?: AiModelOption[];
@@ -191,7 +192,7 @@ export default function Home() {
       const wav = await blobToWav(blob);
       const body = new FormData();
       body.append("audio", wav, "prompt.wav");
-      const response = await fetch("/api/ai/transcribe", { method: "POST", body });
+      const response = await authFetch("/api/ai/transcribe", { method: "POST", body });
       const data = (await response.json().catch(() => ({}))) as {
         transcript?: unknown;
         error?: unknown;

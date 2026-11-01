@@ -7,7 +7,7 @@ import { startCloudSync } from "@/lib/supabase/sync";
 /**
  * Hydrates the browser cache before paint, then starts account-scoped Neon
  * sync. Account caches stay owner-tagged and are only shown to the matching
- * session; signed-out guest data stays local.
+ * session; legacy browser data remains unchanged and is never auto-uploaded.
  */
 export default function StoreHydrator() {
   useLayoutEffect(() => {

@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import Link from "next/link";
+import { authRedirectUrl } from "@/lib/supabase/redirect-url";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useAuthSession } from "@/lib/supabase/use-auth-session";
 import LoadingSticker from "@/stickers/LoadingSticker";
@@ -19,7 +20,7 @@ export function ForgotPasswordScreen() {
     setNotice(null);
     try {
       const { error } = await supabaseBrowser().auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: authRedirectUrl("/reset-password"),
       });
       if (error) throw error;
       setNotice({ kind: "success", text: "If that address has an account, a password reset link is on its way. Check your inbox." });

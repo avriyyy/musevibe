@@ -1,12 +1,12 @@
 /**
  * Shared draft creation: the chat hands an idea over, the model names it, and
- * a draft project exists before the wizard opens. Signed-in projects are
- * created by the server in Neon; guest projects stay in localStorage.
+ * a draft project exists before the wizard opens. Every project is created
+ * server-side for the authenticated account; old browser data is untouched.
  */
 import { useVibe } from "./store";
 import { isWorkspaceSnapshot } from "./workspace-snapshot";
 import { buildNamePrompt, deriveProjectName, parseProjectName } from "./wizard";
-import { isSupabaseAuthConfigured, supabaseBrowser } from "./supabase/client";
+import { authFetch, isSupabaseAuthConfigured, supabaseBrowser } from "./supabase/client";
 
 export async function createDraftProject(
   ideaText: string,
@@ -15,14 +15,16 @@ export async function createDraftProject(
   const trimmed = ideaText.trim();
   const name = deriveProjectName(trimmed) || "Untitled project";
 
-  if (isSupabaseAuthConfigured()) {
-    const client = supabaseBrowser();
-    const { data, error } = await client.auth.getSession();
-    if (error) throw new Error("Could not verify your account. Please try again.");
-
-    const session = data.session;
-    if (session) {
-      const response = await fetch("/api/workspaces/create", {
+  if (!isSupabaseAuthConfigured()) {
+    throw new Error("Account sign-in is unavailable. Please configure authentication and try again.");
+  }
+  const client = supabaseBrowser();
+  const { data, error } = await client.auth.getSession();
+  if (error || !data.session) {
+    throw new Error("Sign in is required before creating a workspace.");
+  }
+  const session = data.session;
+  const response = await fetch("/api/workspaces/create", {
         method: "POST",
         cache: "no-store",
         headers: {
@@ -32,49 +34,34 @@ export async function createDraftProject(
         body: JSON.stringify({
           project: { name, idea: trimmed, ...(model ? { model } : {}) },
         }),
-      });
-      const payload = (await response.json().catch(() => null)) as
+  });
+  const payload = (await response.json().catch(() => null)) as
         | { snapshot?: unknown; revision?: unknown }
         | null;
-      if (
+  if (
         !response.ok ||
         !payload ||
         !isWorkspaceSnapshot(payload.snapshot) ||
         typeof payload.revision !== "string" ||
         !Number.isFinite(Date.parse(payload.revision))
-      ) {
-        throw new Error(
+  ) {
+    throw new Error(
           "Could not create your account workspace. Check your connection and try again.",
-        );
-      }
-
-      const project = payload.snapshot.project;
-      useVibe.getState().addProject(project);
-      useVibe.getState().setCloudOwner(project.id, session.user.id);
-      useVibe.getState().setCloudRevision(project.id, payload.revision);
-
-      const { data: latest, error: latestError } = await client.auth.getSession();
-      if (latestError || latest.session?.user.id !== session.user.id) {
-        throw new Error("Your account changed while creating the project. Please try again.");
-      }
-
-      void improveProjectName(project.id, trimmed, model, project.name);
-      return project.id;
-    }
+    );
   }
 
-  const id = crypto.randomUUID();
-  useVibe.getState().addProject({
-    id,
-    name,
-    idea: trimmed,
-    createdAt: new Date().toISOString(),
-    status: "draft",
-    wizardStep: 0,
-    model,
-  });
-  void improveProjectName(id, trimmed, model, name);
-  return id;
+  const project = payload.snapshot.project;
+  useVibe.getState().addProject(project);
+  useVibe.getState().setCloudOwner(project.id, session.user.id);
+  useVibe.getState().setCloudRevision(project.id, payload.revision);
+
+  const { data: latest, error: latestError } = await client.auth.getSession();
+  if (latestError || latest.session?.user.id !== session.user.id) {
+    throw new Error("Your account changed while creating the project. Please try again.");
+  }
+
+  void improveProjectName(project.id, trimmed, model, project.name);
+  return project.id;
 }
 
 async function improveProjectName(
@@ -84,7 +71,7 @@ async function improveProjectName(
   fallbackName: string,
 ): Promise<void> {
   try {
-    const response = await fetch("/api/ai/generate", {
+    const response = await authFetch("/api/ai/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

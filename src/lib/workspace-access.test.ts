@@ -2,9 +2,9 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { canViewWorkspace } from "./workspace-access";
 
-test("guest workspaces stay visible on the browser without an account", () => {
-  assert.equal(canViewWorkspace(undefined, false, null), true);
-  assert.equal(canViewWorkspace(undefined, true, null), true);
+test("legacy workspaces without an owner stay hidden and require explicit account ownership", () => {
+  assert.equal(canViewWorkspace(undefined, false, null), false);
+  assert.equal(canViewWorkspace(undefined, true, "user-a"), false);
 });
 
 test("account workspaces stay hidden until the matching session is ready", () => {

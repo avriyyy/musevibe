@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRuntimeEnv } from "@/lib/server/runtime-env";
+import { requireWorkspaceUser } from "@/lib/server/workspace-auth";
 
 const MAX_BYTES = 32 * 1024 * 1024;
 
@@ -8,6 +9,9 @@ const MAX_BYTES = 32 * 1024 * 1024;
  * clip and resamples it to the mono 16-bit PCM WAV the provider accepts.
  */
 export async function POST(req: Request) {
+  const auth = await requireWorkspaceUser(req);
+  if ("response" in auth) return auth.response;
+
   const url = getRuntimeEnv("AI_API_URL");
   const key = getRuntimeEnv("AI_API_KEY");
   if (!url || !key) {

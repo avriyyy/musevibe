@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { aiGenerate } from "@/lib/ai";
 import { parseDesignSystemResponse } from "@/lib/design-system";
 import { fetchPublicHttpUrl } from "@/lib/safe-fetch";
+import { requireWorkspaceUser } from "@/lib/server/workspace-auth";
 
 const MAX_REF_CHARS = 6000;
 const FETCH_TIMEOUT = 20000;
@@ -31,6 +32,9 @@ function extractText(html: string): { title: string; text: string } {
  * wizard previews before the project is finished.
  */
 export async function POST(req: Request) {
+  const auth = await requireWorkspaceUser(req);
+  if ("response" in auth) return auth.response;
+
   let url = "";
   let idea = "";
   try {

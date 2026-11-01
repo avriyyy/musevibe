@@ -88,6 +88,7 @@ import {
   type StackRecommendation,
 } from "@/lib/stack-options";
 import { useVibe } from "@/lib/store";
+import { authFetch } from "@/lib/supabase/client";
 import type { Project } from "@/lib/types";
 import { createDraftProject } from "@/lib/draft";
 import ProjectAccessGate from "@/components/ProjectAccessGate";
@@ -342,7 +343,7 @@ function WizardBody({ projectId }: { projectId: string }) {
       const current = useVibe
         .getState()
         .projects.find((item) => item.id === projectIdRef.current);
-      const response = await fetch("/api/ai/generate", {
+      const response = await authFetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -637,7 +638,7 @@ function WizardBody({ projectId }: { projectId: string }) {
       const summary = questions
         .map((question) => `${question.label}: ${answerToText(answers[question.id]) || "no answer"}`)
         .join(" | ");
-      const response = await fetch("/api/ai/generate", {
+      const response = await authFetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -729,7 +730,7 @@ function WizardBody({ projectId }: { projectId: string }) {
     setLogoError("");
 
     try {
-      const response = await fetch("/api/ai/generate", {
+      const response = await authFetch("/api/ai/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -1,14 +1,10 @@
-import AccountFrame from "@/components/AccountFrame";
+import AuthPageFrame from "@/components/AuthPageFrame";
 import { ForgotPasswordScreen } from "@/components/PasswordRecoveryScreens";
 
 export default function ForgotPasswordPage() {
   return (
-    <AccountFrame
-      active="account"
-      title="Recover your account"
-      description="Request a secure password reset link by email."
-    >
+    <AuthPageFrame>
       <ForgotPasswordScreen />
-    </AccountFrame>
+    </AuthPageFrame>
   );
 }

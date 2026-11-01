@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRuntimeEnv } from "@/lib/server/runtime-env";
+import { requireWorkspaceUser } from "@/lib/server/workspace-auth";
 import {
   DEFAULT_MODEL,
   FALLBACK_MODELS,
@@ -13,7 +14,10 @@ import {
  * models are filtered out: they cannot answer the text prompts this workspace
  * sends, so offering them would be a lie.
  */
-export async function GET() {
+export async function GET(req: Request) {
+  const auth = await requireWorkspaceUser(req);
+  if ("response" in auth) return auth.response;
+
   const url = getRuntimeEnv("AI_API_URL");
   const key = getRuntimeEnv("AI_API_KEY");
 

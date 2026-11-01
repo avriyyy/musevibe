@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 import { isSupabaseAuthConfigured, supabaseBrowser } from "./client";
 
-/** Keeps optional account UI in sync without gating the local workspace. */
+/** Resolves the browser account session used by the mandatory route gate. */
 export function useAuthSession() {
   const configured = isSupabaseAuthConfigured();
   const [user, setUser] = useState<User | null>(null);

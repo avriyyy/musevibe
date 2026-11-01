@@ -53,13 +53,13 @@ export default function ProfileScreen() {
   };
 
   if (!auth.configured) {
-    return <StateCard title="Profile unavailable" body="Supabase Auth is not configured in this deployment. You can still use a local guest workspace." />;
+    return <StateCard title="Profile unavailable" body="Supabase Auth is not configured in this deployment. A verified account is required to use MuseVibe." />;
   }
   if (!auth.ready) {
     return <StateCard title="Loading profile" body="Checking your account session…"><LoadingSticker size={44} label="Checking account" /></StateCard>;
   }
   if (!auth.user) {
-    return <StateCard title="Sign in to view your profile" body="Your profile belongs to your Supabase Auth account. Guest workspaces remain local to this browser."><Link href="/sign-in" className="inline-flex h-10 items-center rounded-full bg-meta px-4 text-[13px] font-semibold text-white hover:bg-meta-hover">Sign in</Link><Link href="/register" className="ml-2 inline-flex h-10 items-center rounded-full border border-white/15 px-4 text-[13px] text-[#d4d8e0] hover:bg-white/5">Create account</Link></StateCard>;
+    return <StateCard title="Sign-in required" body="A verified account is required to view your profile." />;
   }
 
   const title = name.trim() || auth.user.email || "MuseVibe member";
@@ -98,7 +98,7 @@ export default function ProfileScreen() {
         <dl className="mt-4 space-y-4 text-[12px]">
           <div><dt className="text-[#7c8493]">Member since</dt><dd className="mt-1 text-[#d4d8e0]">{joined}</dd></div>
           <div><dt className="text-[#7c8493]">Sign-in method</dt><dd className="mt-1 text-[#d4d8e0]">Email and password</dd></div>
-          <div><dt className="text-[#7c8493]">Workspace storage</dt><dd className="mt-1 leading-5 text-[#d4d8e0]">Account-owned workspaces sync to Neon. Guest projects stay in this browser.</dd></div>
+          <div><dt className="text-[#7c8493]">Workspace storage</dt><dd className="mt-1 leading-5 text-[#d4d8e0]">Account-owned workspaces sync to Neon. Existing browser data remains untouched and is not uploaded automatically.</dd></div>
         </dl>
         <Link href="/settings" className="mt-5 inline-flex text-[12px] font-medium text-[#bfc7d4] underline decoration-white/20 underline-offset-4 hover:text-white">Open settings</Link>
       </aside>

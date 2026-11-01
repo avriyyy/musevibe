@@ -8,7 +8,7 @@ export function isSupabaseAuthConfigured() {
   return Boolean(SUPABASE_URL && SUPABASE_ANON_KEY);
 }
 
-/** Public-key-only browser client shared by optional auth and local-safe reads. */
+/** Public-key-only browser client for required account authentication. */
 export function supabaseBrowser() {
   if (!isSupabaseAuthConfigured()) {
     throw new Error("Supabase Auth is not configured for this build.");
@@ -23,4 +23,16 @@ export function supabaseBrowser() {
     });
   }
   return browserClient;
+}
+
+export async function authFetch(input: RequestInfo | URL, init: RequestInit = {}) {
+  const { data, error } = await supabaseBrowser().auth.getSession();
+  const accessToken = data.session?.access_token;
+  if (error || !accessToken) {
+    throw new Error("Sign in is required to make this request.");
+  }
+
+  const headers = new Headers(init.headers);
+  headers.set("Authorization", `Bearer ${accessToken}`);
+  return fetch(input, { ...init, headers });
 }

@@ -10,7 +10,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "tsx --test src/lib/*.test.ts src/lib/server/*.test.ts"
+    "test": "tsx --test src/lib/*.test.ts src/lib/server/*.test.ts src/lib/supabase/*.test.ts"
   },
   "dependencies": {
     "@astryxdesign/core": "^0.7.4",

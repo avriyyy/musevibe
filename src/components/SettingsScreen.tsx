@@ -3,10 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { FALLBACK_MODELS, DEFAULT_MODEL, type AiModelOption } from "@/lib/models";
-import { supabaseBrowser } from "@/lib/supabase/client";
+import { authFetch, supabaseBrowser } from "@/lib/supabase/client";
 import { useAuthSession } from "@/lib/supabase/use-auth-session";
 import { useCloudSyncStatus } from "@/lib/supabase/sync";
 import { useVibe } from "@/lib/store";
+import { authRedirectUrl } from "@/lib/supabase/redirect-url";
 import LoadingSticker from "@/stickers/LoadingSticker";
 
 export default function SettingsScreen() {
@@ -18,7 +19,7 @@ export default function SettingsScreen() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ kind: "success" | "error"; text: string } | null>(null);
   const workspaceCount = useVibe((state) => state.projects.filter((project) =>
-    auth.user ? state.cloudOwnerByProject[project.id] === auth.user.id : !state.cloudOwnerByProject[project.id],
+    auth.user ? state.cloudOwnerByProject[project.id] === auth.user.id : false,
   ).length);
 
   useEffect(() => {
@@ -27,7 +28,7 @@ export default function SettingsScreen() {
       let available = FALLBACK_MODELS;
       let fallback = DEFAULT_MODEL;
       try {
-        const response = await fetch("/api/ai/models", { cache: "no-store" });
+        const response = await authFetch("/api/ai/models", { cache: "no-store" });
         if (response.ok) {
           const data = await response.json() as { models?: AiModelOption[]; default?: string };
           if (Array.isArray(data.models) && data.models.length) available = data.models;
@@ -68,7 +69,7 @@ export default function SettingsScreen() {
     setNotice(null);
     try {
       const { error } = await supabaseBrowser().auth.resetPasswordForEmail(auth.user.email, {
-        redirectTo: `${window.location.origin}/reset-password`,
+        redirectTo: authRedirectUrl("/reset-password"),
       });
       if (error) throw error;
       setNotice({ kind: "success", text: "Password reset link sent. Check your inbox to continue." });
@@ -85,7 +86,7 @@ export default function SettingsScreen() {
     try {
       const { error } = await supabaseBrowser().auth.signOut({ scope: "local" });
       if (error) throw error;
-      setNotice({ kind: "success", text: "Signed out on this device. Guest workspaces remain available here." });
+      setNotice({ kind: "success", text: "Signed out on this device. Saved browser data has not been changed." });
     } catch {
       setNotice({ kind: "error", text: "We could not sign out. Please try again." });
     } finally {
@@ -93,9 +94,9 @@ export default function SettingsScreen() {
     }
   };
 
-  if (!auth.configured) return <StateCard title="Account settings unavailable" body="Supabase Auth is not configured in this deployment. Guest projects remain saved locally." />;
+  if (!auth.configured) return <StateCard title="Account settings unavailable" body="Supabase Auth is not configured in this deployment. A verified account is required to use MuseVibe." />;
   if (!auth.ready) return <StateCard title="Loading settings" body="Checking your account session…"><LoadingSticker size={44} label="Checking account" /></StateCard>;
-  if (!auth.user) return <StateCard title="Sign in to manage your settings" body="Your account settings and cloud-sync status appear after you sign in. Guest workspaces stay in this browser."><Link href="/sign-in" className="inline-flex h-10 items-center rounded-full bg-meta px-4 text-[13px] font-semibold text-white hover:bg-meta-hover">Sign in</Link><Link href="/register" className="ml-2 inline-flex h-10 items-center rounded-full border border-white/15 px-4 text-[13px] text-[#d4d8e0] hover:bg-white/5">Create account</Link></StateCard>;
+  if (!auth.user) return <StateCard title="Sign-in required" body="A verified account is required to view account settings." />;
 
   const syncLabel = syncStatus === "syncing" ? "Syncing" : syncStatus === "synced" ? "Up to date" : syncStatus === "error" ? "Needs attention" : "Waiting for connection";
   return (
@@ -113,7 +114,7 @@ export default function SettingsScreen() {
 
       <section className="rounded-3xl border border-white/10 bg-[#13151a] p-5 sm:p-7">
         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-[#7c8493]">Workspace sync</p><div className="mt-2 flex flex-wrap items-center justify-between gap-3"><h2 className="text-[17px] font-semibold">{syncLabel}</h2><span className={`rounded-full px-3 py-1 text-[11px] ${syncStatus === "error" ? "bg-red-400/10 text-[#ff9c9c]" : syncStatus === "synced" ? "bg-emerald-400/10 text-[#9fe6bc]" : "bg-white/5 text-[#b4bbc7]"}`}>{workspaceCount} account {workspaceCount === 1 ? "workspace" : "workspaces"}</span></div>
-        <p className="mt-3 max-w-3xl text-[13px] leading-6 text-[#9aa0ae]">Signed-in workspaces are stored in Neon and checked against your Supabase account on the server. A recovery copy stays on this device. Guest projects are local and are not uploaded automatically.</p>
+        <p className="mt-3 max-w-3xl text-[13px] leading-6 text-[#9aa0ae]">Account-owned workspaces are stored in Neon and checked against your Supabase account on the server. A recovery copy stays on this device and is not uploaded automatically if it is not linked to your account.</p>
         <Link href="/projects" className="mt-4 inline-flex text-[12px] font-medium text-[#bfc7d4] underline decoration-white/20 underline-offset-4 hover:text-white">View projects</Link>
       </section>
 

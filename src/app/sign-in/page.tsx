@@ -1,14 +1,10 @@
-import AccountFrame from "@/components/AccountFrame";
+import AuthPageFrame from "@/components/AuthPageFrame";
 import AuthForm from "@/components/AuthForm";
 
 export default function SignInPage() {
   return (
-    <AccountFrame
-      active="account"
-      title="Sign in to MuseVibe"
-      description="Access your account-owned workspaces while keeping guest projects local to this browser."
-    >
+    <AuthPageFrame>
       <AuthForm initialMode="sign-in" />
-    </AccountFrame>
+    </AuthPageFrame>
   );
 }

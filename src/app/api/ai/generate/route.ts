@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
 import { aiGenerate, aiGenerateLogo, type AiGenerateKind } from "@/lib/ai";
+import { requireWorkspaceUser } from "@/lib/server/workspace-auth";
 
 const KINDS: AiGenerateKind[] = ["prd", "tasks", "brief", "code", "questions", "logo", "stack", "name", "doc", "prototype", "chat", "design-system", "pages", "logo-svg"];
 
 export async function POST(req: Request) {
+  const auth = await requireWorkspaceUser(req);
+  if ("response" in auth) return auth.response;
+
   let body: unknown;
   try {
     body = await req.json();

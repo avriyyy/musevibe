@@ -3,5 +3,5 @@ export function canViewWorkspace(
   authReady: boolean,
   userId: string | null,
 ): boolean {
-  return ownerId === undefined || (authReady && userId !== null && ownerId === userId);
+  return authReady && userId !== null && ownerId !== undefined && ownerId === userId;
 }

@@ -47,7 +47,7 @@ function hasStatus(error: unknown, status: number): boolean {
   return isObject(error) && error.status === status;
 }
 
-/** Sync only workspaces explicitly created for a verified account; guest projects stay local. */
+/** Sync only workspaces explicitly created for a verified account; legacy browser data is never imported automatically. */
 export function startCloudSync() {
   if (!isSupabaseAuthConfigured()) {
     setStatus("local");
