@@ -8,6 +8,7 @@ import {
   FALLBACK_MODELS,
   type AiModelOption,
 } from "@/lib/models";
+import AccountShortcut from "@/components/AccountShortcut";
 import Sidebar from "@/components/Sidebar";
 
 const PHRASES = [
@@ -152,6 +153,7 @@ export default function Home() {
   const submitInFlight = useRef(false);
   const [naming, setNaming] = useState(false);
   const [namingStage, setNamingStage] = useState(0);
+  const [createError, setCreateError] = useState("");
 
   // While the model names the project the screen shows a blurred overlay, so
   // the wait is visible from the first frame. The second stage only describes
@@ -262,15 +264,21 @@ export default function Home() {
     const text = idea.trim();
     if (!text || submitInFlight.current) return;
     submitInFlight.current = true;
+    setCreateError("");
     setNamingStage(0);
     setNaming(true);
 
     let id = "";
     try {
       id = await createDraftProject(text, model);
-    } catch {
+    } catch (error) {
       setNaming(false);
       submitInFlight.current = false;
+      setCreateError(
+        error instanceof Error
+          ? error.message
+          : "Could not create the project. Check your connection and try again.",
+      );
       return;
     }
 
@@ -352,6 +360,9 @@ export default function Home() {
               <line x1="9.5" y1="4.5" x2="9.5" y2="19.5" />
             </svg>
           </button>
+          <div className="ml-auto">
+            <AccountShortcut />
+          </div>
         </header>
 
         <main className="flex-1 min-h-0 overflow-y-auto">
@@ -360,13 +371,21 @@ export default function Home() {
               MuseVibe, what are we building?
             </h1>
 
+            {createError && (
+              <p role="alert" className="mt-4 text-center text-[13px] text-[#ff9c9c]">
+                {createError}
+              </p>
+            )}
             <div className="mt-8 w-full rounded-2xl border border-white/10 bg-[#17181d] shadow-2xl transition-colors focus-within:border-white/25">
               <div className="scroll-inset rounded-t-2xl">
                 <textarea
                   id="idea"
                   aria-label="Describe your project idea"
                   value={idea}
-                  onChange={(e) => setIdea(e.target.value)}
+                  onChange={(e) => {
+                    setIdea(e.target.value);
+                    if (createError) setCreateError("");
+                  }}
                   onFocus={() => setFocused(true)}
                   onBlur={() => setFocused(false)}
                   onKeyDown={(e) => {

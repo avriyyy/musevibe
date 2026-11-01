@@ -34,9 +34,11 @@ import {
 } from "@heroicons/react/24/outline";
 import DocumentsView from "@/components/DocumentsView";
 import DesignSidebar from "@/components/DesignSidebar";
+import AccountShortcut from "@/components/AccountShortcut";
 import type { CanvasFrame } from "@/components/DesignCanvas";
 import WorkspaceChat from "@/components/WorkspaceChat";
 import WorkspacePicker from "@/components/WorkspacePicker";
+import ProjectAccessGate from "@/components/ProjectAccessGate";
 import LoadingSticker from "@/stickers/LoadingSticker";
 import { CanvasSkeleton, WorkspaceSkeleton } from "@/components/LoadingState";
 import { FRAME_H, FRAME_W, parseCanvasShapes } from "@/lib/canvas";
@@ -307,6 +309,14 @@ function localDraftNote(reply: AiReply, item: string): string {
 }
 
 export default function IdeWorkspace({ projectId }: { projectId: string }) {
+  return (
+    <ProjectAccessGate projectId={projectId}>
+      <IdeWorkspaceContent projectId={projectId} />
+    </ProjectAccessGate>
+  );
+}
+
+function IdeWorkspaceContent({ projectId }: { projectId: string }) {
   const hydrated = useSyncExternalStore(
     subscribeHydration,
     getHydrated,
@@ -1982,6 +1992,9 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             );
           })}
         </nav>
+        <div className="hidden lg:block">
+          <AccountShortcut />
+        </div>
         <button
           type="button"
           onClick={() => setAgentModalOpen(true)}

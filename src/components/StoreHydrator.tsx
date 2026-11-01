@@ -5,8 +5,9 @@ import { useVibe } from "@/lib/store";
 import { startCloudSync } from "@/lib/supabase/sync";
 
 /**
- * Hydrates the browser cache before paint, then starts account-scoped cloud
- * sync. Signed-out use remains local-first.
+ * Hydrates the browser cache before paint, then starts account-scoped Neon
+ * sync. Account caches stay owner-tagged and are only shown to the matching
+ * session; signed-out guest data stays local.
  */
 export default function StoreHydrator() {
   useLayoutEffect(() => {

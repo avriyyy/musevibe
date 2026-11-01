@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getRuntimeEnv } from "@/lib/server/runtime-env";
 
 const MAX_BYTES = 32 * 1024 * 1024;
 
@@ -7,8 +8,8 @@ const MAX_BYTES = 32 * 1024 * 1024;
  * clip and resamples it to the mono 16-bit PCM WAV the provider accepts.
  */
 export async function POST(req: Request) {
-  const url = process.env.AI_API_URL;
-  const key = process.env.AI_API_KEY;
+  const url = getRuntimeEnv("AI_API_URL");
+  const key = getRuntimeEnv("AI_API_KEY");
   if (!url || !key) {
     return NextResponse.json(
       { error: "Voice transcription is not configured." },
@@ -35,7 +36,7 @@ export async function POST(req: Request) {
   const root = base.replace(/\/v1$/, "");
   const request = {
     mode: "PUSH_TO_TALK",
-    model: process.env.AI_VOICE_MODEL || "muse-voice-transcribe-1.0",
+    model: getRuntimeEnv("AI_VOICE_MODEL") || "muse-voice-transcribe-1.0",
     audioEncoding: "WAV",
     languageBias: ["English", "Indonesian"],
   };

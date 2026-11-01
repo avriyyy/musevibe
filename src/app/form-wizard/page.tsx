@@ -90,6 +90,7 @@ import {
 import { useVibe } from "@/lib/store";
 import type { Project } from "@/lib/types";
 import { createDraftProject } from "@/lib/draft";
+import ProjectAccessGate from "@/components/ProjectAccessGate";
 import {
   resolveWizardFramework,
   restoreWizardAnswers,
@@ -173,6 +174,7 @@ function Wizard() {
   const searchParams = useSearchParams();
   const liveId = searchParams.get("id") ?? "";
   const [createdId, setCreatedId] = useState("");
+  const [creationError, setCreationError] = useState("");
   const projectId = liveId || createdId;
   const resolvingRef = useRef(false);
 
@@ -186,6 +188,12 @@ function Wizard() {
     void createDraftProject(fallbackIdea).then((id) => {
       setCreatedId(id);
       router.replace(`/form-wizard?id=${id}`);
+    }).catch((error: unknown) => {
+      setCreationError(
+        error instanceof Error
+          ? error.message
+          : "Could not create the project. Check your connection and try again.",
+      );
     });
   }, [projectId, router, setDraftIdea, searchParams]);
 
@@ -198,11 +206,12 @@ function Wizard() {
         content={
           <LayoutContent>
             <VStack gap={3}>
-              <Heading level={1}>Project not found</Heading>
-              <Text type="supporting" color="secondary">
-                This setup link has no project behind it. Start from the home
-                screen by typing your idea into the chat.
-              </Text>
+                  <Heading level={1}>
+                    {creationError ? "Could not create the project" : "Project not found"}
+                  </Heading>
+                  <Text type="supporting" color="secondary">
+                    {creationError || "This setup link has no project behind it. Start from the home screen by typing your idea into the chat."}
+                  </Text>
               <HStack gap={3}>
                 <Button
                   label="Back home"
@@ -222,7 +231,11 @@ function Wizard() {
   // Switching projects unmounts the previous body: in-flight question / stack
   // / logo requests close over the old instance and can no longer write into
   // the new one, and stale questions / answers / recommendations never leak.
-  return <WizardBody key={projectId} projectId={projectId} />;
+  return (
+    <ProjectAccessGate projectId={projectId}>
+      <WizardBody key={projectId} projectId={projectId} />
+    </ProjectAccessGate>
+  );
 }
 
 function WizardBody({ projectId }: { projectId: string }) {

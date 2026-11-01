@@ -2,6 +2,7 @@ import type { Prd } from "./types";
 import { FALLBACK_QUESTIONS, deriveProjectName } from "./wizard";
 import { DEFAULT_MODEL } from "./models";
 import { generationQualitySystemPrompt } from "./generation-quality";
+import { getRuntimeEnv } from "./server/runtime-env";
 
 // Abstraction AI agar bisa swap provider Meta (Muse Spark).
 // Kalau AI_API_URL / AI_API_KEY kosong -> mock lokal, demo tetap jalan.
@@ -32,8 +33,8 @@ export async function aiGenerate(
   requestSignal?: AbortSignal,
 ): Promise<AiGenerateResult> {
   void requestedModel;
-  const url = process.env.AI_API_URL;
-  const key = process.env.AI_API_KEY;
+  const url = getRuntimeEnv("AI_API_URL");
+  const key = getRuntimeEnv("AI_API_KEY");
   // Old project settings and environment values cannot switch this provider.
   const model = DEFAULT_MODEL;
 
@@ -285,9 +286,9 @@ export async function aiGenerateLogo(
   prompt: string,
   requestSignal?: AbortSignal,
 ): Promise<AiLogoResult> {
-  const url = process.env.AI_API_URL;
-  const key = process.env.AI_API_KEY;
-  const model = process.env.AI_IMAGE_MODEL || "muse-image-1.0";
+  const url = getRuntimeEnv("AI_API_URL");
+  const key = getRuntimeEnv("AI_API_KEY");
+  const model = getRuntimeEnv("AI_IMAGE_MODEL") || "muse-image-1.0";
 
   if (!url || !key) return { image: null, source: "local" };
 

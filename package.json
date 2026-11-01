@@ -9,12 +9,14 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "tsx --test src/lib/*.test.ts src/lib/server/*.test.ts"
   },
   "dependencies": {
     "@astryxdesign/core": "^0.7.4",
     "@astryxdesign/theme-neutral": "^0.7.4",
     "@heroicons/react": "^2.2.0",
+    "@neondatabase/serverless": "^1.2.0",
     "@stylexjs/stylex": "^0.19.1",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.118.0",
@@ -35,6 +37,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.3",
     "tailwindcss": "^4",
+    "tsx": "^4.23.15",
     "typescript": "^5"
   }
 }

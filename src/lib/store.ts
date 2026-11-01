@@ -1,6 +1,7 @@
 import { create, type StateCreator } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import type {
+  CloudWorkspaceRecord,
   CloudWorkspaceSnapshot,
   CodeFile,
   Project,
@@ -8,6 +9,7 @@ import type {
   Screen,
   Task,
 } from "./types";
+import { decideWorkspaceMerge } from "./workspace-merge";
 
 interface VibeState {
   projects: Project[];
@@ -18,9 +20,13 @@ interface VibeState {
   prdByProject: Record<string, string>;
   docsByProject: Record<string, ProjectDoc[]>;
   cloudOwnerByProject: Record<string, string>;
+  cloudRevisionByProject: Record<string, string>;
+  cloudConflictByProject: Record<string, boolean>;
   setDraftIdea: (idea: string) => void;
-  mergeCloudWorkspaces: (snapshots: CloudWorkspaceSnapshot[], ownerId: string) => void;
+  mergeCloudWorkspaces: (records: CloudWorkspaceRecord[], ownerId: string) => void;
   setCloudOwner: (projectId: string, ownerId: string) => void;
+  setCloudRevision: (projectId: string, revision: string) => void;
+  setCloudConflict: (projectId: string, conflict: boolean) => void;
   addProject: (p: Project) => void;
   updateProject: (id: string, patch: Partial<Project>) => void;
   touchProject: (id: string) => void;
@@ -98,52 +104,92 @@ const vibeState: StateCreator<VibeState> = (set) => ({
   prdByProject: { "demo-indie": "# PRD Demo\n\nProblem: indie devs keep switching tools." },
   docsByProject: {},
   cloudOwnerByProject: {},
+  cloudRevisionByProject: {},
+  cloudConflictByProject: {},
 
   setDraftIdea: (idea) => set({ draftIdea: idea }),
-  mergeCloudWorkspaces: (snapshots, ownerId) =>
+  mergeCloudWorkspaces: (records, ownerId) =>
     set((state) => {
-      const ids = new Set(snapshots.map((snapshot) => snapshot.project.id));
+      const remoteIds = new Set(records.map((record) => record.snapshot.project.id));
+      const projectsById = new Map(state.projects.map((project) => [project.id, project]));
+      const tasksByProject = { ...state.tasksByProject };
+      const screensByProject = { ...state.screensByProject };
+      const filesByProject = { ...state.filesByProject };
+      const prdByProject = { ...state.prdByProject };
+      const docsByProject = { ...state.docsByProject };
+      const cloudOwnerByProject = { ...state.cloudOwnerByProject };
+      const cloudRevisionByProject = { ...state.cloudRevisionByProject };
+      const cloudConflictByProject = { ...state.cloudConflictByProject };
+
+      for (const { snapshot, revision } of records) {
+        const projectId = snapshot.project.id;
+        const localProject = projectsById.get(projectId);
+        const localSnapshot: CloudWorkspaceSnapshot | undefined = localProject
+          ? {
+              version: 1,
+              project: localProject,
+              prd: state.prdByProject[projectId] ?? "",
+              tasks: state.tasksByProject[projectId] ?? [],
+              screens: state.screensByProject[projectId] ?? [],
+              files: state.filesByProject[projectId] ?? [],
+              docs: state.docsByProject[projectId] ?? [],
+            }
+          : undefined;
+        const decision = decideWorkspaceMerge({
+          existingOwnerId: cloudOwnerByProject[projectId],
+          accountId: ownerId,
+          localRevision: cloudRevisionByProject[projectId],
+          remoteRevision: revision,
+          localSnapshotJson: localSnapshot ? JSON.stringify(localSnapshot) : undefined,
+          remoteSnapshotJson: JSON.stringify(snapshot),
+        });
+
+        cloudOwnerByProject[projectId] = ownerId;
+        if (decision === "replace") {
+          projectsById.set(projectId, snapshot.project);
+          tasksByProject[projectId] = snapshot.tasks;
+          screensByProject[projectId] = snapshot.screens;
+          filesByProject[projectId] = snapshot.files;
+          prdByProject[projectId] = snapshot.prd;
+          docsByProject[projectId] = snapshot.docs;
+          cloudRevisionByProject[projectId] = revision;
+          delete cloudConflictByProject[projectId];
+        } else if (decision === "keep-pending") {
+          cloudRevisionByProject[projectId] = revision;
+          delete cloudConflictByProject[projectId];
+        } else {
+          cloudConflictByProject[projectId] = true;
+        }
+      }
+
+      for (const [projectId, existingOwnerId] of Object.entries(cloudOwnerByProject)) {
+        if (
+          existingOwnerId === ownerId &&
+          !remoteIds.has(projectId) &&
+          !cloudRevisionByProject[projectId]
+        ) {
+          // Legacy Supabase-only or otherwise untracked cache: keep it locally,
+          // but do not silently create or upload a Neon row for it.
+          cloudConflictByProject[projectId] = true;
+        }
+      }
+
+      const remoteProjects = records
+        .map((record) => projectsById.get(record.snapshot.project.id))
+        .filter((project): project is Project => project !== undefined);
       return {
         projects: [
-          ...snapshots.map((snapshot) => snapshot.project),
-          ...state.projects.filter((project) => !ids.has(project.id)),
+          ...remoteProjects,
+          ...state.projects.filter((project) => !remoteIds.has(project.id)),
         ],
-        tasksByProject: {
-          ...state.tasksByProject,
-          ...Object.fromEntries(
-            snapshots.map((snapshot) => [snapshot.project.id, snapshot.tasks]),
-          ),
-        },
-        screensByProject: {
-          ...state.screensByProject,
-          ...Object.fromEntries(
-            snapshots.map((snapshot) => [snapshot.project.id, snapshot.screens]),
-          ),
-        },
-        filesByProject: {
-          ...state.filesByProject,
-          ...Object.fromEntries(
-            snapshots.map((snapshot) => [snapshot.project.id, snapshot.files]),
-          ),
-        },
-        prdByProject: {
-          ...state.prdByProject,
-          ...Object.fromEntries(
-            snapshots.map((snapshot) => [snapshot.project.id, snapshot.prd]),
-          ),
-        },
-        docsByProject: {
-          ...state.docsByProject,
-          ...Object.fromEntries(
-            snapshots.map((snapshot) => [snapshot.project.id, snapshot.docs]),
-          ),
-        },
-        cloudOwnerByProject: {
-          ...state.cloudOwnerByProject,
-          ...Object.fromEntries(
-            snapshots.map((snapshot) => [snapshot.project.id, ownerId]),
-          ),
-        },
+        tasksByProject,
+        screensByProject,
+        filesByProject,
+        prdByProject,
+        docsByProject,
+        cloudOwnerByProject,
+        cloudRevisionByProject,
+        cloudConflictByProject,
       };
     }),
   setCloudOwner: (projectId, ownerId) =>
@@ -153,6 +199,20 @@ const vibeState: StateCreator<VibeState> = (set) => ({
         [projectId]: ownerId,
       },
     })),
+  setCloudRevision: (projectId, revision) =>
+    set((state) => ({
+      cloudRevisionByProject: {
+        ...state.cloudRevisionByProject,
+        [projectId]: revision,
+      },
+    })),
+  setCloudConflict: (projectId, conflict) =>
+    set((state) => {
+      const cloudConflictByProject = { ...state.cloudConflictByProject };
+      if (conflict) cloudConflictByProject[projectId] = true;
+      else delete cloudConflictByProject[projectId];
+      return { cloudConflictByProject };
+    }),
   updateProject: (id, patch) =>
     set((s) => ({
       projects: s.projects.map((p) =>
@@ -184,73 +244,114 @@ const vibeState: StateCreator<VibeState> = (set) => ({
       ),
     })),
   setPrd: (projectId, md) =>
-    set((s) => ({ prdByProject: { ...s.prdByProject, [projectId]: md } })),
+    set((s) =>
+      s.projects.some((project) => project.id === projectId)
+        ? { prdByProject: { ...s.prdByProject, [projectId]: md } }
+        : s,
+    ),
   setTasks: (projectId, tasks) =>
-    set((s) => ({ tasksByProject: { ...s.tasksByProject, [projectId]: tasks } })),
+    set((s) =>
+      s.projects.some((project) => project.id === projectId)
+        ? { tasksByProject: { ...s.tasksByProject, [projectId]: tasks } }
+        : s,
+    ),
   moveTask: (projectId, taskId, status) =>
     set((s) => ({
-      tasksByProject: {
-        ...s.tasksByProject,
-        [projectId]: (s.tasksByProject[projectId] || []).map((t) =>
-          t.id === taskId ? { ...t, status } : t
-        ),
-      },
+      ...(s.projects.some((project) => project.id === projectId)
+        ? {
+            tasksByProject: {
+              ...s.tasksByProject,
+              [projectId]: (s.tasksByProject[projectId] || []).map((t) =>
+                t.id === taskId ? { ...t, status } : t,
+              ),
+            },
+          }
+        : {}),
     })),
   removeTask: (projectId, taskId) =>
-    set((s) => ({
-      tasksByProject: {
-        ...s.tasksByProject,
-        [projectId]: (s.tasksByProject[projectId] || []).filter(
-          (t) => t.id !== taskId
-        ),
-      },
-    })),
+    set((s) =>
+      s.projects.some((project) => project.id === projectId)
+        ? {
+            tasksByProject: {
+              ...s.tasksByProject,
+              [projectId]: (s.tasksByProject[projectId] || []).filter(
+                (t) => t.id !== taskId,
+              ),
+            },
+          }
+        : s,
+    ),
   setScreens: (projectId, screens) =>
-    set((s) => ({ screensByProject: { ...s.screensByProject, [projectId]: screens } })),
+    set((s) =>
+      s.projects.some((project) => project.id === projectId)
+        ? { screensByProject: { ...s.screensByProject, [projectId]: screens } }
+        : s,
+    ),
   setFiles: (projectId, files) =>
-    set((s) => ({ filesByProject: { ...s.filesByProject, [projectId]: files } })),
+    set((s) =>
+      s.projects.some((project) => project.id === projectId)
+        ? { filesByProject: { ...s.filesByProject, [projectId]: files } }
+        : s,
+    ),
   updateFile: (projectId, fileId, content, source) =>
     set((s) => ({
-      filesByProject: {
-        ...s.filesByProject,
-        [projectId]: (s.filesByProject[projectId] || []).map((f) =>
-          f.id === fileId
-            ? { ...f, content, ...(source ? { source } : {}) }
-            : f,
-        ),
-      },
+      ...(s.projects.some((project) => project.id === projectId)
+        ? {
+            filesByProject: {
+              ...s.filesByProject,
+              [projectId]: (s.filesByProject[projectId] || []).map((f) =>
+                f.id === fileId
+                  ? { ...f, content, ...(source ? { source } : {}) }
+                  : f,
+              ),
+            },
+          }
+        : {}),
     })),
   seedDocs: (projectId, docs) =>
     set((s) =>
+      s.projects.some((project) => project.id === projectId) &&
       s.docsByProject[projectId] === undefined
         ? { docsByProject: { ...s.docsByProject, [projectId]: docs } }
         : s,
     ),
   addDoc: (projectId, doc) =>
-    set((s) => ({
-      docsByProject: {
-        ...s.docsByProject,
-        [projectId]: [...(s.docsByProject[projectId] || []), doc],
-      },
-    })),
+    set((s) =>
+      s.projects.some((project) => project.id === projectId)
+        ? {
+            docsByProject: {
+              ...s.docsByProject,
+              [projectId]: [...(s.docsByProject[projectId] || []), doc],
+            },
+          }
+        : s,
+    ),
   updateDoc: (projectId, docId, patch) =>
     set((s) => ({
-      docsByProject: {
-        ...s.docsByProject,
-        [projectId]: (s.docsByProject[projectId] || []).map((d) =>
-          d.id === docId ? { ...d, ...patch } : d
-        ),
-      },
+      ...(s.projects.some((project) => project.id === projectId)
+        ? {
+            docsByProject: {
+              ...s.docsByProject,
+              [projectId]: (s.docsByProject[projectId] || []).map((d) =>
+                d.id === docId ? { ...d, ...patch } : d,
+              ),
+            },
+          }
+        : {}),
     })),
   removeDoc: (projectId, docId) =>
-    set((s) => ({
-      docsByProject: {
-        ...s.docsByProject,
-        [projectId]: (s.docsByProject[projectId] || []).filter(
-          (d) => d.id !== docId
-        ),
-      },
-    })),
+    set((s) =>
+      s.projects.some((project) => project.id === projectId)
+        ? {
+            docsByProject: {
+              ...s.docsByProject,
+              [projectId]: (s.docsByProject[projectId] || []).filter(
+                (d) => d.id !== docId,
+              ),
+            },
+          }
+        : s,
+    ),
 });
 
 /**
@@ -273,6 +374,8 @@ export const useVibe = create<VibeState>()(
       prdByProject: state.prdByProject,
       docsByProject: state.docsByProject,
       cloudOwnerByProject: state.cloudOwnerByProject,
+      cloudRevisionByProject: state.cloudRevisionByProject,
+      cloudConflictByProject: state.cloudConflictByProject,
     }),
   }),
 );

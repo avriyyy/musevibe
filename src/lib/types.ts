@@ -114,3 +114,9 @@ export interface CloudWorkspaceSnapshot {
   files: CodeFile[];
   docs: ProjectDoc[];
 }
+
+/** Server revision is `updated_at` from Neon and changes after every successful write. */
+export interface CloudWorkspaceRecord {
+  snapshot: CloudWorkspaceSnapshot;
+  revision: string;
+}

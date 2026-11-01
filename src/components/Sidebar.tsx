@@ -13,6 +13,7 @@ import Link from "next/link";
 import { useVibe } from "@/lib/store";
 import { supabaseBrowser } from "@/lib/supabase/client";
 import { useAuthSession } from "@/lib/supabase/use-auth-session";
+import { canViewWorkspace } from "@/lib/workspace-access";
 import { initials } from "@/lib/logo";
 import { platformLabel } from "@/lib/project-options";
 import { frameworkLabel } from "@/lib/stack-options";
@@ -82,7 +83,7 @@ export default function Sidebar({
   const signOut = async () => {
     setAuthError("");
     try {
-      const { error } = await supabaseBrowser().auth.signOut();
+      const { error } = await supabaseBrowser().auth.signOut({ scope: "local" });
       if (error) throw error;
       setProfileOpen(false);
     } catch {
@@ -90,14 +91,13 @@ export default function Sidebar({
     }
   };
 
-  const accountProjects = !auth.ready
-    ? projects.filter((project) => !cloudOwnerByProject[project.id])
-    : auth.user
-      ? projects.filter((project) => {
-          const ownerId = cloudOwnerByProject[project.id];
-          return !ownerId || ownerId === auth.user?.id;
-        })
-      : projects;
+  const accountProjects = projects.filter((project) =>
+    canViewWorkspace(
+      cloudOwnerByProject[project.id],
+      auth.ready,
+      auth.user?.id ?? null,
+    ),
+  );
   const visible = [...accountProjects]
     .sort((a, b) => (b.lastOpenedAt || "").localeCompare(a.lastOpenedAt || ""))
     .filter((p) => {
@@ -305,11 +305,21 @@ export default function Sidebar({
               )}
             </>
           )}
+          {!auth.user && (
+            <div className="shrink-0 rounded-2xl border border-white/10 bg-white/[0.03] p-3">
+              <p className="text-[12px] font-semibold text-[#f5f6f8]">Save work across devices</p>
+              <p className="mt-1 text-[11px] leading-5 text-[#9aa0ae]">Guest projects stay here. Sign in to sync new workspaces.</p>
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <Link href="/sign-in" className="flex h-8 items-center justify-center rounded-full border border-white/15 text-[11px] font-medium text-[#d4d8e0] hover:bg-white/5">Sign in</Link>
+                <Link href="/register" className="flex h-8 items-center justify-center rounded-full bg-meta text-[11px] font-semibold text-white hover:bg-meta-hover">Register</Link>
+              </div>
+            </div>
+          )}
           <div ref={profileRef} className="relative mt-auto shrink-0 border-t border-white/10 pt-3">
             <button
               type="button"
               onClick={() => setProfileOpen((open) => !open)}
-              aria-label="Open profile menu"
+              aria-label="Open account menu"
               aria-expanded={profileOpen}
               aria-controls="profile-menu"
               className="flex w-full items-center gap-3 rounded-xl px-2 py-2 text-left hover:bg-white/5"
@@ -370,19 +380,17 @@ export default function Sidebar({
                     Projects sync to your account while signed in. Signed-out work stays in this browser.
                   </p>
                 </div>
-                {auth.configured ? (
-                  <Link
-                    href="/account"
-                    onClick={() => setProfileOpen(false)}
-                    className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white"
-                  >
-                    {auth.user ? "Account settings" : "Sign in or create account"}
-                    <span aria-hidden className="text-[#5b6472]">→</span>
-                  </Link>
+                {auth.user ? (
+                  <>
+                    <Link href="/profile" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Profile<span aria-hidden className="text-[#5b6472]">→</span></Link>
+                    <Link href="/settings" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Settings<span aria-hidden className="text-[#5b6472]">→</span></Link>
+                    <Link href="/account" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Account &amp; sync<span aria-hidden className="text-[#5b6472]">→</span></Link>
+                  </>
                 ) : (
-                  <p className="px-3 py-2 text-[12px] text-[#7f8795]">
-                    Account sign-in is not configured in this build.
-                  </p>
+                  <>
+                    <Link href="/sign-in" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Sign in<span aria-hidden className="text-[#5b6472]">→</span></Link>
+                    <Link href="/register" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Create account<span aria-hidden className="text-[#5b6472]">→</span></Link>
+                  </>
                 )}
                 {auth.user && (
                   <button

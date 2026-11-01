@@ -9,8 +9,10 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar, { useOpenProject } from "@/components/Sidebar";
+import AccountShortcut from "@/components/AccountShortcut";
 import { useVibe } from "@/lib/store";
 import { useAuthSession } from "@/lib/supabase/use-auth-session";
+import { canViewWorkspace } from "@/lib/workspace-access";
 import { initials } from "@/lib/logo";
 import { platformLabel } from "@/lib/project-options";
 import { frameworkLabel } from "@/lib/stack-options";
@@ -36,14 +38,13 @@ export default function ProjectsPage() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [navOpen]);
 
-  const accountProjects = !auth.ready
-    ? projects.filter((project) => !cloudOwnerByProject[project.id])
-    : auth.user
-      ? projects.filter((project) => {
-          const ownerId = cloudOwnerByProject[project.id];
-          return !ownerId || ownerId === auth.user?.id;
-        })
-      : projects;
+  const accountProjects = projects.filter((project) =>
+    canViewWorkspace(
+      cloudOwnerByProject[project.id],
+      auth.ready,
+      auth.user?.id ?? null,
+    ),
+  );
   const sorted = [...accountProjects].sort((a, b) =>
     (b.lastOpenedAt || "").localeCompare(a.lastOpenedAt || ""),
   );
@@ -102,6 +103,9 @@ export default function ProjectsPage() {
           <span className="text-[13px] text-[#5b6472]">
             {sorted.length} {sorted.length === 1 ? "project" : "projects"}
           </span>
+          <div className="ml-auto">
+            <AccountShortcut />
+          </div>
         </header>
 
         <main className="min-h-0 flex-1 overflow-y-auto px-4 pb-10 md:px-8">

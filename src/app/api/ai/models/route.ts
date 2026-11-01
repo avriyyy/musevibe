@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getRuntimeEnv } from "@/lib/server/runtime-env";
 import {
   DEFAULT_MODEL,
   FALLBACK_MODELS,
@@ -13,8 +14,8 @@ import {
  * sends, so offering them would be a lie.
  */
 export async function GET() {
-  const url = process.env.AI_API_URL;
-  const key = process.env.AI_API_KEY;
+  const url = getRuntimeEnv("AI_API_URL");
+  const key = getRuntimeEnv("AI_API_KEY");
 
   if (url && key) {
     try {
