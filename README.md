@@ -49,7 +49,7 @@ Projects created while signed in are created through an authenticated server rou
 
 The existing Supabase workspace schema and RLS migration are legacy artifacts and are not used by the app's workspace API. They are left untouched; existing Supabase workspace rows are not automatically copied to Neon or deleted.
 
-The earlier `/api/sync` implementation used a separate `public.projects` schema and could associate locally stored projects with a signed-in account. That schema is legacy: the current app does not read, import, or delete its rows because their ownership provenance cannot be confirmed. Keep those rows untouched until they can be reviewed.
+The earlier `/api/sync` implementation used a separate `public.projects` schema and could associate locally stored projects with a signed-in account. That schema is retained as [`neon/legacy-schema.sql`](neon/legacy-schema.sql) for reference, but is not used by the current app. The current app does not read, import, or delete those rows because their ownership provenance cannot be confirmed; review them before attempting any migration.
 
 The current API writes only to `public.musevibe_projects`. It creates that table and its owner index additively with `IF NOT EXISTS` on the first authenticated workspace request; you can also run [`neon/migrations/0001_musevibe_projects.sql`](neon/migrations/0001_musevibe_projects.sql) manually. Use a pooled Neon connection string and keep it server-only. The API checks `DATABASE_URL`, then `POSTGRES_URL`, then `STORAGE_DATABASE_URL` (the latter two may be injected by Vercel's Neon integration); never use a `NEXT_PUBLIC_` prefix or put the connection string in browser code. A Supabase service-role key is not used by this app.
 
