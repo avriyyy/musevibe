@@ -7,8 +7,10 @@
 -- and only ever reads/writes rows whose owner_id matches that user.
 --
 -- How to apply: paste this file into the Neon SQL editor, or run it with
--- psql against the Neon connection string (the Vercel Neon integration
--- exposes it as DATABASE_URL).
+-- psql against the Neon connection string. Note: the app also applies
+-- this same DDL automatically on the first /api/sync call
+-- (src/lib/neon/db.ts ensureNeonSchema), so with the Vercel Neon
+-- integration no manual step is needed.
 --
 -- One atomic workspace snapshot per project, exactly like the previous
 -- Supabase schema: the full workspace (project, PRD, tasks, screens,
