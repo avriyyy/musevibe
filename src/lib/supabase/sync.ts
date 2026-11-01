@@ -93,7 +93,13 @@ function snapshotForProject(projectId: string): CloudWorkspaceSnapshot | null {
   };
 }
 
-/** Starts auth-aware cloud sync after local Zustand storage has hydrated. */
+/**
+ * Starts auth-aware cloud sync after local Zustand storage has hydrated.
+ *
+ * Auth is Supabase; data lives in Neon. The browser never talks to Neon
+ * directly: it calls /api/sync with the Supabase session token, and the
+ * server verifies that token and scopes every query to that user.
+ */
 export function startCloudSync() {
   if (!isSupabaseAuthConfigured()) {
     setStatus("local");
@@ -103,6 +109,16 @@ export function startCloudSync() {
   const client = supabaseBrowser();
   let disposed = false;
   let activeUserId: string | null = null;
+  let activeToken: string | null = null;
+
+  const apiSync = async (init: RequestInit, token: string) => {
+    const res = await fetch("/api/sync", {
+      ...init,
+      headers: { "content-type": "application/json", authorization: `Bearer ${token}`, ...(init.headers ?? {}) },
+    });
+    if (!res.ok) throw new Error(`sync failed: ${res.status}`);
+    return res.json() as Promise<{ projects?: ProjectRow[] }>;
+  };
   let generation = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let storeUnsubscribe: (() => void) | undefined;
@@ -134,18 +150,16 @@ export function startCloudSync() {
         const serialized = JSON.stringify(snapshot);
         if (lastSaved.get(project.id) === serialized) continue;
 
-        const { error } = await client.from("projects").upsert(
-          {
-            id: project.id,
-            owner_id: userId,
-            name: project.name,
-            idea: project.idea,
-            created_at: project.createdAt,
-            workspace_state: snapshot,
-          },
-          { onConflict: "id" },
-        );
-        if (error) {
+        if (!activeToken) {
+          failed = true;
+          break;
+        }
+        try {
+          await apiSync(
+            { method: "POST", body: JSON.stringify({ snapshot }) },
+            activeToken,
+          );
+        } catch {
           failed = true;
           break;
         }
@@ -175,9 +189,10 @@ export function startCloudSync() {
     }, 650);
   };
 
-  const activateUser = async (nextUserId: string | null) => {
+  const activateUser = async (nextUserId: string | null, nextToken: string | null) => {
     if (disposed || nextUserId === activeUserId) return;
     activeUserId = nextUserId;
+    activeToken = nextToken;
     const token = ++generation;
     pendingSync = false;
     if (timer) {
@@ -195,19 +210,14 @@ export function startCloudSync() {
 
     setStatus("syncing");
     try {
-      const { data, error } = await client
-        .from("projects")
-        .select("id,name,idea,created_at,workspace_state")
-        .eq("owner_id", nextUserId)
-        .order("created_at", { ascending: false })
-        .limit(500);
-      if (disposed || token !== generation || activeUserId !== nextUserId) return;
-      if (error) {
+      if (!nextToken) {
         setStatus("error");
         return;
       }
+      const { projects } = await apiSync({ method: "GET" }, nextToken);
+      if (disposed || token !== generation || activeUserId !== nextUserId) return;
 
-      const rows = (data ?? []) as ProjectRow[];
+      const rows = (projects ?? []) as ProjectRow[];
       const snapshots = rows.map(snapshotFromRow);
       for (const snapshot of snapshots) {
         lastSaved.set(snapshot.project.id, JSON.stringify(snapshot));
@@ -229,7 +239,7 @@ export function startCloudSync() {
   const {
     data: { subscription },
   } = client.auth.onAuthStateChange((_event, session) => {
-    void activateUser(session?.user.id ?? null);
+    void activateUser(session?.user.id ?? null, session?.access_token ?? null);
   });
 
   void client.auth
@@ -239,7 +249,7 @@ export function startCloudSync() {
         setStatus("error");
         return;
       }
-      void activateUser(data.session?.user.id ?? null);
+      void activateUser(data.session?.user.id ?? null, data.session?.access_token ?? null);
     })
     .catch(() => setStatus("error"));
 
