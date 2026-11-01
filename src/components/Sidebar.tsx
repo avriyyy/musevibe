@@ -53,6 +53,7 @@ export default function Sidebar({
   onSeeAll,
 }: SidebarProps) {
   const projects = useVibe((state) => state.projects);
+  const cloudOwnerByProject = useVibe((state) => state.cloudOwnerByProject);
   const openProject = useOpenProject();
   const [query, setQuery] = useState("");
   const [profileOpen, setProfileOpen] = useState(false);
@@ -89,7 +90,15 @@ export default function Sidebar({
     }
   };
 
-  const visible = [...projects]
+  const accountProjects = !auth.ready
+    ? projects.filter((project) => !cloudOwnerByProject[project.id])
+    : auth.user
+      ? projects.filter((project) => {
+          const ownerId = cloudOwnerByProject[project.id];
+          return !ownerId || ownerId === auth.user?.id;
+        })
+      : projects;
+  const visible = [...accountProjects]
     .sort((a, b) => (b.lastOpenedAt || "").localeCompare(a.lastOpenedAt || ""))
     .filter((p) => {
       const q = query.trim().toLowerCase();
@@ -328,8 +337,8 @@ export default function Sidebar({
                 </span>
                 <span className="mt-0.5 block truncate text-[11px] text-[#9aa0ae]">
                   {auth.user
-                    ? "Signed in · projects stay local"
-                    : `${projects.length} ${projects.length === 1 ? "project" : "projects"} · saved here`}
+                    ? "Signed in · projects sync to cloud"
+                    : `${accountProjects.length} ${accountProjects.length === 1 ? "project" : "projects"} · saved here`}
                 </span>
               </span>
               <svg
@@ -358,7 +367,7 @@ export default function Sidebar({
                     {auth.user?.email ?? "Local workspace"}
                   </p>
                   <p className="mt-0.5 text-[11px] leading-relaxed text-[#9aa0ae]">
-                    Projects are saved in this browser. Sign-in is optional; cloud sync is not enabled yet.
+                    Projects sync to your account while signed in. Signed-out work stays in this browser.
                   </p>
                 </div>
                 {auth.configured ? (

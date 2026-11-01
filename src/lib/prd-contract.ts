@@ -1,9 +1,9 @@
 /**
  * Single source of truth for the PRD contract.
  *
- * runPlan, first-run preparation, manual PRD generation, repair prompts,
- * the local fallback, and the PRD document entry in docs.ts all use these
- * exact headings in this exact order. Keeping them here (instead of in
+ * first-run preparation, manual PRD generation, repair prompts, and the PRD
+ * document entry in docs.ts all use these exact headings in this exact order.
+ * Keeping them here (instead of in
  * plan.ts or docs.ts) avoids a circular import: both modules import from
  * this file, never from each other.
  */
@@ -33,7 +33,7 @@ export const PRD_GUIDANCE = [
   "Mark unconfirmed product choices as assumptions instead of presenting them as established user needs.",
 ] as const;
 
-/** Minimum words for a useful PRD; the prompt asks for more, the gate keeps 250. */
+/** Minimum words required by both the prompt and the PRD quality gate. */
 export const PRD_MIN_WORDS = 250;
 
 /** Wizard answers as one compact paragraph for prompts. */
@@ -86,7 +86,7 @@ export function buildUnifiedPrdPrompt(project: Project): string {
     ...PRD_SECTIONS,
     "",
     "Rules:",
-    "- 220 to 380 words total. Concrete and specific to this product.",
+    `- ${PRD_MIN_WORDS} to 380 words total. Concrete and specific to this product.`,
     "- Use short paragraphs. Bullets only in 'What ships first' and 'Out of scope for v1', 4 to 6 items each.",
     "- The core flow is numbered steps from first open to the value moment.",
     "- 'How we know it works' is a manual check a developer can do, never a made-up metric.",
@@ -99,72 +99,4 @@ export function buildUnifiedPrdPrompt(project: Project): string {
   ]
     .filter(Boolean)
     .join("\n");
-}
-
-/**
- * Local PRD fallback. The section frame matches the contract exactly, but
- * the detail is not finished: the explicit label keeps it from ever being
- * mistaken for a model answer.
- */
-export function buildPrdFallback(project: Project): string {
-  const clamp = (value: string, max: number): string => {
-    const normalized = value.replace(/\s+/g, " ").trim();
-    if (normalized.length <= max) return normalized;
-    return `${normalized.slice(0, max - 1).trimEnd()}…`;
-  };
-  const sentence = (value: string): string => {
-    const trimmed = value.trim().replace(/[.!?]+$/, "");
-    if (!trimmed) return "";
-    return trimmed[0].toUpperCase() + trimmed.slice(1);
-  };
-  const answers = (project.answers ?? [])
-    .map((entry) => ({
-      question: entry.question,
-      value: answerToText(entry.values ?? entry.answer),
-    }))
-    .filter((entry) => entry.value);
-
-  const core =
-    answers.find((entry) => /action|day one|core/i.test(entry.question))?.value ??
-    "work through the main screen and keep the result";
-  const audience =
-    answers.find((entry) => /who|audience|for/i.test(entry.question))?.value ??
-    "the first user";
-  const scopeOut = answers.find((entry) => /leave out|out of scope|skip/i.test(entry.question))?.value;
-
-  const ships = [
-    "The core screen that delivers the idea",
-    `A working path for: ${sentence(clamp(core, 160))}`,
-    "Local data so a reload keeps the work",
-    "Empty, loading, and error states on every screen",
-  ];
-  const excluded = scopeOut
-    ? [clamp(scopeOut, 160), "Extra platforms beyond the first one", "Advanced analytics"]
-    : ["Extra platforms beyond the first one", "Advanced analytics", "Notifications and email"];
-
-  return [
-    `# ${project.name}`,
-    "",
-    "> Local draft. The model is unavailable, so the section frame below is real but the detail is not finished. Generate again when the model is back; this draft is never presented as a model answer.",
-    "",
-    "## Problem",
-    `${clamp(project.idea, 240)} is still just a note. The first version should prove the idea works before it grows a feature list.`,
-    "",
-    "## Who it is for",
-    `${sentence(clamp(audience, 160))}. They want the result without learning a new tool first.`,
-    "",
-    "## The core flow",
-    `1. Open the app and see the main screen.`,
-    `2. ${sentence(clamp(core, 200))}.`,
-    "3. See the result and keep it for next time.",
-    "",
-    "## What ships first",
-    ...ships.map((item) => `- ${item}`),
-    "",
-    "## Out of scope for v1",
-    ...excluded.map((item) => `- ${item}`),
-    "",
-    "## How we know it works",
-    `A new person can finish this check without help: ${sentence(clamp(core, 160))}.`,
-  ].join("\n");
 }

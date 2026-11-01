@@ -29,7 +29,7 @@ interface WorkspaceChatProps {
   onAction: (
     message: string,
     pins: Array<ChatQuote>,
-  ) => Promise<{ ok: boolean; note: string }> ;
+  ) => Promise<{ ok: boolean; partial?: boolean; note: string }>;
   onDraftConsumed?: () => void;
   /** Armed component picker, available while the design canvas is open. */
   canPick?: boolean;
@@ -55,7 +55,7 @@ export default function WorkspaceChat({
   const [chips, setChips] = useState<Array<{ id: number; quote: ChatQuote }>>([]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<
-    { tone: "working" | "done" | "error"; text: string } | null
+    { tone: "working" | "done" | "partial" | "error"; text: string } | null
   >(null);
   const [micState, setMicState] = useState<MicState>("idle");
   const [micError, setMicError] = useState("");
@@ -184,7 +184,7 @@ export default function WorkspaceChat({
 
   // One-line receipt for the last action; successes fade away on their own.
   const flashStatus = (
-    tone: "working" | "done" | "error",
+    tone: "working" | "done" | "partial" | "error",
     text: string,
     sticky = false,
   ) => {
@@ -217,7 +217,9 @@ export default function WorkspaceChat({
     setChips([]);
     try {
       const result = await onAction(typed, pins);
-      if (result.ok) {
+      if (result.ok && result.partial) {
+        flashStatus("partial", result.note, true);
+      } else if (result.ok) {
         flashStatus("done", result.note, true);
       } else {
         flashStatus("error", result.note, true);
@@ -386,9 +388,11 @@ export default function WorkspaceChat({
                 className={`flex items-center gap-2 px-1 pb-1.5 pt-1 text-[12px] ${
                   status.tone === "error"
                     ? "text-[#f0a6a6]"
-                    : status.tone === "done"
-                      ? "text-[#7ee2a8]"
-                      : "text-[#9aa0ae]"
+                    : status.tone === "partial"
+                      ? "text-[#f2c879]"
+                      : status.tone === "done"
+                        ? "text-[#7ee2a8]"
+                        : "text-[#9aa0ae]"
                 }`}
               >
                 {status.tone === "working" ? (

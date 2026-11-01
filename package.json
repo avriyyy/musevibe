@@ -2,6 +2,9 @@
   "name": "musevibe",
   "version": "0.1.0",
   "private": true,
+  "bin": {
+    "musevibe": "./bin/musevibe.cjs"
+  },
   "scripts": {
     "dev": "next dev",
     "build": "next build",

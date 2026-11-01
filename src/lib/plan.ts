@@ -7,16 +7,15 @@
 import type { Project, Task, TaskStatus } from "./types";
 import { answerToText } from "./wizard";
 import {
-  buildPrdFallback,
   buildUnifiedPrdPrompt,
   prdAnswersText,
   prdStackText,
 } from "./prd-contract";
 
 const MAX_PRD_CONTEXT = 3200;
-const MAX_TASK_TITLE = 110;
-const MAX_TASK_NOTES = 160;
-const MAX_TASKS = 10;
+const MAX_TASK_TITLE = 89;
+const MAX_TASK_NOTES = 119;
+const MAX_TASKS = 9;
 
 export function clampText(value: string, max: number): string {
   const normalized = value.replace(/\s+/g, " ").trim();
@@ -38,6 +37,41 @@ export function describeAnswers(project: Project): string {
 
 export function stackSummary(project: Project): string {
   return prdStackText(project);
+}
+
+/**
+ * Small shared planning memory for downstream generation. It carries only the
+ * user decisions and a short approved-PRD excerpt, rather than replaying the
+ * whole document into every independent agent-like task.
+ */
+export function buildPlanningMemory(project: Project, prd: string): string {
+  const answers = new Map(
+    (project.answers ?? []).map((entry) => [
+      entry.qid,
+      answerToText(entry.values ?? entry.answer),
+    ]),
+  );
+  const decisions: Array<[string, string | undefined]> = [
+    ["Audience", answers.get("audience")],
+    ["Problem", answers.get("problem")],
+    ["Core workflow", answers.get("core-action")],
+    ["First version", answers.get("first-build")],
+    ["Constraints and integrations", answers.get("constraints-integrations")],
+    ["Out of scope", answers.get("out-of-scope")],
+  ];
+  const setup = decisions
+    .filter(([, value]) => Boolean(value))
+    .map(([label, value]) => `${label}: ${clampText(value ?? "", 140)}`);
+  const stack = stackSummary(project);
+  return [
+    "Shared planning memory (user decisions are the source of truth):",
+    ...setup,
+    stack ? `Stack: ${clampText(stack, 180)}` : "",
+    prd.trim() ? `Approved PRD excerpt: ${clampText(prd, 1200)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .slice(0, 2600);
 }
 
 export function buildPrdPrompt(project: Project): string {
@@ -88,40 +122,9 @@ function unwrapJson(raw: unknown): unknown {
   }
 }
 
-function normalizeStatus(value: unknown): TaskStatus {
-  if (typeof value !== "string") return "todo";
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "todo" || normalized === "to-do" || normalized === "backlog") return "todo";
-  if (
-    normalized === "doing" ||
-    normalized === "in-progress" ||
-    normalized === "in_progress" ||
-    normalized === "inprogress"
-  )
-    return "doing";
-  if (
-    normalized === "review" ||
-    normalized === "in-review" ||
-    normalized === "in_review" ||
-    normalized === "testing"
-  )
-    return "review";
-  if (normalized === "blocked" || normalized === "stuck" || normalized === "waiting") return "blocked";
-  if (normalized === "done" || normalized === "complete" || normalized === "completed") return "done";
-  if (
-    normalized === "cancelled" ||
-    normalized === "canceled" ||
-    normalized === "dropped" ||
-    normalized === "failed" ||
-    normalized === "wontfix"
-  )
-    return "cancelled";
-  return "todo";
-}
-
 /**
  * Accepts the provider's raw text and returns tasks that are safe to render.
- * Anything malformed is dropped; fewer than four survivors means the caller
+ * Anything malformed is dropped; fewer than seven survivors means the caller
  * should fall back to the local list.
  */
 export function parseTasks(raw: unknown, idPrefix: string): Task[] | null {
@@ -156,17 +159,14 @@ export function parseTasks(raw: unknown, idPrefix: string): Task[] | null {
     tasks.push({
       id: `${idPrefix}-${tasks.length}`,
       title,
-      status: normalizeStatus(entry.status),
+      // The request explicitly asks for a first-pass checklist, so generated
+      // tasks must not arrive pre-completed or blocked.
+      status: "todo",
       ...(notes ? { notes } : {}),
     });
   }
 
-  return tasks.length >= 4 ? tasks : null;
-}
-
-/** Local brief built from the same fields the prompt uses, for offline demos. */
-export function fallbackPrd(project: Project): string {
-  return buildPrdFallback(project);
+  return tasks.length >= 7 ? tasks : null;
 }
 
 /** Local task list that matches the fallback brief, so the demo never stalls. */

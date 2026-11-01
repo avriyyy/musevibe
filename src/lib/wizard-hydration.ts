@@ -8,7 +8,13 @@
 import type { Platform, Timeline } from "./project-options";
 import { FRAMEWORKS, isFrameworkFor } from "./stack-options";
 import type { Project, ProjectAnswer } from "./types";
-import type { WizardAnswers, WizardQuestion } from "./wizard";
+import {
+  CUSTOM_ANSWER_OPTION,
+  isCustomAnswer,
+  toCustomAnswer,
+  type WizardAnswers,
+  type WizardQuestion,
+} from "./wizard";
 
 export function restoreWizardAnswers(
   list: WizardQuestion[],
@@ -34,28 +40,44 @@ export function restoreWizardAnswers(
         continue;
       }
       const options = new Set(question.options ?? []);
-      const kept = value
-        .map((item) => String(item))
-        .filter((option) => options.has(option));
-      if (kept.length) {
-        next[question.id] = question.type === "single" ? kept[0] : kept;
+      const values = value.map((item) => String(item).trim()).filter(Boolean);
+      if (question.type === "single") {
+        const kept = values.find((option) => options.has(option));
+        const custom = values.find((option) => isCustomAnswer(option));
+        if (kept) {
+          next[question.id] = kept;
+        } else if (custom) {
+          next[question.id] = custom;
+        } else if (values.length) {
+          next[question.id] = toCustomAnswer(values.join(", "));
+        }
       } else if (question.type === "multi") {
-        // Unknown options from an older questionnaire still carry meaning;
-        // keep them as-is rather than erasing the user's answer.
-        const raw = value.map((item) => String(item).trim()).filter(Boolean);
-        if (raw.length) next[question.id] = raw;
+        // Unknown options and custom entries from an older questionnaire still
+        // carry meaning; keep them rather than erasing the user's answer.
+        const preserved = values.map((item) =>
+          item === CUSTOM_ANSWER_OPTION ? toCustomAnswer("") : item,
+        );
+        const unique = [...new Set(preserved)];
+        if (unique.length) next[question.id] = unique;
       }
     } else if (typeof value === "string" && value.trim()) {
       const trimmed = value.trim();
       if (question.type === "single") {
         if ((question.options ?? []).includes(trimmed)) {
           next[question.id] = trimmed;
-        } else if ((question.options ?? []).length === 0) {
+        } else if (isCustomAnswer(trimmed)) {
           next[question.id] = trimmed;
+        } else {
+          // Preserve answers from older free-response questions as custom text.
+          next[question.id] = toCustomAnswer(trimmed);
         }
       } else if (question.type === "multi") {
         // A legacy free-response answer restored into options: split on
         // commas and keep what matches, else keep the raw text as one item.
+        if (isCustomAnswer(trimmed)) {
+          next[question.id] = [trimmed];
+          continue;
+        }
         const options = new Set(question.options ?? []);
         const parts = trimmed
           .split(/[,;]\s*/)

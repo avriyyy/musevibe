@@ -7,3 +7,7 @@ This version has breaking changes — APIs, conventions, and file structure may 
 This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
 
 <!-- END:nextjs-agent-rules -->
+
+## AI generation quality
+
+Before changing MuseVibe generation prompts, validators, fallback behavior, or document rendering, follow `.agents/skills/musevibe-generation-quality/SKILL.md`. Runtime-wide prompt rules live in `src/lib/generation-quality.ts`; keep them aligned with specialized prompt builders and deterministic validators. Do not change the configured model unless explicitly requested.

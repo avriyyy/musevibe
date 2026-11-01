@@ -32,18 +32,13 @@ function extractText(html: string): { title: string; text: string } {
  */
 export async function POST(req: Request) {
   let url = "";
-  let projectName = "Untitled project";
   let idea = "";
   try {
     const body = (await req.json()) as {
       url?: unknown;
-      projectName?: unknown;
       idea?: unknown;
     };
     if (typeof body.url === "string") url = body.url.trim();
-    if (typeof body.projectName === "string" && body.projectName.trim()) {
-      projectName = body.projectName.trim().slice(0, 120);
-    }
     if (typeof body.idea === "string") idea = body.idea.trim();
   } catch {
     return NextResponse.json({ error: "Send a JSON body with a url." }, { status: 400 });
@@ -93,7 +88,7 @@ export async function POST(req: Request) {
   const { buildDesignSystemPrompt } = await import("@/lib/design-system");
   const result = await aiGenerate(
     "design-system",
-    buildDesignSystemPrompt(text, title, projectName, idea),
+    buildDesignSystemPrompt(text, title, idea),
   );
   const parsedSystem = parseDesignSystemResponse(result.text);
   if (result.source === "local" || !parsedSystem || (!parsedSystem.designMd && !parsedSystem.tokensCss)) {

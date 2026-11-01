@@ -1,6 +1,13 @@
 import { create, type StateCreator } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
-import type { CodeFile, Project, ProjectDoc, Screen, Task } from "./types";
+import type {
+  CloudWorkspaceSnapshot,
+  CodeFile,
+  Project,
+  ProjectDoc,
+  Screen,
+  Task,
+} from "./types";
 
 interface VibeState {
   projects: Project[];
@@ -10,7 +17,10 @@ interface VibeState {
   filesByProject: Record<string, CodeFile[]>;
   prdByProject: Record<string, string>;
   docsByProject: Record<string, ProjectDoc[]>;
+  cloudOwnerByProject: Record<string, string>;
   setDraftIdea: (idea: string) => void;
+  mergeCloudWorkspaces: (snapshots: CloudWorkspaceSnapshot[], ownerId: string) => void;
+  setCloudOwner: (projectId: string, ownerId: string) => void;
   addProject: (p: Project) => void;
   updateProject: (id: string, patch: Partial<Project>) => void;
   touchProject: (id: string) => void;
@@ -87,8 +97,62 @@ const vibeState: StateCreator<VibeState> = (set) => ({
   },
   prdByProject: { "demo-indie": "# PRD Demo\n\nProblem: indie devs keep switching tools." },
   docsByProject: {},
+  cloudOwnerByProject: {},
 
   setDraftIdea: (idea) => set({ draftIdea: idea }),
+  mergeCloudWorkspaces: (snapshots, ownerId) =>
+    set((state) => {
+      const ids = new Set(snapshots.map((snapshot) => snapshot.project.id));
+      return {
+        projects: [
+          ...snapshots.map((snapshot) => snapshot.project),
+          ...state.projects.filter((project) => !ids.has(project.id)),
+        ],
+        tasksByProject: {
+          ...state.tasksByProject,
+          ...Object.fromEntries(
+            snapshots.map((snapshot) => [snapshot.project.id, snapshot.tasks]),
+          ),
+        },
+        screensByProject: {
+          ...state.screensByProject,
+          ...Object.fromEntries(
+            snapshots.map((snapshot) => [snapshot.project.id, snapshot.screens]),
+          ),
+        },
+        filesByProject: {
+          ...state.filesByProject,
+          ...Object.fromEntries(
+            snapshots.map((snapshot) => [snapshot.project.id, snapshot.files]),
+          ),
+        },
+        prdByProject: {
+          ...state.prdByProject,
+          ...Object.fromEntries(
+            snapshots.map((snapshot) => [snapshot.project.id, snapshot.prd]),
+          ),
+        },
+        docsByProject: {
+          ...state.docsByProject,
+          ...Object.fromEntries(
+            snapshots.map((snapshot) => [snapshot.project.id, snapshot.docs]),
+          ),
+        },
+        cloudOwnerByProject: {
+          ...state.cloudOwnerByProject,
+          ...Object.fromEntries(
+            snapshots.map((snapshot) => [snapshot.project.id, ownerId]),
+          ),
+        },
+      };
+    }),
+  setCloudOwner: (projectId, ownerId) =>
+    set((state) => ({
+      cloudOwnerByProject: {
+        ...state.cloudOwnerByProject,
+        [projectId]: ownerId,
+      },
+    })),
   updateProject: (id, patch) =>
     set((s) => ({
       projects: s.projects.map((p) =>
@@ -208,6 +272,7 @@ export const useVibe = create<VibeState>()(
       filesByProject: state.filesByProject,
       prdByProject: state.prdByProject,
       docsByProject: state.docsByProject,
+      cloudOwnerByProject: state.cloudOwnerByProject,
     }),
   }),
 );

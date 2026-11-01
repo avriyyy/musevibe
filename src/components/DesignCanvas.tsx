@@ -139,7 +139,7 @@ function GeneratingCard({ left, title }: { left: number; title: string }) {
             strokeWidth="1.8"
             strokeLinecap="round"
             strokeLinejoin="round"
-            className="animate-pulse text-[#8ab4ff]"
+            className="text-[#8ab4ff]"
           >
             <rect x="3.5" y="4.5" width="17" height="15" rx="2" />
             <path d="M3.5 9h17" />
@@ -154,20 +154,59 @@ function GeneratingCard({ left, title }: { left: number; title: string }) {
       <div
         role="status"
         aria-label={`Generating the ${title} page`}
-        className="relative h-full w-full overflow-hidden rounded-2xl border border-[#8ab4ff]/30 bg-[#8ab4ff]/[0.03]"
+        className="relative h-full w-full overflow-hidden rounded-2xl border border-[#8ab4ff]/30 bg-[#8ab4ff]/[0.03] p-5"
       >
-      <div
-        aria-hidden
-        className="musevibe-scan-bar absolute left-0 right-0 h-24 bg-gradient-to-b from-transparent via-[#8ab4ff]/25 to-transparent"
-        style={{ animation: "musevibe-scan 1.8s linear infinite" }}
-      />
-      <div className="absolute inset-0 grid place-items-center">
-        <p className="animate-pulse text-[13px] font-medium text-[#9aa0ae]">
-          Drawing {title}…
-        </p>
+        <div
+          aria-hidden
+          className="musevibe-scan-bar pointer-events-none absolute left-0 right-0 h-24 bg-gradient-to-b from-transparent via-[#8ab4ff]/25 to-transparent"
+          style={{ animation: "musevibe-scan 1.8s linear infinite" }}
+        />
+        <div className="relative flex h-full flex-col gap-4">
+          <div className="flex items-center justify-between">
+            <span
+              aria-hidden
+              className="musevibe-shimmer block h-3.5 w-32 rounded"
+            />
+            <span
+              aria-hidden
+              className="musevibe-shimmer block h-3 w-16 rounded-full"
+            />
+          </div>
+          <span
+            aria-hidden
+            className="musevibe-shimmer block h-6 w-3/4 rounded-md"
+          />
+          <div className="flex gap-3">
+            {[0, 1, 2].map((column) => (
+              <div
+                key={column}
+                className="flex-1 space-y-2.5 rounded-xl border border-white/5 bg-white/[0.02] p-3"
+              >
+                <span
+                  aria-hidden
+                  className="musevibe-shimmer block h-2.5 w-1/2 rounded"
+                />
+                <span
+                  aria-hidden
+                  className="musevibe-shimmer block h-2.5 w-full rounded"
+                />
+                <span
+                  aria-hidden
+                  className="musevibe-shimmer block h-2.5 w-4/5 rounded"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="mt-auto flex items-center gap-2 text-[12px] font-medium text-[#9aa0ae]">
+            <span
+              aria-hidden
+              className="musevibe-loader-ring size-3.5 rounded-full border-2 border-white/15 border-t-[#8ab4ff]"
+            />
+            Drawing {title}…
+          </div>
+        </div>
       </div>
     </div>
-  </div>
   );
 }
 

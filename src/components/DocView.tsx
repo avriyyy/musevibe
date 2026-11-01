@@ -22,7 +22,7 @@ interface DocViewProps {
   canGenerate: boolean;
   generating: boolean;
   modelLabel: string;
-  /** Latest generation failure or local-draft notice for this doc, if any. */
+  /** Latest generation failure for this doc, if any. */
   error?: string;
   onMarkdown: (markdown: string) => void;
   onGenerate: () => void;
@@ -90,9 +90,7 @@ export default function DocView({
       ? "Model draft"
       : doc.source === "edited"
         ? "Edited by you"
-        : doc.source === "local"
-          ? "Local draft"
-          : null;
+        : null;
 
   // The preview always renders the draft so Edit → Preview shows the
   // latest keystrokes even before the debounced save fires.

@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar, { useOpenProject } from "@/components/Sidebar";
 import { useVibe } from "@/lib/store";
+import { useAuthSession } from "@/lib/supabase/use-auth-session";
 import { initials } from "@/lib/logo";
 import { platformLabel } from "@/lib/project-options";
 import { frameworkLabel } from "@/lib/stack-options";
@@ -17,6 +18,8 @@ import { frameworkLabel } from "@/lib/stack-options";
 export default function ProjectsPage() {
   const router = useRouter();
   const projects = useVibe((state) => state.projects);
+  const cloudOwnerByProject = useVibe((state) => state.cloudOwnerByProject);
+  const auth = useAuthSession();
   const openProject = useOpenProject();
   const [navOpen, setNavOpen] = useState(false);
   const [navPinned, setNavPinned] = useState(false);
@@ -33,12 +36,20 @@ export default function ProjectsPage() {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [navOpen]);
 
-  const sorted = [...projects].sort((a, b) =>
+  const accountProjects = !auth.ready
+    ? projects.filter((project) => !cloudOwnerByProject[project.id])
+    : auth.user
+      ? projects.filter((project) => {
+          const ownerId = cloudOwnerByProject[project.id];
+          return !ownerId || ownerId === auth.user?.id;
+        })
+      : projects;
+  const sorted = [...accountProjects].sort((a, b) =>
     (b.lastOpenedAt || "").localeCompare(a.lastOpenedAt || ""),
   );
 
   return (
-    <div className="h-screen flex bg-[#0b0c10] text-[#f5f6f8] overflow-hidden">
+    <div className="h-dvh flex bg-[#0b0c10] text-[#f5f6f8] overflow-hidden">
       <Sidebar
         open={navOpen}
         pinned={navPinned}

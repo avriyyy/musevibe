@@ -90,19 +90,22 @@ export const ANTISLOP_DESIGN_RULES = [
   "Responsive: the layout still works at 390px wide with no horizontal overflow.",
 ].join("\n");
 
-/** Brand fidelity: the model must never invent a name, tagline, or logo. */
-function brandRules(projectName: string, logoUrl?: string): string {
-  const name = projectName.trim() || "Untitled project";
-  const lines = [
-    `Brand: the product is called "${name}". Use that exact name in the title, header, and copy. Never invent a different brand name, tagline, mascot, or logo mark.`,
-  ];
+/** Keep the customer-facing brand separate from the internal workspace label. */
+function brandRules(brandName?: string, logoUrl?: string): string {
+  const name = brandName?.trim().slice(0, 80) ?? "";
+  const lines = name
+    ? [`Product brand: "${name}". Use this exact name in the title, header, and wordmark. Do not change or embellish it.`]
+    : [
+        "No brand name was supplied. Choose one concise, plausible brand name from the product idea and use it consistently as the title, header, and wordmark.",
+        "Never use an internal workspace/project label or copy request wording as the website brand. If an existing page is included, reuse its established brand.",
+      ];
   if (logoUrl && logoUrl.length < 12000) {
     lines.push(
-      `The product logo is this exact image, place it in the header as given: <img src="${logoUrl}" alt="${name} logo" />`,
+      `The product logo is this exact image, place it in the header as given: <img src="${logoUrl}" alt="${name || "product"} logo" />`,
     );
   } else {
     lines.push(
-      "No logo file exists, so render the name as a plain text wordmark. Do not draw an invented logo, icon, or emblem.",
+      "No logo file exists, so render the chosen brand name as a plain text wordmark. Do not draw an invented logo, icon, or emblem.",
     );
   }
   return lines.join("\n");
@@ -112,12 +115,11 @@ function brandRules(projectName: string, logoUrl?: string): string {
 export function buildDesignSystemPrompt(
   refText: string,
   refTitle: string,
-  projectName: string,
   idea: string,
 ): string {
   return [
     "You turn a design reference into a reusable design system for MuseVibe.",
-    `Project: "${projectName}". The app idea: "${idea.slice(0, 400)}".`,
+    `App idea: "${idea.slice(0, 400)}".`,
     refTitle ? `Reference title: "${refTitle}".` : "",
     `Reference content (may be truncated): """${refText.slice(0, 6000)}"""`,
     "",
@@ -163,15 +165,15 @@ export function parseDesignSystemResponse(raw: unknown): {
  * gallery, so the style is visible before any app page exists.
  */
 export function buildShowcasePrompt(
-  projectName: string,
   idea: string,
   designMd: string,
   tokensCss: string,
+  brandName = "",
 ): string {
   return [
     "Write one self-contained HTML file: a design-system showcase page for the app below.",
-    `Project: "${projectName}". Idea: "${idea.slice(0, 400)}".`,
-    brandRules(projectName),
+    `Product idea: "${idea.slice(0, 400)}".`,
+    brandRules(brandName),
     "",
     "The design system to demonstrate:",
     `"""${designMd.slice(0, 5200)}"""`,
@@ -180,7 +182,7 @@ export function buildShowcasePrompt(
     `${tokensCss.slice(0, 4000)}`,
     "",
     "Page content (each in its own labeled section):",
-    "- Header with the project name and one primary action.",
+    "- Header with the product brand name and one primary action.",
     "- Type scale sample, buttons (primary/secondary/disabled), inputs with labels, a card grid, a small table, badges, and a loading state.",
     "",
     "Rules:",
@@ -195,16 +197,16 @@ export function buildShowcasePrompt(
 
 /** Second chance after a blank, hidden, or framework-code showcase. */
 export function buildShowcaseRepairPrompt(
-  projectName: string,
   idea: string,
   designMd: string,
   tokensCss: string,
+  brandName = "",
 ): string {
   return [
-    `Your last showcase output for "${projectName.trim() || "Untitled project"}" failed: it rendered blank, hid its content, or returned framework code instead of plain HTML. Return the complete corrected file now.`,
+    "Your last showcase output failed: it rendered blank, hid its content, or returned framework code instead of plain HTML. Return the complete corrected file now.",
     "",
-    `Project: "${projectName}". Idea: "${idea.slice(0, 400)}".`,
-    brandRules(projectName),
+    `Product idea: "${idea.slice(0, 400)}".`,
+    brandRules(brandName),
     "",
     "Paste this token block verbatim as the FIRST thing in the single <style> tag:",
     `${tokensCss.slice(0, 4000)}`,
@@ -214,7 +216,7 @@ export function buildShowcaseRepairPrompt(
     "",
     "Non-negotiable fixes:",
     "- Start with <!DOCTYPE html>, include <html>, <head>, and a <body> that already holds the visible showcase.",
-    "- Header with the project name and one primary action, then labeled sections: type scale, buttons, inputs with labels, card grid, table, badges, loading state.",
+    "- Header with the product brand name and one primary action, then labeled sections: type scale, buttons, inputs with labels, card grid, table, badges, loading state.",
     "- Real copy tied to the project. No lorem ipsum, no TODO, no placeholders.",
     "- Plain HTML, CSS, and JS only. No React, Vue, Svelte, Next.js, no imports, no JSX, no components.",
     "- No external requests, no web fonts, no remote images; system fonts and inline SVG only.",
@@ -245,14 +247,13 @@ function appFlowExcerpt(appFlow: string, maxChars = 3400): string {
  * supplies the domain content. Marketing pages are never planned.
  */
 export function buildPagePlanPrompt(
-  projectName: string,
   idea: string,
   brief: string,
   appFlow = "",
 ): string {
   return [
     "You plan the screens of a first-version application prototype from its documents.",
-    `Project: "${projectName}". Idea: "${idea.slice(0, 400)}".`,
+    `Idea: "${idea.slice(0, 400)}".`,
     `PRD: """${brief.slice(0, 3600)}"""`,
     appFlow.trim()
       ? `App Flow doc (screen table and navigation map): """${appFlowExcerpt(appFlow)}"""`
@@ -348,7 +349,10 @@ export interface PriorPageContext {
 
 /** Everything one page generation needs, in one object. */
 export interface PagePromptContext {
+  /** Legacy/internal workspace label. Kept for compatibility, never sent as page branding. */
   projectName: string;
+  /** Optional customer-facing brand; blank means the model should derive one from the idea. */
+  brandName?: string;
   idea: string;
   prd: string;
   appFlow?: string;
@@ -424,13 +428,12 @@ export function buildPagePrompt(context: PagePromptContext): string {
     "You are a senior product designer and front-end engineer. Build one real application screen as a single self-contained HTML file.",
     "",
     "PRODUCT",
-    `Name: "${context.projectName.trim() || "Untitled project"}" (use it exactly).`,
     `Idea: "${context.idea.replace(/\s+/g, " ").trim().slice(0, 400)}".`,
     context.prd.trim()
       ? `PRD: """${context.prd.replace(/\s+/g, " ").trim().slice(0, 3200)}"""`
       : "",
     spec ? `App Flow detail for this screen:\n${spec}` : "",
-    brandRules(context.projectName, context.logoUrl),
+    brandRules(context.brandName, context.logoUrl),
     "",
     "THIS SCREEN",
     `Title: "${page.title}". Route: ${pageFilePath(page.slug)}.`,
@@ -482,7 +485,7 @@ export function buildPagePrompt(context: PagePromptContext): string {
     "- Visible on first paint: real content inside <body>, no opacity:0, no visibility:hidden, no display:none on the body or main, no splash overlay, no JavaScript required to show the screen.",
     "- Text contrast meets AA. Inputs have visible labels. Focus states are visible. No horizontal overflow at 390px.",
     "- No em dashes, no lorem ipsum, no TODO, no bracketed placeholders, no emoji as icons.",
-    "- Use the exact project name. Never invent a different brand, logo, or tagline.",
+    "- Use the exact supplied brand name; if none is supplied, choose a concise name from the product idea. Never display a workspace/project label or copy request wording as the brand.",
     "- Return ONLY the HTML, no fences or commentary.",
   ]
     .filter(Boolean)
@@ -497,7 +500,6 @@ export function buildPageRepairPrompt(context: PagePromptContext): string {
   return [
     `Your last output for the "${page.title}" screen failed: it rendered blank, hid its content, or returned framework code instead of plain HTML. Return the complete corrected file now.`,
     "",
-    `Project name: "${context.projectName.trim() || "Untitled project"}" (use it exactly).`,
     `Screen job: ${page.brief || page.title}.`,
     sections.length ? `Blocks it must show: ${sections.join(" / ")}.` : "",
     page.primaryAction ? `Primary action: "${page.primaryAction}".` : "",
@@ -510,7 +512,7 @@ export function buildPageRepairPrompt(context: PagePromptContext): string {
     editing
       ? `Current page HTML:\n"""${context.existingHtml!.replace(/\s+/g, " ").trim().slice(0, 9000)}"""`
       : "",
-    brandRules(context.projectName, context.logoUrl),
+    brandRules(context.brandName, context.logoUrl),
     "",
     "Paste this token block verbatim as the FIRST thing in the single <style> tag:",
     `${context.tokensCss.slice(0, 4200)}`,
@@ -543,7 +545,7 @@ export function buildFallbackPageHtml(context: PagePromptContext): string {
       .replace(/</g, "&lt;")
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;");
-  const name = esc(context.projectName.trim() || "Untitled project");
+  const name = esc(context.brandName?.trim().slice(0, 80) || "Your app");
   const title = esc(context.page.title);
   const brief = esc(context.page.brief || "The core content for this screen.");
   const blocks = (context.page.sections ?? [])
@@ -718,9 +720,9 @@ export function resolvePrototypeFrameId(
  */
 export function buildSamplePreviewHtml(
   tokensCss: string,
-  projectName: string,
+  brandName: string,
 ): string {
-  const safe = (projectName.trim() || "Preview").replace(/[<>&"]/g, "");
+  const safe = (brandName.trim().slice(0, 80) || "Your app").replace(/[<>&"]/g, "");
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -811,8 +813,11 @@ export async function resolveProjectDesignSystem(project: {
 
 /** Offline showcase: the token sample stands in until the model draws. */
 export function buildSamplePreviewHtmlFallback(
-  project: { name: string },
+  project: { brandName?: string },
   system: DesignSystemRef,
 ): string {
-  return buildSamplePreviewHtml(system.tokensCss || DEFAULT_TOKENS_CSS, project.name);
+  return buildSamplePreviewHtml(
+    system.tokensCss || DEFAULT_TOKENS_CSS,
+    project.brandName?.trim() || "Your app",
+  );
 }

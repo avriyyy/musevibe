@@ -312,7 +312,7 @@ export default function Home() {
   const activeModel = models.find((entry) => entry.id === model) ?? models[0];
 
   return (
-    <div className="h-screen flex bg-[#0b0c10] text-[#f5f6f8] overflow-hidden">
+    <div className="h-dvh flex bg-[#0b0c10] text-[#f5f6f8] overflow-hidden">
       <Sidebar
         open={navOpen}
         pinned={navPinned}

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  DEFAULT_MODEL,
   FALLBACK_MODELS,
   formatModelLabel,
   modelHint,
@@ -14,7 +15,6 @@ import {
 export async function GET() {
   const url = process.env.AI_API_URL;
   const key = process.env.AI_API_KEY;
-  const preferred = process.env.AI_MODEL || "";
 
   if (url && key) {
     try {
@@ -37,8 +37,7 @@ export async function GET() {
             label: formatModelLabel(id),
             hint: modelHint(id),
           }));
-          const fallback = chatIds.includes(preferred) ? preferred : chatIds[0];
-          return NextResponse.json({ models, default: fallback, source: "ai" });
+          return NextResponse.json({ models, default: DEFAULT_MODEL, source: "ai" });
         }
       }
     } catch {
@@ -46,12 +45,9 @@ export async function GET() {
     }
   }
 
-  const fallback = FALLBACK_MODELS.some((model) => model.id === preferred)
-    ? preferred
-    : FALLBACK_MODELS[0].id;
   return NextResponse.json({
     models: FALLBACK_MODELS,
-    default: fallback,
+    default: DEFAULT_MODEL,
     source: "local",
   });
 }

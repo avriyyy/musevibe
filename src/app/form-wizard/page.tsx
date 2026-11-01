@@ -47,11 +47,14 @@ import {
   type Timeline,
 } from "@/lib/project-options";
 import {
+  CUSTOM_ANSWER_OPTION,
   FALLBACK_QUESTIONS,
   answerToText,
   buildQuestionPrompt,
+  isCustomAnswer,
   isAnswered,
   parseWizardQuestions,
+  toCustomAnswer,
   type WizardAnswerValue,
   type WizardAnswers,
   type WizardQuestion,
@@ -59,11 +62,8 @@ import {
 import {
   MAX_LOGO_HISTORY,
   buildLogoPrompt,
-  buildLogoSvgPrompt,
-  dedupeLogoSvgVariants,
   fileToLogoDataUrl,
   paletteFromTokensCss,
-  parseLogoSvgVariants,
   removeLogoBackground,
   sanitizeLogoSvg,
   suggestLogoBrief,
@@ -72,7 +72,6 @@ import {
   type LogoFormat,
   type LogoOrigin,
   type LogoStatus,
-  type LogoSvgVariant,
 } from "@/lib/logo";
 import {
   DEFAULT_DESIGN_MD,
@@ -108,6 +107,25 @@ const REVIEW_STEP = STEPS.length - 1;
 
 type QuestionStatus = "idle" | "loading" | "ready";
 type QuestionSource = "ai" | "local" | null;
+
+function questionFallbackDescription(reason: unknown): string {
+  if (reason === "missing-key") {
+    return "AI generation is not connected, so MuseVibe is using its standard setup. You can still create the project.";
+  }
+  if (reason === "timeout") {
+    return "Muse took too long to draft these questions, so MuseVibe is using its standard setup. You can still create the project.";
+  }
+  if (reason === "http") {
+    return "Muse could not complete this question request, so MuseVibe is using its standard setup. You can still create the project.";
+  }
+  if (reason === "network") {
+    return "Muse could not be reached, so MuseVibe is using its standard setup. You can still create the project.";
+  }
+  if (reason === "invalid-output") {
+    return "Muse replied in a format this setup could not use, so MuseVibe is using its standard questions. You can still create the project.";
+  }
+  return "Muse did not return usable questions, so MuseVibe is using its standard setup. You can still create the project.";
+}
 
 function subscribeToClient() {
   return () => {};
@@ -249,27 +267,25 @@ function WizardBody({ projectId }: { projectId: string }) {
   const [questions, setQuestions] = useState<WizardQuestion[]>([]);
   const [questionStatus, setQuestionStatus] = useState<QuestionStatus>("loading");
   const [questionSource, setQuestionSource] = useState<QuestionSource>(null);
+  const [questionFallbackMessage, setQuestionFallbackMessage] = useState("");
   const [answers, setAnswers] = useState<WizardAnswers>({});
 
   const [logoUrl, setLogoUrl] = useState<string | null>(null);
   const [logoOrigin, setLogoOrigin] = useState<LogoOrigin>(null);
-  const [logoPrompt, setLogoPrompt] = useState("");
   const [logoStatus, setLogoStatus] = useState<LogoStatus>("idle");
   const [logoError, setLogoError] = useState("");
   const [logoRemoveBg, setLogoRemoveBg] = useState(true);
   const [logoBgNote, setLogoBgNote] = useState("");
+  const [brandName, setBrandName] = useState("");
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
-  const [logoFormat, setLogoFormat] = useState<LogoFormat>("svg");
-  const [svgVariants, setSvgVariants] = useState<LogoSvgVariant[]>([]);
-  const [svgStatus, setSvgStatus] = useState<"idle" | "loading">("idle");
+  const [logoFormat, setLogoFormat] = useState<LogoFormat>("png");
   const [design, setDesign] = useState<DesignSystemRef | null>(null);
   const designLoadedRef = useRef("");
   const logoRequestRef = useRef(0);
   const stackTouchedRef = useRef(false);
   const answersRef = useRef<WizardAnswers>({});
   const answersSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const logoBriefSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Keep a live ref so the question generator (stable callback) can merge
   // freshly typed answers that have not flushed to the store yet.
@@ -280,7 +296,6 @@ function WizardBody({ projectId }: { projectId: string }) {
   useEffect(
     () => () => {
       if (answersSaveTimerRef.current) clearTimeout(answersSaveTimerRef.current);
-      if (logoBriefSaveTimerRef.current) clearTimeout(logoBriefSaveTimerRef.current);
     },
     [],
   );
@@ -304,9 +319,11 @@ function WizardBody({ projectId }: { projectId: string }) {
     requestRef.current = requestId;
     setGeneratedFor(trimmed);
     setQuestionStatus("loading");
+    setQuestionFallbackMessage("");
 
     let nextQuestions = FALLBACK_QUESTIONS;
     let nextSource: QuestionSource = "local";
+    let failureMessage = "";
 
     try {
       const current = useVibe
@@ -320,25 +337,42 @@ function WizardBody({ projectId }: { projectId: string }) {
           prompt: buildQuestionPrompt(trimmed),
           ...(current?.model ? { model: current.model } : {}),
         }),
+        signal: AbortSignal.timeout(32_000),
       });
-      if (!response.ok) throw new Error(`Question request failed: ${response.status}`);
+      if (!response.ok) {
+        failureMessage = questionFallbackDescription("http");
+        throw new Error(`Question request failed: ${response.status}`);
+      }
 
-      const data = (await response.json()) as { text?: unknown; source?: unknown };
+      const data = (await response.json()) as {
+        text?: unknown;
+        source?: unknown;
+        reason?: unknown;
+      };
       if (requestId !== requestRef.current) return;
 
       const parsed = parseWizardQuestions(data.text);
       if (parsed) {
         nextQuestions = parsed;
         nextSource = data.source === "ai" ? "ai" : "local";
+        if (nextSource === "local") failureMessage = questionFallbackDescription(data.reason);
+      } else if (data.source === "ai") {
+        failureMessage = questionFallbackDescription("invalid-output");
+      } else {
+        failureMessage = questionFallbackDescription(data.reason);
       }
-    } catch {
+    } catch (error) {
       // The fallback set is already selected above; the wizard stays usable.
+      failureMessage ||= questionFallbackDescription(
+        error instanceof Error && error.name === "TimeoutError" ? "timeout" : "network",
+      );
     }
 
     if (requestId !== requestRef.current) return;
 
     setQuestions(nextQuestions);
     setQuestionSource(nextSource);
+    setQuestionFallbackMessage(nextSource === "local" ? failureMessage : "");
     setQuestionStatus("ready");
     // Cache the questionnaire on the project so a refresh reuses it instead
     // of calling the AI again. Preserve unmatched legacy answers (e.g. an
@@ -354,13 +388,16 @@ function WizardBody({ projectId }: { projectId: string }) {
       for (const question of nextQuestions) {
         const localValue = localAnswers[question.id];
         const hasLocal =
-          localValue !== undefined &&
-          (Array.isArray(localValue) ? localValue.length > 0 : String(localValue).trim().length > 0);
+          isCustomAnswer(localValue) ||
+          (localValue !== undefined &&
+            (Array.isArray(localValue)
+              ? localValue.length > 0
+              : String(localValue).trim().length > 0));
         const restored = restoreWizardAnswers([question], savedAnswers)[question.id];
         const value = hasLocal ? localValue : restored;
         if (value === undefined) continue;
         const text = answerToText(value);
-        if (!text) continue;
+        if (!text && !isCustomAnswer(value)) continue;
         merged.push({ qid: question.id, question: question.label, answer: text, values: value });
         seen.add(question.id);
       }
@@ -414,15 +451,13 @@ function WizardBody({ projectId }: { projectId: string }) {
     setPlatform(project.platform ?? "web");
     setTimeline(project.timeline ?? "two-weeks");
     setFramework(resolveWizardFramework(project.platform ?? "web", project.framework));
+    setBrandName(project.brandName ?? "");
     setLogoUrl(project.logoUrl ?? null);
     setLogoOrigin(project.logoOrigin ?? null);
     setLogoStatus("idle");
     setLogoRemoveBg(project.logoRemoveBg ?? true);
-    setLogoFormat(project.logoFormat ?? "svg");
+    setLogoFormat(project.logoFormat ?? "png");
     setLogoBgNote("");
-    // User-written logo direction persists across refresh/resume; the
-    // generated mark itself stays opt-in and is never auto-generated.
-    setLogoPrompt(project.logoBrief ?? "");
     // Unconditional so the effect keeps one straight hydration pass.
     // A project with no saved system always falls back to Minimal — never a
     // previous project's design (fresh mount starts from null by default).
@@ -472,6 +507,11 @@ function WizardBody({ projectId }: { projectId: string }) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setQuestions(project.questions);
       setQuestionSource(project.questionSource ?? null);
+      setQuestionFallbackMessage(
+        project.questionSource === "local"
+          ? "This project is using its saved built-in questions. You can still create the project."
+          : "",
+      );
       setGeneratedFor((project.idea ?? "").trim());
       setQuestionStatus("ready");
       setAnswers(restoreAnswers(project.questions));
@@ -481,6 +521,7 @@ function WizardBody({ projectId }: { projectId: string }) {
       // valid. Explicitly ensure the loading state for the fresh request.
       setQuestions([]);
       setQuestionSource(null);
+      setQuestionFallbackMessage("");
       setQuestionStatus("loading");
       setAnswers({});
     }
@@ -506,7 +547,7 @@ function WizardBody({ projectId }: { projectId: string }) {
       for (const question of questions) {
         const value = current[question.id];
         const text = answerToText(value);
-        if (!text) continue;
+        if (!text && !isCustomAnswer(value)) continue;
         merged.push({ qid: question.id, question: question.label, answer: text, values: value });
         seen.add(question.id);
       }
@@ -531,22 +572,6 @@ function WizardBody({ projectId }: { projectId: string }) {
     // re-arming the timer on every keystroke render loop.
   }, [answers, questions, questionStatus, projectId]);
 
-  // Debounce-save the user's logo brief alongside answers, same hydration guard.
-  useEffect(() => {
-    if (!projectId || hydratedRef.current !== projectId) return;
-    if (logoBriefSaveTimerRef.current) clearTimeout(logoBriefSaveTimerRef.current);
-    logoBriefSaveTimerRef.current = setTimeout(() => {
-      const store = useVibe.getState();
-      const existing = store.projects.find((item) => item.id === projectIdRef.current);
-      if (!existing) return;
-      if ((existing.logoBrief ?? "") === logoPrompt) return;
-      store.updateProject(projectIdRef.current, { logoBrief: logoPrompt });
-    }, 600);
-    return () => {
-      if (logoBriefSaveTimerRef.current) clearTimeout(logoBriefSaveTimerRef.current);
-    };
-  }, [logoPrompt, projectId]);
-
   const setAnswer = (id: string, value: WizardAnswerValue) => {
     setAnswers((current) => ({ ...current, [id]: value }));
   };
@@ -570,10 +595,8 @@ function WizardBody({ projectId }: { projectId: string }) {
     return context;
   };
 
-  /** User-written direction wins; otherwise suggest a grounded default. */
+  /** Use project details to build the logo direction without extra user input. */
   const effectiveLogoBrief = (): string => {
-    const typed = logoPrompt.trim();
-    if (typed) return typed;
     const coreWorkflow = answerToText(answersRef.current["core-action"] ?? answers["core-action"]);
     return suggestLogoBrief(name.trim() || "Untitled project", idea, coreWorkflow);
   };
@@ -715,10 +738,15 @@ function WizardBody({ projectId }: { projectId: string }) {
         stashLogo(logoUrl);
         const finalUrl = await maybeRemoveBg(data.image);
         setLogoUrl(finalUrl);
+        setLogoFormat("png");
         // User chose to generate: persist the chosen output immediately so a
         // refresh does not lose it. Never auto-replace without this click.
         if (projectId) {
-          useVibe.getState().updateProject(projectId, { logoUrl: finalUrl, logoOrigin: "ai" });
+          useVibe.getState().updateProject(projectId, {
+            logoUrl: finalUrl,
+            logoOrigin: "ai",
+            logoFormat: "png",
+          });
         }
         setLogoOrigin("ai");
         setLogoStatus("ready");
@@ -735,81 +763,6 @@ function WizardBody({ projectId }: { projectId: string }) {
         "The image model is unavailable right now, so no logo was drawn. Your initials stay as the mark, or upload an image instead.",
       );
     }
-  };
-
-  /** Draw three vector variants with the text model; SVG has no backdrop. */
-  const generateLogoSvg = async () => {
-    const description = effectiveLogoBrief().trim();
-    if (!description || svgStatus === "loading") return;
-
-    const requestId = logoRequestRef.current + 1;
-    logoRequestRef.current = requestId;
-    setSvgStatus("loading");
-    setLogoError("");
-
-    try {
-      const response = await fetch("/api/ai/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          kind: "logo-svg",
-          prompt: buildLogoSvgPrompt(
-            description,
-            name.trim() || "Untitled project",
-            idea,
-            logoBriefContext(),
-          ),
-          ...(projectModel ? { model: projectModel } : {}),
-        }),
-      });
-      if (!response.ok) throw new Error(`Logo request failed: ${response.status}`);
-
-      const data = (await response.json()) as { text?: unknown; source?: unknown };
-      if (requestId !== logoRequestRef.current) return;
-
-      // Local generic geometry is never a generated logo: only source ai
-      // may populate concepts, and the current mark stays untouched.
-      if (data.source !== "ai") {
-        setLogoError(
-          "Logo concepts are unavailable while the model is offline. Reconnect and try again. Your current mark is unchanged.",
-        );
-      } else {
-        const variants = dedupeLogoSvgVariants(parseLogoSvgVariants(data.text));
-        if (!variants.length) {
-          setLogoError("The model did not return usable SVG. Try a shorter description.");
-        } else {
-          setSvgVariants(variants);
-          setLogoError("");
-          if (variants.length < 3) {
-            setLogoBgNote(
-              `Only ${variants.length} of 3 concepts were usable. Regenerate or refine the description for more options.`,
-            );
-          } else {
-            setLogoBgNote("");
-          }
-        }
-      }
-    } catch {
-      if (requestId !== logoRequestRef.current) return;
-      setLogoError("The model is unavailable right now, so no variants were drawn. Try again or upload a file.");
-    } finally {
-      if (requestId === logoRequestRef.current) setSvgStatus("idle");
-    }
-  };
-
-  /** Adopt one vector variant as the mark, stashing the current one. */
-  const pickLogoSvg = (svg: string) => {
-    stashLogo(logoUrl);
-    const url = svgToDataUrl(svg);
-    setLogoUrl(url);
-    // Explicit user choice: persist immediately, never silently replace.
-    if (projectId) {
-      useVibe.getState().updateProject(projectId, { logoUrl: url, logoOrigin: "ai" });
-    }
-    setLogoOrigin("ai");
-    setLogoStatus("ready");
-    setLogoError("");
-    setLogoBgNote("Vector mark: transparent by construction, no removal needed.");
   };
 
   /** Bring back an older mark, stashing the current one in its place. */
@@ -836,8 +789,13 @@ function WizardBody({ projectId }: { projectId: string }) {
         stashLogo(logoUrl);
         const url = svgToDataUrl(clean);
         setLogoUrl(url);
+        setLogoFormat("svg");
         if (projectId) {
-          useVibe.getState().updateProject(projectId, { logoUrl: url, logoOrigin: "upload" });
+          useVibe.getState().updateProject(projectId, {
+            logoUrl: url,
+            logoOrigin: "upload",
+            logoFormat: "svg",
+          });
         }
         setLogoOrigin("upload");
         setLogoStatus("ready");
@@ -848,8 +806,13 @@ function WizardBody({ projectId }: { projectId: string }) {
       stashLogo(logoUrl);
       const finalUrl = await maybeRemoveBg(dataUrl);
       setLogoUrl(finalUrl);
+      setLogoFormat("png");
       if (projectId) {
-        useVibe.getState().updateProject(projectId, { logoUrl: finalUrl, logoOrigin: "upload" });
+        useVibe.getState().updateProject(projectId, {
+          logoUrl: finalUrl,
+          logoOrigin: "upload",
+          logoFormat: "png",
+        });
       }
       setLogoOrigin("upload");
       setLogoStatus("ready");
@@ -913,7 +876,7 @@ function WizardBody({ projectId }: { projectId: string }) {
         answer: answerToText(answers[question.id]),
         values: answers[question.id],
       }))
-      .filter((entry) => entry.answer.length > 0);
+      .filter((entry) => entry.answer.length > 0 || isCustomAnswer(entry.values));
     // Preserve legacy answers (e.g. old "feel") that no longer have a
     // question in the regenerated set instead of silently dropping them.
     const seen = new Set(current.map((entry) => entry.qid));
@@ -935,18 +898,14 @@ function WizardBody({ projectId }: { projectId: string }) {
       clearTimeout(answersSaveTimerRef.current);
       answersSaveTimerRef.current = null;
     }
-    if (logoBriefSaveTimerRef.current) {
-      clearTimeout(logoBriefSaveTimerRef.current);
-      logoBriefSaveTimerRef.current = null;
-    }
     updateProject(projectId, {
       answers: answersList(),
       platform,
       timeline,
       framework,
+      brandName: brandName.trim().slice(0, 80) || undefined,
       ...(logoUrl ? { logoUrl } : {}),
       logoOrigin: logoOrigin ?? undefined,
-      logoBrief: logoPrompt,
       logoRemoveBg,
       logoFormat,
       ...(project?.logoHistory?.length ? { logoHistory: project.logoHistory } : {}),
@@ -1043,39 +1002,108 @@ function WizardBody({ projectId }: { projectId: string }) {
     };
 
     if (question.type === "single") {
+      const options = question.options ?? [];
+      const customSelected =
+        isCustomAnswer(value) ||
+        (typeof value === "string" && !!value && !options.includes(value));
       return (
-        <RadioList
-          key={question.id}
-          ref={attachRef}
-          label={question.label}
-          description={description}
-          isRequired={question.required || undefined}
-          value={typeof value === "string" ? value : ""}
-          onChange={(next) => setAnswer(question.id, next)}
-          status={status}
-          orientation="horizontal">
-          {(question.options ?? []).map((option) => (
-            <RadioListItem key={option} value={option} label={option} />
-          ))}
-        </RadioList>
+        <div key={question.id} ref={attachRef} className="space-y-3">
+          <RadioList
+            label={question.label}
+            description={description}
+            isRequired={question.required || undefined}
+            value={customSelected ? CUSTOM_ANSWER_OPTION : typeof value === "string" ? value : ""}
+            onChange={(next) => {
+              if (next === CUSTOM_ANSWER_OPTION) {
+                setAnswer(question.id, toCustomAnswer(customSelected ? answerToText(value) : ""));
+              } else {
+                setAnswer(question.id, next);
+              }
+            }}
+            status={status}
+            orientation={isNarrow ? "vertical" : "horizontal"}
+            controlStyle={
+              isNarrow
+                ? {
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "stretch",
+                    gap: 12,
+                    width: "100%",
+                  }
+                : undefined
+            }>
+            {options.map((option) => (
+              <RadioListItem
+                key={option}
+                value={option}
+                label={option}
+                className={isNarrow ? "w-full min-w-0" : undefined}
+              />
+            ))}
+            <RadioListItem
+              value={CUSTOM_ANSWER_OPTION}
+              label="Type your answer"
+              className={isNarrow ? "w-full min-w-0" : undefined}
+            />
+          </RadioList>
+          {customSelected && (
+            <TextInput
+              label="Your answer"
+              placeholder={question.placeholder || "Type your answer"}
+              value={answerToText(value)}
+              onChange={(next) => setAnswer(question.id, toCustomAnswer(next))}
+            />
+          )}
+        </div>
       );
     }
 
     if (question.type === "multi") {
+      const selected = Array.isArray(value) ? value : [];
+      const customAnswer = selected.find((item) => isCustomAnswer(item));
+      const customSelected = !!customAnswer;
       return (
-        <CheckboxList
-          key={question.id}
-          ref={attachRef}
-          label={question.label}
-          description={description}
-          value={Array.isArray(value) ? value : []}
-          onChange={(next) => setAnswer(question.id, next)}
-          status={status}
-          controlClassName="[&>ul]:flex [&>ul]:flex-row! [&>ul]:flex-wrap [&>ul]:gap-x-6 [&>ul]:gap-y-2">
-          {(question.options ?? []).map((option) => (
-            <CheckboxListItem key={option} value={option} label={option} />
-          ))}
-        </CheckboxList>
+        <div key={question.id} ref={attachRef} className="space-y-3">
+          <CheckboxList
+            label={question.label}
+            description={description}
+            value={selected.map((item) =>
+              isCustomAnswer(item) ? CUSTOM_ANSWER_OPTION : item,
+            )}
+            onChange={(next) => {
+              const nextValues = next.filter((item) => item !== CUSTOM_ANSWER_OPTION);
+              if (next.includes(CUSTOM_ANSWER_OPTION)) {
+                nextValues.push(toCustomAnswer(answerToText(customAnswer)));
+              }
+              setAnswer(question.id, nextValues);
+            }}
+            status={status}
+            controlClassName={
+              isNarrow
+                ? "[&>ul]:flex [&>ul]:flex-col! [&>ul]:gap-y-2"
+                : "[&>ul]:flex [&>ul]:flex-row! [&>ul]:flex-wrap [&>ul]:gap-x-6 [&>ul]:gap-y-2"
+            }>
+            {(question.options ?? []).map((option) => (
+              <CheckboxListItem key={option} value={option} label={option} />
+            ))}
+            <CheckboxListItem
+              value={CUSTOM_ANSWER_OPTION}
+              label="Type your answer"
+            />
+          </CheckboxList>
+          {customSelected && (
+            <TextInput
+              label="Your answer"
+              placeholder={question.placeholder || "Type your answer"}
+              value={answerToText(customAnswer)}
+              onChange={(next) => {
+                const kept = selected.filter((item) => !isCustomAnswer(item));
+                setAnswer(question.id, [...kept, toCustomAnswer(next)]);
+              }}
+            />
+          )}
+        </div>
       );
     }
 
@@ -1146,11 +1174,11 @@ function WizardBody({ projectId }: { projectId: string }) {
         <LayoutHeader hasDivider={false}>
           <VStack gap={isNarrow ? 3 : 5}>
             <HStack gap={3} vAlign="center">
-              <StackItem size="fill">
-                <span className="group flex items-center gap-1.5">
+              <StackItem size="fill" className="min-w-0">
+                <span className="group flex min-w-0 items-center gap-1.5">
                   {editingName ? (
                     <TextInput
-                      label="Project name"
+                      label="Project label"
                       isLabelHidden
                       value={nameDraft}
                       onChange={setNameDraft}
@@ -1171,7 +1199,14 @@ function WizardBody({ projectId }: { projectId: string }) {
                     />
                   ) : (
                     <>
-                      <Heading level={1}>{name || "New project"}</Heading>
+                      <Heading
+                        level={1}
+                        className="min-w-0 flex-1"
+                        maxLines={1}
+                        hasTruncateTooltip={false}
+                      >
+                        {name || "New project"}
+                      </Heading>
                       <button
                         type="button"
                         onClick={() => {
@@ -1201,7 +1236,7 @@ function WizardBody({ projectId }: { projectId: string }) {
               <Button
                 label="Cancel"
                 variant="ghost"
-                className="min-h-11 md:min-h-0"
+                className="min-h-11 min-w-[72px] shrink-0 whitespace-nowrap md:min-h-0"
                 onClick={() => {
                   saveProgress(step);
                   router.push("/");
@@ -1366,7 +1401,7 @@ function WizardBody({ projectId }: { projectId: string }) {
                 <Banner
                   status="info"
                   title="Using the built-in questions"
-                  description="The AI provider is unavailable right now, so MuseVibe is using its standard setup. You can still create the project."
+                  description={questionFallbackMessage || questionFallbackDescription(undefined)}
                   collapsible={false}
                 />
               )}
@@ -1386,28 +1421,13 @@ function WizardBody({ projectId }: { projectId: string }) {
               onDesign={setDesign}
               logoUrl={logoUrl}
               logoOrigin={logoOrigin}
-              logoPrompt={logoPrompt}
-              onLogoPrompt={setLogoPrompt}
-              logoSuggestion={suggestLogoBrief(
-                name.trim() || "Untitled project",
-                idea,
-                answerToText(answers["core-action"]),
-              )}
               logoStatus={logoStatus}
               logoError={logoError}
               logoBgNote={logoBgNote}
-              logoRemoveBg={logoRemoveBg}
-              onLogoRemoveBg={setLogoRemoveBg}
               onGenerateLogo={() => void generateLogo()}
               onUploadLogo={(file) => void uploadLogo(file)}
-              logoFormat={logoFormat}
-              onLogoFormat={setLogoFormat}
               logoHistory={logoHistory}
               onRestoreLogo={restoreLogo}
-              svgVariants={svgVariants}
-              svgStatus={svgStatus}
-              onGenerateSvg={() => void generateLogoSvg()}
-              onPickSvg={pickLogoSvg}
             />
           )}
 
@@ -1452,9 +1472,26 @@ function WizardBody({ projectId }: { projectId: string }) {
                 </Banner>
               )}
 
-              <MetadataList orientation="vertical">
-                <MetadataListItem label="Project name">
+              <MetadataList
+                orientation="vertical"
+                label={{ position: isNarrow ? "top" : "start" }}
+              >
+                <MetadataListItem label="Project label">
                   {name.trim() || "Not set"}
+                </MetadataListItem>
+                <MetadataListItem label="Website brand">
+                  <div className="max-w-md space-y-1.5">
+                    <TextInput
+                      label="Website brand"
+                      isLabelHidden
+                      value={brandName}
+                      onChange={setBrandName}
+                      placeholder="Leave blank for a suggestion"
+                    />
+                    <Text type="supporting" color="secondary">
+                      Shown on generated website pages, separate from the project label.
+                    </Text>
+                  </div>
                 </MetadataListItem>
                 {questions.map((question) => (
                   <MetadataListItem key={question.id} label={question.label}>
@@ -1502,7 +1539,7 @@ function WizardBody({ projectId }: { projectId: string }) {
       }
       footer={
         <LayoutFooter>
-          <HStack gap={3} vAlign="center">
+          <HStack gap={isNarrow ? 2 : 3} vAlign="center">
             <StackItem size="fill" style={footerZone}>
               {STEPS[step].isOptional && (
                 <Button
@@ -1516,15 +1553,22 @@ function WizardBody({ projectId }: { projectId: string }) {
                 />
               )}
             </StackItem>
-            <Text type="supporting" color="secondary">
+            <Text
+              type="supporting"
+              color="secondary"
+              style={isNarrow ? { minWidth: 44, flexShrink: 0, textAlign: "center" } : undefined}
+            >
               {step + 1} of {STEPS.length}
             </Text>
-            <StackItem size="fill" style={footerZone}>
-              <HStack gap={3} hAlign="end">
+            <StackItem
+              size="fill"
+              style={isNarrow ? { flex: "0 0 auto" } : footerZone}
+            >
+              <HStack gap={isNarrow ? 2 : 3} hAlign="end">
                 <Button
                   label="Back"
                   variant="secondary"
-                  className="min-h-11 md:min-h-0"
+                  className="min-h-11 min-w-[68px] shrink-0 whitespace-nowrap md:min-h-0"
                   isDisabled={step === 0}
                   onClick={() => {
                     const next = Math.max(0, step - 1);
@@ -1541,7 +1585,7 @@ function WizardBody({ projectId }: { projectId: string }) {
                         : "Next"
                   }
                   variant="primary"
-                  className="min-h-11 md:min-h-0"
+                  className="min-h-11 min-w-[68px] shrink-0 whitespace-nowrap md:min-h-0"
                   isDisabled={step === 1 && questionStatus !== "ready"}
                   onClick={goNext}
                 />

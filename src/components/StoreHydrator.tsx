@@ -2,15 +2,26 @@
 
 import { useLayoutEffect } from "react";
 import { useVibe } from "@/lib/store";
+import { startCloudSync } from "@/lib/supabase/sync";
 
 /**
- * Loads the saved workspace after the server HTML has hydrated but before the
- * browser paints, so the project list never flashes the seed data. Reading
- * storage during the first render would break hydration instead.
+ * Hydrates the browser cache before paint, then starts account-scoped cloud
+ * sync. Signed-out use remains local-first.
  */
 export default function StoreHydrator() {
   useLayoutEffect(() => {
-    void useVibe.persist.rehydrate();
+    let cancelled = false;
+    let stopSync: (() => void) | undefined;
+
+    void (async () => {
+      await useVibe.persist.rehydrate();
+      if (!cancelled) stopSync = startCloudSync();
+    })();
+
+    return () => {
+      cancelled = true;
+      stopSync?.();
+    };
   }, []);
 
   return null;

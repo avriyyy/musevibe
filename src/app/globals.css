@@ -18,9 +18,13 @@
   --font-code: var(--font-code), ui-monospace, monospace;
 }
 
+html,
 body {
-  background: var(--color-wash);
-  color: var(--color-ink);
+  background: #0b0c10;
+}
+
+body {
+  color: #f5f6f8;
 }
 
 @layer base {
@@ -86,6 +90,46 @@ body {
 }
 .musevibe-sheet {
   animation: musevibe-sheet-in 0.22s ease-out;
+}
+
+/* Loading placeholders: a moving sheen on skeleton blocks plus a small ring
+   next to the label. The old single pulsing dot is gone on purpose. */
+@keyframes musevibe-shimmer {
+  0% {
+    background-position: -220% 0;
+  }
+  100% {
+    background-position: 220% 0;
+  }
+}
+
+.musevibe-shimmer {
+  background-color: rgba(255, 255, 255, 0.04);
+  background-image: linear-gradient(
+    100deg,
+    rgba(255, 255, 255, 0.04) 20%,
+    rgba(255, 255, 255, 0.13) 42%,
+    rgba(255, 255, 255, 0.04) 64%
+  );
+  background-size: 220% 100%;
+  animation: musevibe-shimmer 1.7s ease-in-out infinite;
+}
+
+@keyframes musevibe-loader-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.musevibe-loader-ring {
+  animation: musevibe-loader-spin 0.9s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .musevibe-shimmer,
+  .musevibe-loader-ring {
+    animation: none;
+  }
 }
 
 /* Firefox gets the standard properties instead, because setting them

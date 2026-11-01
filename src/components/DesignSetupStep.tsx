@@ -9,10 +9,9 @@
  * before the project is finished, so the choice is seen, not guessed.
  */
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading, Text } from "@astryxdesign/core/Text";
-import { TextArea } from "@astryxdesign/core/TextArea";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { HStack, VStack } from "@astryxdesign/core/Stack";
 import { Spinner } from "@astryxdesign/core/Spinner";
@@ -28,11 +27,8 @@ import {
 } from "@/lib/design-system";
 import {
   initials,
-  svgToDataUrl,
-  type LogoFormat,
   type LogoOrigin,
   type LogoStatus,
-  type LogoSvgVariant,
 } from "@/lib/logo";
 
 const fileCache = new Map<string, { designMd: string; tokensCss: string }>();
@@ -121,24 +117,13 @@ interface DesignSetupStepProps {
   onDesign: (next: DesignSystemRef | null) => void;
   logoUrl: string | null;
   logoOrigin: LogoOrigin;
-  logoPrompt: string;
-  onLogoPrompt: (value: string) => void;
-  logoSuggestion?: string;
   logoStatus: LogoStatus;
   logoError: string;
   logoBgNote: string;
-  logoRemoveBg: boolean;
-  onLogoRemoveBg: (value: boolean) => void;
   onGenerateLogo: () => void;
   onUploadLogo: (file: File | undefined) => void;
-  logoFormat: LogoFormat;
-  onLogoFormat: (format: LogoFormat) => void;
   logoHistory: string[];
   onRestoreLogo: (url: string) => void;
-  svgVariants: LogoSvgVariant[];
-  svgStatus: "idle" | "loading";
-  onGenerateSvg: () => void;
-  onPickSvg: (svg: string) => void;
 }
 
 export default function DesignSetupStep({
@@ -147,24 +132,13 @@ export default function DesignSetupStep({
   onDesign,
   logoUrl,
   logoOrigin,
-  logoPrompt,
-  onLogoPrompt,
-  logoSuggestion,
   logoStatus,
   logoError,
   logoBgNote,
-  logoRemoveBg,
-  onLogoRemoveBg,
   onGenerateLogo,
   onUploadLogo,
-  logoFormat,
-  onLogoFormat,
   logoHistory,
   onRestoreLogo,
-  svgVariants,
-  svgStatus,
-  onGenerateSvg,
-  onPickSvg,
 }: DesignSetupStepProps) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All");
@@ -172,7 +146,6 @@ export default function DesignSetupStep({
   const [loadingId, setLoadingId] = useState<string | null>(null);
   const [logoPickerOpen, setLogoPickerOpen] = useState(false);
   const [showMd, setShowMd] = useState(false);
-  const logoFileRef = useRef<HTMLInputElement>(null);
 
   const categories = useMemo(() => {
     const set = new Set<string>();
@@ -239,8 +212,8 @@ export default function DesignSetupStep({
 
       <VStack gap={2}>
         <Heading level={3}>Templates</Heading>
-        <HStack gap={3}>
-          <div className="min-w-0 flex-1">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-[minmax(0,1fr)_11rem]">
+          <div className="min-w-0">
             <TextInput
               label="Search styles"
               value={query}
@@ -248,7 +221,7 @@ export default function DesignSetupStep({
               placeholder="linear, playful, editorial…"
             />
           </div>
-          <div className="w-44 shrink-0">
+          <div className="w-full sm:w-44">
             <label className="mb-1 block text-[13px] font-medium" htmlFor="ds-category">
               Category
             </label>
@@ -264,7 +237,7 @@ export default function DesignSetupStep({
               ))}
             </select>
           </div>
-        </HStack>
+        </div>
         <div
           role="listbox"
           aria-label="Design system templates"
@@ -350,12 +323,16 @@ export default function DesignSetupStep({
       </VStack>
 
       <VStack gap={2}>
-        <Heading level={3}>Logo mark (optional)</Heading>
+        <HStack gap={2} vAlign="center">
+          <Heading level={3}>Logo mark (optional)</Heading>
+          <span className="rounded-full border border-[#8ab4ff]/30 bg-[#8ab4ff]/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[#a9c8ff]">
+            Beta
+          </span>
+        </HStack>
         <Text type="supporting" color="secondary">
-          This step designs a small symbol mark for the project — not a
-          wordmark, mockup, or full logo lockup. The project name stays
-          separate as text. Generate a few concepts and pick one, upload your
-          own, or skip and keep your initials.
+          Generate a symbol mark automatically from your project details. The
+          project name stays separate as text. You can change the mark later,
+          or skip and keep your initials.
         </Text>
         <HStack gap={4} vAlign="center">
           <button
@@ -399,170 +376,19 @@ export default function DesignSetupStep({
             <Text type="supporting" color="secondary">
               {logoBgNote ||
                 (logoUrl
-                  ? "This is the mark stored on the project. Generating more concepts never replaces it until you pick one."
-                  : "Generate concepts and pick one to adopt it. Skipping is fine.")}
+                  ? "This is the mark stored on the project. Generate again to replace it, or click the mark to restore an earlier one."
+                  : "Generate a mark automatically, or skip and keep your initials.")}
             </Text>
           </VStack>
         </HStack>
 
-        <TextArea
-          label="Describe the mark"
-          rows={3}
-          value={logoPrompt}
-          onChange={onLogoPrompt}
-          placeholder={logoSuggestion || "A calm circle with a small sprout, deep green on transparent"}
-          description="Optional. One or two sentences: motif, colors, mood. Your words win over the suggested direction. Leave it empty to use the suggestion. Flat and minimal reads best at small sizes."
+        <Button
+          label={logoStatus === "loading" ? "Generating…" : "Generate"}
+          variant="primary"
+          className="min-h-11 self-start md:min-h-0"
+          isDisabled={logoStatus === "loading"}
+          onClick={onGenerateLogo}
         />
-
-        <div
-          role="group"
-          aria-label="Logo format"
-          className="flex gap-1 self-start rounded-full bg-white/5 p-1">
-          {(
-            [
-              { value: "svg", label: "SVG · vector · Recommended" },
-              { value: "png", label: "PNG · image concept" },
-            ] as Array<{ value: LogoFormat; label: string }>
-          ).map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => onLogoFormat(option.value)}
-              aria-pressed={logoFormat === option.value}
-              className={`min-h-9 rounded-full px-4 text-[13px] font-medium transition-colors ${
-                logoFormat === option.value
-                  ? "bg-white text-[#0b0c10]"
-                  : "text-[#9aa0ae] hover:text-white"
-              }`}>
-              {option.label}
-            </button>
-          ))}
-        </div>
-        <Text type="supporting" color="secondary">
-          {logoFormat === "svg"
-            ? "Vector from the text model (recommended): transparent by construction, sharp at any size, best for a recognizable icon. Produces 3 concepts to pick from."
-            : "Raster image concept from the image model: a single illustration to judge the idea, not a scalable vector. Use remove-background when it arrives on a solid field."}
-        </Text>
-
-        {logoFormat === "svg" ? (
-          <HStack gap={3} vAlign="center">
-            <Button
-              label={svgStatus === "loading" ? "Drawing…" : "Generate 3 concepts"}
-              variant="primary"
-              className="min-h-11 md:min-h-0"
-              isDisabled={svgStatus === "loading"}
-              onClick={onGenerateSvg}
-            />
-            <Button
-              label="Upload"
-              variant="secondary"
-              className="min-h-11 md:min-h-0"
-              onClick={() => logoFileRef.current?.click()}
-            />
-          </HStack>
-        ) : (
-          <HStack gap={3} vAlign="center">
-            <Button
-              label={logoStatus === "loading" ? "Drawing…" : "Generate concept"}
-              variant="primary"
-              className="min-h-11 md:min-h-0"
-              isDisabled={logoStatus === "loading"}
-              onClick={onGenerateLogo}
-            />
-            <Button
-              label="Upload"
-              variant="secondary"
-              className="min-h-11 md:min-h-0"
-              onClick={() => logoFileRef.current?.click()}
-            />
-          </HStack>
-        )}
-        <input
-          ref={logoFileRef}
-          type="file"
-          accept="image/png,image/jpeg,image/webp,image/svg+xml"
-          className="hidden"
-          aria-label="Upload your own logo"
-          onChange={(event) => {
-            onUploadLogo(event.target.files?.[0]);
-            event.target.value = "";
-          }}
-        />
-
-        {svgVariants.length > 0 && (
-          <VStack gap={2}>
-            <Text type="label">
-              Concepts ({svgVariants.length}). Pick one to adopt it — nothing changes until you pick.
-            </Text>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-              {svgVariants.map((variant, index) => {
-                const previewUrl = svgToDataUrl(variant.svg, "#111827");
-                const darkPreviewUrl = svgToDataUrl(variant.svg, "#f5f6f8");
-                return (
-                  <button
-                    key={index}
-                    type="button"
-                    onClick={() => onPickSvg(variant.svg)}
-                    aria-label={`Adopt concept ${index + 1}${variant.rationale ? `: ${variant.rationale}` : ""}`}
-                    className="group flex flex-col items-stretch gap-2 rounded-xl border border-white/10 bg-white/[0.02] p-3 text-left transition-colors hover:border-white/30 hover:bg-white/[0.04]">
-                    <span className="flex items-center justify-center gap-4 rounded-lg bg-white p-3">
-                      <img
-                        src={previewUrl}
-                        alt={`Logo concept ${index + 1} at large size`}
-                        width={64}
-                        height={64}
-                        className="size-16 object-contain"
-                      />
-                      <span className="flex flex-col items-center gap-1">
-                        <img
-                          src={previewUrl}
-                          alt={`Logo concept ${index + 1} at 16 pixels`}
-                          width={16}
-                          height={16}
-                          className="size-4 object-contain"
-                        />
-                        <span className="text-[10px] text-[#4b5563]">16px</span>
-                      </span>
-                    </span>
-                    <span className="flex items-center justify-center gap-3 rounded-lg bg-[#0b0c10] p-2 ring-1 ring-white/10">
-                      <img
-                        src={darkPreviewUrl}
-                        alt=""
-                        aria-hidden
-                        width={24}
-                        height={24}
-                        className="size-6 object-contain"
-                      />
-                      <span className="text-[11px] text-[#9aa0ae]">one-colour check</span>
-                    </span>
-                    {!!variant.rationale && (
-                      <span className="text-[11px] leading-4 text-[#9aa0ae]">
-                        {variant.rationale}
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-          </VStack>
-        )}
-
-        {logoFormat === "png" && (
-          <label className="flex min-h-11 cursor-pointer items-center gap-3 md:min-h-0">
-            <input
-              type="checkbox"
-              checked={logoRemoveBg}
-              onChange={(event) => onLogoRemoveBg(event.target.checked)}
-              className="size-4 accent-black"
-            />
-            <span className="text-[14px] text-[#f5f6f8]">
-              Remove background
-              <span className="block text-[12px] text-[#9aa0ae]">
-                On: the solid field behind the mark is cut so the logo sits clean on any surface.
-              </span>
-            </span>
-          </label>
-        )}
 
         {logoHistory.length > 0 && (
           <VStack gap={2}>
@@ -596,7 +422,7 @@ export default function DesignSetupStep({
           <div role="status" aria-live="polite" className="flex items-center gap-3">
             <Spinner size="md" />
             <Text type="supporting" color="secondary">
-              Drawing your logo…
+              Generating your logo…
             </Text>
           </div>
         )}
@@ -611,9 +437,7 @@ export default function DesignSetupStep({
           projectName={projectName}
           current={logoUrl}
           history={logoHistory}
-          variants={svgVariants}
           onPick={(url) => onRestoreLogo(url)}
-          onPickVariant={(svg) => onPickSvg(svg)}
           onUpload={(file) => onUploadLogo(file)}
           onClose={() => setLogoPickerOpen(false)}
         />
@@ -622,7 +446,6 @@ export default function DesignSetupStep({
       {previewEntry && (
         <PreviewModal
           entry={previewEntry}
-          projectName={projectName}
           onUse={() => {
             void applyTemplate(previewEntry).then(() => setPreviewId(null));
           }}
@@ -635,12 +458,10 @@ export default function DesignSetupStep({
 
 function PreviewModal({
   entry,
-  projectName,
   onUse,
   onClose,
 }: {
   entry: DesignSystemEntry;
-  projectName: string;
   onUse: () => void;
   onClose: () => void;
 }) {
@@ -674,33 +495,44 @@ function PreviewModal({
       <div
         className="flex max-h-[86dvh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#17181d] shadow-2xl"
         onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[15px] font-semibold text-[#f5f6f8]">{entry.name}</p>
-            {!!entry.category && <p className="truncate text-[12px] text-[#9aa0ae]">{entry.category}</p>}
+        <div className="shrink-0 border-b border-white/10 px-3 py-3 sm:px-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-[15px] font-semibold text-[#f5f6f8]">{entry.name}</p>
+              {!!entry.category && <p className="truncate text-[12px] text-[#9aa0ae]">{entry.category}</p>}
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close preview"
+              className="flex size-10 shrink-0 items-center justify-center rounded-full text-[18px] text-[#9aa0ae] hover:bg-white/10 hover:text-white"
+            >
+              ×
+            </button>
           </div>
-          <div className="flex gap-1 rounded-full bg-white/5 p-1">
+          <div className="mt-3 flex min-w-0 items-center gap-2">
+            <div className="flex min-w-0 flex-1 gap-1 overflow-x-auto rounded-full bg-white/5 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {pages.map((page, index) => (
               <button
                 key={`${page.path}-${index}`}
                 type="button"
                 onClick={() => setTab(index)}
                 aria-pressed={tab === index}
-                className={`rounded-full px-3 py-1.5 text-[12px] font-medium ${
+                className={`shrink-0 whitespace-nowrap rounded-full px-3 py-1.5 text-[12px] font-medium ${
                   tab === index ? "bg-white text-[#0b0c10]" : "text-[#9aa0ae] hover:text-white"
                 }`}>
                 {page.title || page.role || `View ${index + 1}`}
               </button>
             ))}
+            </div>
+            <Button
+              label="Use this style"
+              variant="primary"
+              size="sm"
+              className="min-h-11 shrink-0 whitespace-nowrap md:min-h-0"
+              onClick={onUse}
+            />
           </div>
-          <Button label="Use this style" variant="primary" size="sm" className="min-h-11 md:min-h-0" onClick={onUse} />
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close preview"
-            className="flex size-9 items-center justify-center rounded-full text-[18px] text-[#9aa0ae] hover:bg-white/10 hover:text-white">
-            ×
-          </button>
         </div>
         <div className="min-h-0 flex-1 bg-white">
           {pages[Math.min(tab, pages.length - 1)].path ? (
@@ -713,7 +545,7 @@ function PreviewModal({
           ) : (
             <iframe
               title={`${entry.name} sample preview`}
-              srcDoc={buildSamplePreviewHtml(tokens ?? DEFAULT_TOKENS_CSS, projectName)}
+              srcDoc={buildSamplePreviewHtml(tokens ?? DEFAULT_TOKENS_CSS, "Your app")}
               sandbox="allow-scripts"
               className="h-[60dvh] w-full"
             />

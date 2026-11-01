@@ -2,6 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildFallbackPageHtml,
+  buildPagePrompt,
+  buildPageRepairPrompt,
+  buildShowcasePrompt,
+  buildShowcaseRepairPrompt,
   classifyPrototypeHref,
   fallbackPagePlan,
   resolvePrototypeFrameId,
@@ -100,4 +104,49 @@ test("local page previews include only planned sections and the chosen action", 
   assert.match(html, /Recently added books/);
   assert.match(html, /Add a book/);
   assert.doesNotMatch(html, /Next steps|Recent activity|Ready to review|<table/);
+});
+
+test("generated page prompts and local fallback use the brand, not the workspace label", () => {
+  const context = {
+    projectName: "saya mau buat website e-commerce",
+    brandName: "Harbor Market",
+    idea: "A storefront for local ceramics.",
+    prd: "",
+    page: {
+      slug: "catalog",
+      title: "Catalog",
+      brief: "Browse the available products.",
+    },
+    designMd: "# Quiet design system",
+    tokensCss: ":root { --bg: #fff; --fg: #111; --accent: #111; }",
+    plan: [{ slug: "catalog", title: "Catalog", brief: "Browse products." }],
+  };
+  const prompts = [
+    buildPagePrompt(context),
+    buildPageRepairPrompt(context),
+    buildShowcasePrompt(context.idea, context.designMd, context.tokensCss, context.brandName),
+    buildShowcaseRepairPrompt(context.idea, context.designMd, context.tokensCss, context.brandName),
+  ];
+  for (const prompt of prompts) {
+    assert.match(prompt, /Harbor Market/);
+    assert.doesNotMatch(prompt, /saya mau buat website e-commerce/);
+  }
+
+  const html = buildFallbackPageHtml(context);
+  assert.match(html, /Harbor Market/);
+  assert.doesNotMatch(html, /saya mau buat website e-commerce/);
+});
+
+test("legacy local fallback without a brand does not surface the project label", () => {
+  const html = buildFallbackPageHtml({
+    projectName: "Internal workspace title",
+    idea: "A library catalog.",
+    prd: "",
+    page: { slug: "catalog", title: "Catalog", brief: "Browse books." },
+    designMd: "",
+    tokensCss: "",
+  });
+
+  assert.match(html, /<title>Your app - Catalog<\/title>/);
+  assert.doesNotMatch(html, /Internal workspace title/);
 });

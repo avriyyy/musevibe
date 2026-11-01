@@ -11,6 +11,20 @@ export type WizardAnswerValue = string | string[];
 
 export type WizardAnswers = Record<string, WizardAnswerValue>;
 
+/** Internal choice value used to persist a user-entered answer separately from listed options. */
+const CUSTOM_ANSWER_PREFIX = "__musevibe_custom_answer__:";
+
+export const CUSTOM_ANSWER_OPTION = "__musevibe_type_your_answer__";
+
+export function toCustomAnswer(value: string): string {
+  return `${CUSTOM_ANSWER_PREFIX}${value}`;
+}
+
+export function isCustomAnswer(value: WizardAnswerValue | undefined): boolean {
+  if (typeof value === "string") return value.startsWith(CUSTOM_ANSWER_PREFIX);
+  return Array.isArray(value) && value.some((item) => item.startsWith(CUSTOM_ANSWER_PREFIX));
+}
+
 export interface WizardQuestion {
   id: string;
   label: string;
@@ -45,42 +59,72 @@ export const FALLBACK_QUESTIONS: WizardQuestion[] = [
   {
     id: "problem",
     label: "What problem does this solve?",
-    description: "One or two sentences about what hurts today. If it is unproven, say so.",
-    type: "textarea",
+    description: "Pick the closest challenge; choose “Type your answer” if none fit.",
+    type: "single",
+    options: [
+      "Too much manual work",
+      "Information is scattered",
+      "It's hard to stay consistent",
+      "Current tools are too complex",
+    ],
     required: true,
-    placeholder: "e.g. I forget small habits because tracking apps feel like chores",
+    placeholder: "Describe the problem you want to solve",
   },
   {
     id: "core-action",
     label: "What is the core workflow that must work on day one?",
-    description: "One sentence. If everything else broke, this would still have to work.",
-    type: "textarea",
+    description: "Pick the main thing people will do; choose “Type your answer” if needed.",
+    type: "single",
+    options: [
+      "Create and organize items",
+      "Search and find information",
+      "Track progress over time",
+      "Share or collaborate",
+    ],
     required: true,
-    placeholder: "e.g. Add a habit and see today's streak",
+    placeholder: "Describe the main action",
   },
   {
     id: "first-build",
     label: "What should the first version include?",
-    description: "List the screens, features, or data it needs. Leave out anything that can wait.",
-    type: "textarea",
+    description: "Pick the closest starting point; choose “Type your answer” for something else.",
+    type: "multi",
+    options: [
+      "A simple dashboard",
+      "A list with detail pages",
+      "A guided create flow",
+      "Progress and status tracking",
+    ],
     required: true,
-    placeholder: "e.g. A habit list, a today view, streaks saved locally",
+    placeholder: "Describe what the first version should include",
   },
   {
     id: "constraints-integrations",
     label: "Any constraints or integrations to respect?",
-    description: "Optional. Technical limits, data to import, or services it must work with.",
-    type: "textarea",
+    description: "Optional. Select any that apply, or add your own.",
+    type: "multi",
+    options: [
+      "Must work offline",
+      "Import existing data",
+      "Use an existing service",
+      "Keep data private or local",
+    ],
     required: false,
-    placeholder: "e.g. Must work offline; import habits from a CSV",
+    placeholder: "Add a constraint or integration",
   },
   {
     id: "out-of-scope",
     label: "Anything to leave out of the first build?",
-    description: "Optional. Naming it now keeps the PRD and tasks honest.",
-    type: "textarea",
+    description: "Optional. Select anything to leave out, or add your own.",
+    type: "multi",
+    options: [
+      "No accounts or teams yet",
+      "No payments or subscriptions",
+      "No mobile app yet",
+      "No admin dashboard",
+    ],
     required: false,
-    placeholder: "e.g. No team accounts, no mobile app yet",
+    placeholder: "Add anything to leave out",
   },
 ];
 
@@ -91,21 +135,22 @@ export function buildQuestionPrompt(idea: string): string {
     "You are the setup wizard for MuseVibe, a workspace that turns one app idea into a PRD, a task board, wireframes, and starter code.",
     `The user's idea: "${trimmed}"`,
     "",
-    "Write exactly 6 short questions that pin down what to build before anything is generated. Ask about this specific product, not about the tech stack, platform, framework, or timeline (a separate step already captures those).",
-    "Use exactly these stable ids and coverage, in this order:",
-    '1. id "audience" (required, single): who the product is for.',
-    '2. id "problem" (required, textarea): the problem or need it solves.',
-    '3. id "core-action" (required, textarea): the core workflow that must work on day one.',
-    '4. id "first-build" (required, textarea): what the first version includes — screens, features, data. Free response; never prime with auth, accounts, or payments.',
-    '5. id "constraints-integrations" (optional, textarea): constraints or integrations to respect.',
-    '6. id "out-of-scope" (optional, textarea): what the first build deliberately leaves out.',
+    "Write exactly 6 short questions that pin down what to build before anything is generated. Make each question specific to this product, not about the tech stack, platform, framework, or timeline (a separate step already captures those).",
+    "Use exactly these stable ids and coverage, in this order. Choose the answer type for each question based on what users may reasonably need:",
+    '1. id "audience" (required): who the product is for; usually single-select.',
+    '2. id "problem" (required): the problem or need it solves.',
+    '3. id "core-action" (required): the core workflow that must work on day one; usually single-select.',
+    '4. id "first-build" (required): what the first version includes — screens, features, or data; use multi-select when several can apply.',
+    '5. id "constraints-integrations" (optional): constraints or integrations to respect; use multi-select when several can apply.',
+    '6. id "out-of-scope" (optional): what the first build deliberately leaves out; use multi-select when several can apply.',
     "",
     "Return ONLY a JSON object with this shape:",
-    '{"questions":[{"id":"audience","label":"Who is this for?","description":"Why it matters","type":"single","options":["Just me","A small team"],"required":true,"placeholder":""}]}',
+    '{"questions":[{"id":"audience","label":"Who is this for?","description":"Pick the closest match or use the custom-answer choice","type":"single","options":["Just me","A small team","Public users"],"required":true,"placeholder":"Describe your audience"}]}',
     "",
     "Rules:",
-    '- type is one of "text", "textarea", "single", "multi". Prefer "single" for audience and "textarea" for the rest; use those exact types unless the idea clearly needs options.',
-    '- "single" and "multi" need 2 to 5 short options; leave options out for text types.',
+    '- Use type "single" when one best answer is expected; use type "multi" when several answers can apply at once (for example, features, constraints, integrations, or exclusions). Mix the two types where appropriate; do not make every question the same type.',
+    '- Every question must provide 3 to 5 concise, useful options tailored to the idea. The interface adds a separate "Type your answer" choice, so do not include it in options.',
+    '- Include a short placeholder for the input shown when the user chooses "Type your answer".',
     "- Keep the six ids above verbatim (lowercase kebab-case). label max 80 characters. description max 140 characters. placeholder max 100 characters.",
     "- Mark the first four required: true and the last two required: false.",
     "- Do not ask about platform, framework, timeline, or tech stack.",
@@ -165,8 +210,8 @@ function unwrapJson(raw: unknown): unknown {
  * Accepts the provider's raw text (or an already-parsed payload) and returns
  * only the six canonical questions in canonical order. Anything else falls
  * back: the six ids are required coverage (the two optional ids mean
- * optional answers, not optional questions), audience must be single and the
- * rest text/textarea, and any extra, duplicate, missing, or mistyped entry
+ * optional answers, not optional questions), questions must be choice-based,
+ * and any extra, duplicate, missing, or mistyped entry
  * returns null so the caller uses FALLBACK_QUESTIONS. Cached drafts bypass
  * this gate entirely, so old questionnaires stay usable and no migration is
  * forced.
@@ -205,15 +250,11 @@ export function parseWizardQuestions(raw: unknown): WizardQuestion[] | null {
     const type = normalizeType(entry.type);
     if (!type) return null;
 
-    // Category types: audience is single-select, everything else is free text.
-    if (id === "audience") {
-      if (type !== "single") return null;
-    } else if (type !== "text" && type !== "textarea") {
-      return null;
-    }
+    // Keep new questions choice-first; unsupported free-text responses use the UI's custom option.
+    if (type !== "single" && type !== "multi") return null;
 
     let options: string[] | undefined;
-    if (type === "single") {
+    if (type === "single" || type === "multi") {
       const rawOptions = Array.isArray(entry.options) ? entry.options : null;
       if (!rawOptions) return null;
 
@@ -249,35 +290,37 @@ export function parseWizardQuestions(raw: unknown): WizardQuestion[] | null {
 }
 
 export function answerToText(value: WizardAnswerValue | undefined): string {
-  if (Array.isArray(value)) return value.join(", ");
+  if (Array.isArray(value)) {
+    return value
+      .map((item) =>
+        item.startsWith(CUSTOM_ANSWER_PREFIX)
+          ? item.slice(CUSTOM_ANSWER_PREFIX.length).trim()
+          : item.trim(),
+      )
+      .filter(Boolean)
+      .join(", ");
+  }
+  if (typeof value === "string" && isCustomAnswer(value)) {
+    return value.slice(CUSTOM_ANSWER_PREFIX.length).trim();
+  }
   return typeof value === "string" ? value.trim() : "";
 }
 
 export function isAnswered(value: WizardAnswerValue | undefined): boolean {
-  if (Array.isArray(value)) return value.length > 0;
-  return typeof value === "string" && value.trim().length > 0;
+  return answerToText(value).length > 0;
 }
 
 export function deriveProjectName(idea: string): string {
-  const words = idea
-    .replace(/\s+/g, " ")
-    .trim()
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, 6)
-    .join(" ");
-  if (!words) return "";
-  return words.length > 48 ? `${words.slice(0, 47).trimEnd()}…` : words;
+  return idea.trim() ? "New project" : "";
 }
-
-/** Prompt that asks the model for nothing but a short project name. */
+/** Prompt for a concise internal workspace label, never the customer-facing brand. */
 export function buildNamePrompt(idea: string): string {
   const trimmed = idea.replace(/\s+/g, " ").trim().slice(0, 500);
   return [
-    "Give this app idea a short project name.",
+    "Give this app idea a concise internal workspace project label, not a customer-facing brand name.",
     `Idea: "${trimmed}".`,
     "",
-    "Rules: 2 to 5 words, Title Case, plain words only.",
+    "Rules: 2 to 5 words, Title Case, plain words only. Summarize the idea; do not copy request wording or instructions.",
     "No quotes, no punctuation, no tagline, no explanation.",
     "Reply with ONLY the name.",
   ].join("\n");

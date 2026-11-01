@@ -1,6 +1,7 @@
 import type { Prd } from "./types";
 import { FALLBACK_QUESTIONS, deriveProjectName } from "./wizard";
-import { docFullName } from "./docs";
+import { DEFAULT_MODEL } from "./models";
+import { generationQualitySystemPrompt } from "./generation-quality";
 
 // Abstraction AI agar bisa swap provider Meta (Muse Spark).
 // Kalau AI_API_URL / AI_API_KEY kosong -> mock lokal, demo tetap jalan.
@@ -24,36 +25,55 @@ export interface AiLogoResult {
   source: "ai" | "local";
 }
 
-/** Text models the picker can send. Anything else falls back to the env default. */
-const TEXT_MODEL = /^muse-(spark|wonder)-[a-z0-9.]+$/;
-
 export async function aiGenerate(
   kind: AiGenerateKind,
   prompt: string,
   requestedModel?: string,
+  requestSignal?: AbortSignal,
 ): Promise<AiGenerateResult> {
+  void requestedModel;
   const url = process.env.AI_API_URL;
   const key = process.env.AI_API_KEY;
-  const envModel = process.env.AI_MODEL || "muse-spark-1.3";
-  const model =
-    requestedModel && TEXT_MODEL.test(requestedModel) ? requestedModel : envModel;
+  // Old project settings and environment values cannot switch this provider.
+  const model = DEFAULT_MODEL;
 
   if (!url || !key) return local(kind, prompt, "missing-key", model);
 
-  const reply = await providerText(url, key, model, prompt, kind);
+  let reply = await providerText(url, key, model, prompt, kind, requestSignal);
+  // Wizard questions are a short, non-blocking convenience. Retrying them can
+  // outlive the browser's deadline, so fail fast and use the built-in set.
+  if (kind !== "questions" && !requestSignal?.aborted && isRetryable(reply)) {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    if (!requestSignal?.aborted) {
+      reply = await providerText(url, key, model, prompt, kind, requestSignal);
+    }
+  }
   if (reply.text) {
     return { text: reply.text, source: "ai", reason: "ok", model };
   }
   return local(kind, prompt, reply.reason, model, reply.status);
 }
 
-/** POST a chat request to an OpenAI-compatible endpoint, else try legacy. */
+function isRetryable(reply: {
+  text: string | null;
+  reason: "http" | "timeout" | "network" | "empty";
+  status?: number;
+}): boolean {
+  return (
+    reply.reason === "network" ||
+    (reply.reason === "http" &&
+      (reply.status === 429 || (reply.status !== undefined && reply.status >= 500)))
+  );
+}
+
+/** POST a chat request; only a missing chat endpoint falls back to legacy. */
 async function providerText(
   url: string,
   key: string,
   model: string,
   prompt: string,
   kind?: AiGenerateKind,
+  requestSignal?: AbortSignal,
 ): Promise<{
   text: string | null;
   reason: "http" | "timeout" | "network" | "empty";
@@ -61,32 +81,54 @@ async function providerText(
 }> {
   const base = url.replace(/\/+$/, "");
   // A full app screen is a long answer: reasoning plus a 6 to 9k token HTML
-  // file. The shorter kinds keep the tighter budget and timeout.
+  // file, often past a minute. The shorter kinds keep the tighter budget.
   const heavy = kind === "prototype" || kind === "pages";
-  const budget = heavy ? 14000 : 8000;
-  const timeout = heavy ? 180000 : 90000;
+  const qualityPrompt = generationQualitySystemPrompt(kind);
+  const budget = heavy
+    ? 14000
+    : kind === "name"
+      ? 256
+      : kind === "questions"
+        ? 3000
+        : 8000;
+  // The provider closes silent non-streaming requests after about a minute,
+  // so every call streams: the token flow keeps the connection alive and a
+  // full page can finish instead of dying as a network error.
+  const timeout = heavy
+    ? 300000
+    : kind === "name"
+      ? 25000
+      : kind === "questions"
+        ? 25000
+        : 120000;
 
   try {
     const res = await fetch(`${base}/chat/completions`, {
       method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      headers: {
+        "Content-Type": "application/json",
+        Accept: "text/event-stream",
+        Authorization: `Bearer ${key}`,
+      },
       body: JSON.stringify({
         model,
-        messages: [{ role: "user", content: prompt }],
+        messages: [
+          { role: "system", content: qualityPrompt },
+          { role: "user", content: prompt },
+        ],
         // Reasoning models spend most of this budget before writing an answer.
         // At 4000 the longest PRDs ran out mid-reasoning and came back empty.
         max_tokens: budget,
+        stream: true,
       }),
-      signal: AbortSignal.timeout(timeout),
+      signal: combinedSignal(requestSignal, timeout),
     });
     if (res.ok) {
-      const data = (await res.json()) as {
-        choices?: Array<{ message?: { content?: unknown } }>;
-      };
-      const content = data?.choices?.[0]?.message?.content;
-      if (typeof content === "string" && content.trim()) {
-        return { text: content.trim(), reason: "empty" };
-      }
+      const streamed = await readChatStream(res);
+      if (streamed) return { text: streamed, reason: "empty" };
+      // Do not send a second full request to /generate after a successful but
+      // empty chat response. That usually repeats the same provider failure.
+      return { text: null, reason: "empty" };
     } else if (res.status !== 404) {
       return { text: null, reason: "http", status: res.status };
     }
@@ -101,8 +143,12 @@ async function providerText(
     const res = await fetch(`${base}/generate`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-      body: JSON.stringify({ model, kind: "text", prompt }),
-      signal: AbortSignal.timeout(timeout),
+      body: JSON.stringify({
+        model,
+        kind: "text",
+        prompt: `${qualityPrompt}\n\nREQUESTED OUTPUT:\n${prompt}`,
+      }),
+      signal: combinedSignal(requestSignal, timeout),
     });
     if (!res.ok) {
       return { text: null, reason: "http", status: res.status };
@@ -119,6 +165,92 @@ async function providerText(
       reason: isTimeout(error) ? "timeout" : "network",
     };
   }
+}
+
+function combinedSignal(requestSignal: AbortSignal | undefined, timeout: number): AbortSignal {
+  const deadline = AbortSignal.timeout(timeout);
+  return requestSignal ? AbortSignal.any([requestSignal, deadline]) : deadline;
+}
+
+/**
+ * Drain an SSE chat stream and join the deltas. Providers that ignore
+ * `stream: true` answer with plain JSON instead, so both shapes are read here.
+ */
+async function readChatStream(res: Response): Promise<string> {
+  const type = res.headers.get("content-type") ?? "";
+  if (!res.body || !type.includes("event-stream")) {
+    const data = (await res.json().catch(() => null)) as {
+      choices?: Array<{ message?: { content?: unknown } }>;
+    } | null;
+    const content = data?.choices?.[0]?.message?.content;
+    return typeof content === "string" ? content.trim() : "";
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+      for (const raw of lines) {
+        const line = raw.trim();
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice("data:".length).trim();
+        if (!payload) continue;
+        if (payload === "[DONE]") {
+          await reader.cancel().catch(() => undefined);
+          return text.trim();
+        }
+        try {
+          const frame = JSON.parse(payload) as {
+            choices?: Array<{
+              delta?: { content?: unknown };
+              message?: { content?: unknown };
+            }>;
+          };
+          const choice = frame.choices?.[0];
+          const delta = choice?.delta?.content;
+          const message = choice?.message?.content;
+          if (typeof delta === "string") text += delta;
+          else if (typeof message === "string") text += message;
+        } catch {
+          // A frame split across chunks: the next read completes it.
+        }
+      }
+    }
+    // Some providers close the stream immediately after the final event,
+    // without a trailing newline. Flush and consume that partial line too.
+    buffer += decoder.decode();
+    for (const raw of buffer.split("\n")) {
+      const line = raw.trim();
+      if (!line.startsWith("data:")) continue;
+      const payload = line.slice("data:".length).trim();
+      if (!payload || payload === "[DONE]") continue;
+      try {
+        const frame = JSON.parse(payload) as {
+          choices?: Array<{
+            delta?: { content?: unknown };
+            message?: { content?: unknown };
+          }>;
+        };
+        const choice = frame.choices?.[0];
+        const delta = choice?.delta?.content;
+        const message = choice?.message?.content;
+        if (typeof delta === "string") text += delta;
+        else if (typeof message === "string") text += message;
+      } catch {
+        // Ignore incomplete provider metadata; the usable content is retained.
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return text.trim();
 }
 
 function isTimeout(error: unknown): boolean {
@@ -149,7 +281,10 @@ function local(
  * a mock cannot draw the user's mark, so the wizard falls back to an initials
  * badge instead of inventing a logo.
  */
-export async function aiGenerateLogo(prompt: string): Promise<AiLogoResult> {
+export async function aiGenerateLogo(
+  prompt: string,
+  requestSignal?: AbortSignal,
+): Promise<AiLogoResult> {
   const url = process.env.AI_API_URL;
   const key = process.env.AI_API_KEY;
   const model = process.env.AI_IMAGE_MODEL || "muse-image-1.0";
@@ -162,7 +297,7 @@ export async function aiGenerateLogo(prompt: string): Promise<AiLogoResult> {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
       body: JSON.stringify({ model, prompt, size: "512x512", n: 1 }),
-      signal: AbortSignal.timeout(120000),
+      signal: combinedSignal(requestSignal, 120000),
     });
     if (!res.ok) return { image: null, source: "local" };
 
@@ -203,9 +338,7 @@ function mockGenerate(kind: AiGenerateKind, prompt: string): string {
   if (kind === "questions") {
     return JSON.stringify({ questions: FALLBACK_QUESTIONS });
   }
-  if (kind === "prd") {
-    return `# PRD draft (local)\n\n> Local draft. The model is unavailable, so the section frame below is real but the detail is not finished. Generate again when the model is back; this draft is never presented as a model answer.\n\nIdea: ${idea}\n\n## Problem\nIndie devs need one place for planning, design, and coding without switching tools.\n\n## Who it is for\nSolo indie hackers starting their first project.\n\n## The core flow\n1. Open the app and see the main screen.\n2. Work through the core action.\n3. See the result and keep it for next time.\n\n## What ships first\n- The core screen that delivers the idea\n- A working path for the core action\n- Local data so a reload keeps the work\n- Empty, loading, and error states on every screen\n\n## Out of scope for v1\n- Accounts and team features\n- Payments and billing\n- Notifications and email\n\n## How we know it works\nA new person can finish the core flow without help.`;
-  }
+  if (kind === "prd" || kind === "doc") return "";
   if (kind === "tasks") {
     return JSON.stringify(
       [
@@ -228,11 +361,6 @@ function mockGenerate(kind: AiGenerateKind, prompt: string): string {
   }
   if (kind === "name") {
     return deriveProjectName(prompt) || "Untitled project";
-  }
-  if (kind === "doc") {
-    const requested = prompt.match(/Write the (.+?) for this app/i)?.[1];
-    const label = requested?.trim() || docFullName("prd");
-    return `# ${label} (local draft)\n\n> The model is unavailable, so this is a starting outline. Generate again with the model for full content.\n\nIdea: ${idea}\n\n## Overview\nFill in the product context from the brief.\n\n## Details\nExpand each required section with concrete, product-specific content.\n\n## Open questions\nList what still needs a decision before building.`;
   }
   if (kind === "logo-svg") {
     // Offline: no generic geometry. An empty variant list fails the SVG

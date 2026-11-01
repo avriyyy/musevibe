@@ -49,15 +49,15 @@ export default function LogoModal({
       <div
         className="flex max-h-[86dvh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl border border-white/10 bg-[#17181d] shadow-2xl"
         onClick={(event) => event.stopPropagation()}>
-        <div className="flex items-center gap-3 border-b border-white/10 px-4 py-3">
-          <div className="min-w-0 flex-1">
+        <div className="relative flex flex-wrap items-center gap-2 border-b border-white/10 px-4 py-3 sm:flex-nowrap sm:gap-3">
+          <div className="min-w-0 flex-1 basis-full pr-10 sm:basis-0 sm:pr-0">
             <Heading level={3}>Choose a symbol mark</Heading>
             <Text type="supporting" color="secondary">
               Symbol only, never a wordmark. Picking adopts it; nothing changes until you pick.
             </Text>
           </div>
           {shownVariants.length > 0 && onPickVariant && (
-            <div className="flex gap-1 rounded-full bg-white/5 p-1">
+            <div className="order-3 flex max-w-full gap-1 overflow-x-auto rounded-full bg-white/5 p-1 sm:order-none sm:shrink-0">
               {(["variants", "marks"] as const).map((entry) => (
                 <button
                   key={entry}
@@ -76,7 +76,7 @@ export default function LogoModal({
             type="button"
             onClick={onClose}
             aria-label="Close logo picker"
-            className="flex size-9 items-center justify-center rounded-full text-[18px] text-[#9aa0ae] hover:bg-white/10 hover:text-white">
+            className="absolute right-4 top-3 flex size-11 shrink-0 items-center justify-center rounded-full text-[18px] text-[#9aa0ae] hover:bg-white/10 hover:text-white sm:static sm:size-9">
             ×
           </button>
         </div>
@@ -128,7 +128,7 @@ export default function LogoModal({
               })}
             </div>
           ) : (
-            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {current && (
                 <LogoTile
                   url={current}
@@ -151,9 +151,11 @@ export default function LogoModal({
                   />
                 ))}
               {!current && history.length === 0 && (
-                <Text type="supporting" color="secondary">
-                  No marks yet. Generate or upload one below.
-                </Text>
+                <div className="col-span-full flex min-h-24 items-center justify-center px-2 text-center">
+                  <Text type="supporting" color="secondary">
+                    No marks yet. Generate or upload one below.
+                  </Text>
+                </div>
               )}
             </div>
           )}
@@ -164,7 +166,7 @@ export default function LogoModal({
             label="Upload image"
             variant="secondary"
             size="sm"
-            className="min-h-11 md:min-h-0"
+            className="min-h-11 shrink-0 whitespace-nowrap md:min-h-0"
             onClick={() => uploadRef.current?.click()}
           />
           <input
@@ -178,7 +180,7 @@ export default function LogoModal({
               event.target.value = "";
             }}
           />
-          <Text type="supporting" color="secondary">
+          <Text type="supporting" color="secondary" className="min-w-0 flex-1">
             SVG stays vector; anything else becomes a square mark.
           </Text>
         </div>

@@ -38,6 +38,7 @@ import type { CanvasFrame } from "@/components/DesignCanvas";
 import WorkspaceChat from "@/components/WorkspaceChat";
 import WorkspacePicker from "@/components/WorkspacePicker";
 import LoadingSticker from "@/stickers/LoadingSticker";
+import { CanvasSkeleton, WorkspaceSkeleton } from "@/components/LoadingState";
 import { FRAME_H, FRAME_W, parseCanvasShapes } from "@/lib/canvas";
 import { useVibe } from "@/lib/store";
 import {
@@ -49,27 +50,26 @@ import {
   svgToDataUrl,
 } from "@/lib/logo";
 import LogoModal from "@/components/LogoModal";
+import WorkspaceAgentModal from "@/components/WorkspaceAgentModal";
 import { formatModelLabel } from "@/lib/models";
 import {
   DOC_TYPES,
-  buildDocFallback,
-  buildDocRepairPrompt,
-  buildDocPrompt,
   hasVisibleContent,
-  inspectDocMarkdown,
   looksLikeFrameworkCode,
   missingPageSections,
   normalizePrototypeHtml,
-  parseDocMarkdown,
   type DocKind,
 } from "@/lib/docs";
 import {
-  buildPrdPrompt,
+  buildPlanningMemory,
   buildTasksPrompt,
-  fallbackPrd,
   fallbackTasks,
   parseTasks,
 } from "@/lib/plan";
+import {
+  generateValidatedDocument,
+  type DocumentGenerationResult,
+} from "@/lib/document-generation";
 import {
   buildActionPrompt,
   checkPinnedDocIntegrity,
@@ -78,6 +78,19 @@ import {
 } from "@/lib/chat";
 import { DESIGN_SYSTEMS } from "@/lib/design-systems-catalog";
 import { downloadTextFile } from "@/lib/download";
+import { canCommitGeneration, watchPageLifecycle } from "@/lib/lifecycle";
+import {
+  beginUnit,
+  finishPlanningRun,
+  isSettledStatus,
+  noteUnitProgress,
+  planningUnitId,
+  resumePlanningRun,
+  resumeProgress,
+  settleUnit,
+  type PlanningRun,
+  type PlanningUnitStatus,
+} from "@/lib/planning-run";
 import {
   SHOWCASE_PATH,
   buildFallbackPageHtml,
@@ -93,20 +106,11 @@ import {
   resolveProjectDesignSystem,
   type PlannedPage,
 } from "@/lib/design-system";
-import type { CodeFile, Project, ProjectDoc, Screen, Task, TaskStatus } from "@/lib/types";
+import type { CloudWorkspaceSnapshot, CodeFile, ProjectDoc, Screen, Task, TaskStatus } from "@/lib/types";
 
 const DesignCanvas = dynamic(() => import("@/components/DesignCanvas"), {
   ssr: false,
-  loading: () => (
-    <div
-      role="status"
-      aria-live="polite"
-      className="grid h-full place-items-center bg-[#0b0c10]"
-    >
-      <span className="size-5 animate-pulse rounded-full bg-white/30" />
-      <span className="sr-only">Opening the design canvas</span>
-    </div>
-  ),
+  loading: () => <CanvasSkeleton label="Opening the design canvas" />,
 });
 
 const EMPTY_TASKS: Task[] = [];
@@ -195,16 +199,45 @@ interface AiReply {
   status?: number;
 }
 
+type PrepUnitStatus = PlanningUnitStatus;
+
+interface PrepUnitProgress {
+  status: PrepUnitStatus;
+  percent: number;
+}
+
+function prepPercent(progress: Record<string, PrepUnitProgress>, ids: string[]): number {
+  if (!ids.length) return 0;
+  return Math.round(
+    ids.reduce((total, id) => total + (progress[id]?.percent ?? 0), 0) / ids.length,
+  );
+}
+
+function prepStatusLabel(status: PrepUnitStatus): string {
+  switch (status) {
+    case "generating": return "Writing";
+    case "checking": return "Checking";
+    case "retrying": return "Repairing";
+    case "failed": return "Needs retry";
+    case "done": return "Done";
+    case "local": return "Starter content";
+    default: return "Queued";
+  }
+}
+
 async function requestAi(
   kind: "prd" | "tasks" | "doc" | "prototype" | "pages" | "chat",
   prompt: string,
   model?: string,
+  signal?: AbortSignal,
 ): Promise<AiReply> {
   const response = await fetch("/api/ai/generate", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind, prompt, ...(model ? { model } : {}) }),
+    ...(signal ? { signal } : {}),
   });
+  if (signal?.aborted) throw new Error("Generation cancelled.");
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as {
       error?: unknown;
@@ -229,45 +262,7 @@ async function requestAi(
   };
 }
 
-/**
- * Validate-then-repair flow used by first-run preparation. One model attempt,
- * one repair naming every failure,
- * then the explicitly local fallback. Local provider responses never pass
- * as AI: only source === "ai" with a passing inspection returns "ai".
- */
-async function requestValidatedPrd(
-  project: Project,
-): Promise<{ markdown: string; source: 'ai' | 'local' }> {
-  let reply: AiReply;
-  try {
-    reply = await requestAi('prd', buildPrdPrompt(project), project.model);
-  } catch {
-    return { markdown: fallbackPrd(project), source: 'local' };
-  }
-  if (reply.source !== 'ai') {
-    return { markdown: fallbackPrd(project), source: 'local' };
-  }
-  const first = parseDocMarkdown(reply.text);
-  if (first.trim() && inspectDocMarkdown('prd', first).ok) {
-    return { markdown: first, source: 'ai' };
-  }
-  const firstCheck = inspectDocMarkdown('prd', first);
-  try {
-    const retry = await requestAi(
-      'prd',
-      buildDocRepairPrompt('prd', project, '', first, firstCheck.missing),
-      project.model,
-    );
-    const fixed = parseDocMarkdown(retry.text);
-    if (retry.source === 'ai' && fixed.trim() && inspectDocMarkdown('prd', fixed).ok) {
-      return { markdown: fixed, source: 'ai' };
-    }
-  } catch {
-    // Fall through to the local fallback below.
-  }
-  return { markdown: fallbackPrd(project), source: 'local' };
-}
-
+/** Map provider failures to a concise message that explains how to retry. */
 function aiFailureNote(reply: AiReply): string {
   if (reply.reason === "missing-key") {
     return "Muse isn't connected for this project yet.";
@@ -284,8 +279,31 @@ function aiFailureNote(reply: AiReply): string {
   return "Muse didn't return a usable answer.";
 }
 
+function documentGenerationFailureNote(
+  result: Exclude<DocumentGenerationResult, { ok: true } | { reason: "cancelled" }>,
+  title: string,
+  hadExistingDocument: boolean,
+): string {
+  const disposition = hadExistingDocument
+    ? "Your saved document is unchanged."
+    : "No document was saved.";
+  const retry = "Choose Generate again to retry.";
+  if (result.reason === "invalid") {
+    const firstIssue = result.missing[0];
+    const more = result.missing.length > 1 ? ` (${result.missing.length - 1} more checks failed.)` : "";
+    return `Muse's ${title} did not pass the required checks after one repair. ${firstIssue ?? "The output was incomplete."}${more} ${disposition} ${retry}`;
+  }
+  const fallbackReply: AiReply = {
+    text: "",
+    source: "local",
+    reason: result.reply?.reason ?? "network",
+    ...(result.reply?.status ? { status: result.reply.status } : {}),
+  };
+  return `${aiFailureNote(result.reply ?? fallbackReply)} ${title} wasn't generated. ${disposition} ${retry}`;
+}
+
 function localDraftNote(reply: AiReply, item: string): string {
-  return `${aiFailureNote(reply)} I saved a local ${item} instead, so you can keep working. Use ⋯ → Regenerate to try again.`;
+  return `${aiFailureNote(reply)} I saved an offline ${item} draft instead, so you can keep working. Use ⋯ → Regenerate to try again.`;
 }
 
 export default function IdeWorkspace({ projectId }: { projectId: string }) {
@@ -298,13 +316,35 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const project = useVibe((state) =>
     state.projects.find((entry) => entry.id === projectId),
   );
+  const prd = useVibe((state) => state.prdByProject[projectId] ?? "");
   const tasks = useVibe((state) => state.tasksByProject[projectId] ?? EMPTY_TASKS);
   const files = useVibe((state) => state.filesByProject[projectId] ?? EMPTY_FILES);
   const screens = useVibe(
     (state) => state.screensByProject[projectId] ?? EMPTY_SCREENS,
   );
-  const docs = useVibe(
+  const storedDocs = useVibe(
     (state) => state.docsByProject[projectId] ?? EMPTY_DOCS,
+  );
+  const docs = useMemo(
+    () =>
+      storedDocs.map((doc) =>
+        doc.source === "local" && doc.kind !== "note"
+          ? { ...doc, markdown: "", source: undefined }
+          : doc,
+      ),
+    [storedDocs],
+  );
+  const agentSnapshot = useMemo<CloudWorkspaceSnapshot | null>(
+    () => project ? {
+      version: 1,
+      project,
+      prd,
+      tasks,
+      screens,
+      files,
+      docs: storedDocs,
+    } : null,
+    [project, prd, tasks, screens, files, storedDocs],
   );
 
   const [view, setView] = useState<View>({ kind: "documents" });
@@ -316,6 +356,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [picking, setPicking] = useState(false);
   const [pickSession, setPickSession] = useState(0);
   const [logoPickerOpen, setLogoPickerOpen] = useState(false);
+  const [agentModalOpen, setAgentModalOpen] = useState(false);
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const mainRef = useRef<HTMLElement>(null);
@@ -346,18 +387,68 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
   const [pageErrors, setPageErrors] = useState<Record<string, string>>({});
   const [allProgress, setAllProgress] = useState<{
     done: number;
+    failed: number;
     total: number;
     currentTitle: string;
   } | null>(null);
+  const [allSummary, setAllSummary] = useState<{
+    done: number;
+    failed: number;
+    total: number;
+  } | null>(null);
   const [docErrors, setDocErrors] = useState<Record<string, string>>({});
+
+  // Old versions stored local outlines as documents. Hide them immediately
+  // during render, then remove them from local/cloud state after hydration.
+  useEffect(() => {
+    if (!hydrated) return;
+    const state = useVibe.getState();
+    const staleDocs = (state.docsByProject[projectId] ?? []).filter(
+      (doc) => doc.source === "local" && doc.kind !== "note",
+    );
+    for (const doc of staleDocs) {
+      state.updateDoc(projectId, doc.id, {
+        markdown: "",
+        source: undefined,
+        updatedAt: new Date().toISOString(),
+      });
+      if (doc.kind === "prd") state.setPrd(projectId, "");
+    }
+  }, [hydrated, projectId]);
   const showcaseRequestedRef = useRef("");
   type PrepStepId = "documents" | "tasks" | "design";
   const [prepActive, setPrepActive] = useState<PrepStepId | null>(null);
-  const [prepDoneIds, setPrepDoneIds] = useState<PrepStepId[]>([]);
+  const [prepProgress, setPrepProgress] = useState<Record<string, PrepUnitProgress>>({});
+  const updatePrepProgress = useCallback(
+    (id: string, status: PrepUnitStatus, percent: number) => {
+      setPrepProgress((previous) => ({
+        ...previous,
+        [id]: { status, percent: Math.max(0, Math.min(100, percent)) },
+      }));
+    },
+    [],
+  );
   const preparedRef = useRef(false);
+  const prepAbortRef = useRef<AbortController | null>(null);
+  useEffect(
+    () => () => {
+      prepAbortRef.current?.abort();
+    },
+    [],
+  );
+  /** One controller per manual document request, so unmount cancels cleanly. */
+  const docAbortRef = useRef<Map<string, AbortController>>(new Map());
+  useEffect(() => {
+    watchPageLifecycle();
+    const pending = docAbortRef.current;
+    return () => {
+      for (const controller of pending.values()) controller.abort();
+      pending.clear();
+    };
+  }, []);
   const [tasksLocal, setTasksLocal] = useState(false);
   const [error, setError] = useState("");
-  const isMobile = useMediaQuery("(max-width: 768px)");
+  const isMobile = useMediaQuery("(max-width: 767px)");
 
   /** Which navbar tab the current view belongs to. */
   const activeTab =
@@ -431,8 +522,22 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       );
       if (!current || !doc || doc.kind === "note" || docBusy) return;
       const kind = doc.kind as DocKind;
-      const brief = state.prdByProject[projectId] ?? "";
+      const prdDoc = state.docsByProject[projectId]?.find((entry) => entry.kind === "prd");
+      const brief = prdDoc?.source === "local" ? "" : state.prdByProject[projectId] ?? "";
+      const planningContext =
+        kind === "prd" ? brief : buildPlanningMemory(current, brief);
+      const hadExistingDocument = Boolean(doc.markdown.trim() && doc.source !== "local");
+      const controller = new AbortController();
+      docAbortRef.current.set(docId, controller);
       if (kind === "prd") setError("");
+      if (doc.source === "local") {
+        state.updateDoc(projectId, docId, {
+          markdown: "",
+          source: undefined,
+          updatedAt: new Date().toISOString(),
+        });
+        if (kind === "prd") state.setPrd(projectId, "");
+      }
       setDocBusy(docId);
       setDocErrors((prev) => {
         if (!(docId in prev)) return prev;
@@ -441,64 +546,29 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         return next;
       });
       try {
-        let reply: AiReply;
-        try {
-          reply = await requestAi(
-            "doc",
-            buildDocPrompt(kind, current, brief),
-            current.model,
-          );
-        } catch {
-          const fallback = buildDocFallback(kind, current, brief);
-          saveDocMarkdown(docId, fallback, "local");
-          setDocErrors((prev) => ({
-            ...prev,
-            [docId]:
-              "Muse couldn't be reached, so I saved a local outline instead. You can keep editing it or use ⋯ → Regenerate later.",
-          }));
+        const result = await generateValidatedDocument({
+          kind,
+          project: current,
+          brief: planningContext,
+          signal: controller.signal,
+          request: (requestKind, prompt, requestSignal) =>
+            requestAi(requestKind, prompt, current.model, requestSignal),
+        });
+        if (
+          controller.signal.aborted ||
+          (!result.ok && result.reason === "cancelled")
+        ) return;
+        if (!(await canCommitGeneration(controller.signal))) return;
+        if (result.ok) {
+          saveDocMarkdown(docId, result.markdown, "ai");
           return;
         }
-        const first = parseDocMarkdown(reply.text);
-        const firstCheck = inspectDocMarkdown(kind, first);
-        if (reply.source === "ai" && firstCheck.ok) {
-          saveDocMarkdown(docId, first, "ai");
-          return;
-        }
-        if (reply.source === "ai") {
-          // One repair attempt naming the missing contract.
-          try {
-            const retry = await requestAi(
-              "doc",
-              buildDocRepairPrompt(kind, current, brief, first, firstCheck.missing),
-              current.model,
-            );
-            const fixed = parseDocMarkdown(retry.text);
-            if (
-              retry.source === "ai" &&
-              inspectDocMarkdown(kind, fixed).ok
-            ) {
-              saveDocMarkdown(docId, fixed, "ai");
-              return;
-            }
-          } catch {
-            // Fall through to the local outline below.
-          }
-          const fallback = buildDocFallback(kind, current, brief);
-          saveDocMarkdown(docId, fallback, "local");
-          setDocErrors((prev) => ({
-            ...prev,
-            [docId]:
-              "Muse's answer was incomplete, so I saved a local outline instead. Your document is still usable; choose ⋯ → Regenerate to try again.",
-          }));
-          return;
-        }
-        const fallback = buildDocFallback(kind, current, brief);
-        saveDocMarkdown(docId, fallback, "local");
         setDocErrors((prev) => ({
           ...prev,
-          [docId]: localDraftNote(reply, "outline"),
+          [docId]: documentGenerationFailureNote(result, doc.title, hadExistingDocument),
         }));
       } finally {
+        docAbortRef.current.delete(docId);
         setDocBusy(null);
       }
     },
@@ -574,10 +644,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         reply = await requestAi(
           "prototype",
           buildShowcasePrompt(
-            current.name,
             current.idea,
             system.designMd,
             system.tokensCss,
+            current.brandName ?? "",
           ),
           current.model,
         );
@@ -601,10 +671,10 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           const retry = await requestAi(
             "prototype",
             buildShowcaseRepairPrompt(
-              current.name,
               current.idea,
               system.designMd,
               system.tokensCss,
+              current.brandName ?? "",
             ),
             current.model,
           );
@@ -691,7 +761,6 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       const reply = await requestAi(
         "pages",
         buildPagePlanPrompt(
-          current.name,
           current.idea,
           state.prdByProject[projectId] ?? "",
           (state.docsByProject[projectId] ?? EMPTY_DOCS).find(
@@ -700,11 +769,18 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
         ),
         current.model,
       );
-      const pages = parsePagePlan(reply.text) ?? fallbackPagePlan();
-      state.updateProject(projectId, { pagePlan: pages });
+      const parsed = reply.source === "ai" ? parsePagePlan(reply.text) : null;
+      const pages = parsed ?? fallbackPagePlan();
+      state.updateProject(projectId, {
+        pagePlan: pages,
+        pagePlanSource: parsed ? "ai" : "local",
+      });
     } catch {
       const stateNow = useVibe.getState();
-      stateNow.updateProject(projectId, { pagePlan: fallbackPagePlan() });
+      stateNow.updateProject(projectId, {
+        pagePlan: fallbackPagePlan(),
+        pagePlanSource: "local",
+      });
     } finally {
       setSuggesting(false);
     }
@@ -722,6 +798,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       const plan: PlannedPage[] = current?.pagePlan ?? [];
       const page = plan.find((entry) => entry.slug === slug);
       if (!current || !page || generatingSlugs.has(slug)) return false;
+      setAllSummary(null);
       const existingHtml = (
         useVibe.getState().filesByProject[projectId] ?? []
       ).find((file) => file.path === pageFilePath(slug))?.content;
@@ -755,6 +832,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           docs.find((doc) => doc.kind === "afd")?.markdown ?? "";
         const context = {
           projectName: current.name,
+          brandName: current.brandName ?? "",
           idea: current.idea,
           prd: state.prdByProject[projectId] ?? "",
           appFlow,
@@ -897,24 +975,33 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     );
     if (!missing.length) return;
     allRunningRef.current = true;
+    setAllSummary(null);
     setAllProgress({
       done: 0,
+      failed: 0,
       total: missing.length,
       currentTitle: missing[0].title,
     });
+    let done = 0;
+    let failed = 0;
     try {
-      let done = 0;
       for (const page of missing) {
-        setAllProgress({ done, total: missing.length, currentTitle: page.title });
+        setAllProgress({
+          done,
+          failed,
+          total: missing.length,
+          currentTitle: page.title,
+        });
         // Sequential on purpose: one model call at a time keeps long
         // reasoning generations from colliding. A failure records itself
         // in pageErrors and the loop continues with the next page.
-        await generatePage(page.slug);
-        done += 1;
+        if (await generatePage(page.slug)) done += 1;
+        else failed += 1;
       }
     } finally {
       allRunningRef.current = false;
       setAllProgress(null);
+      setAllSummary(failed ? { done, failed, total: missing.length } : null);
     }
   }, [projectId, generatePage]);
 
@@ -927,7 +1014,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     async (
       message: string,
       pins: Array<ChatQuote>,
-    ): Promise<{ ok: boolean; note: string }> => {
+    ): Promise<{ ok: boolean; partial?: boolean; note: string }> => {
       const state = useVibe.getState();
       const current = state.projects.find((entry) => entry.id === projectId);
       if (!current) return { ok: false, note: "Project not found." };
@@ -1127,6 +1214,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       if (failures.length) {
         return {
           ok: true,
+          partial: true,
           note: `${parsed.note} Changed: ${applied.join("; ")}. Could not finish: ${failures.join("; ")}.`,
         };
       }
@@ -1149,7 +1237,22 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
     const state0 = useVibe.getState();
     const current0 = state0.projects.find((entry) => entry.id === projectId);
     if (!current0) return;
-    setPrepDoneIds([]);
+    const resumingIncomplete = current0.planningPrep === "in-progress";
+    const controller = new AbortController();
+    const signal = controller.signal;
+    prepAbortRef.current = controller;
+    useVibe.getState().updateProject(projectId, { planningPrep: "in-progress" });
+    // The journal is this pass's small memory. It lives in the store, so a
+    // hard refresh resumes with the truth about which units were in flight
+    // instead of guessing from whatever stubs survived the unload.
+    let run: PlanningRun = resumePlanningRun(
+      resumingIncomplete ? current0.planningRun : undefined,
+    );
+    const saveRun = () => {
+      useVibe.getState().updateProject(projectId, { planningRun: run });
+    };
+    saveRun();
+    setPrepProgress(resumeProgress(run));
     setPrepActive("documents");
     try {
       // Seed the six plan documents once.
@@ -1175,172 +1278,324 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           ),
         ]);
       }
-      // Product brief (PRD), then the other five documents in parallel.
-      // Use the same validate -> one repair -> local fallback flow as first run.
-      let brief = useVibe.getState().prdByProject[projectId] ?? "";
-      let briefSource: ProjectDoc["source"];
-      if (!brief.trim()) {
-        briefSource = "local";
-        try {
-          const result = await requestValidatedPrd(current0);
-          brief = result.markdown;
-          briefSource = result.source;
-          if (result.source === 'local') {
-            setError(
-              "Muse couldn't finish your product brief, so I saved a local draft from your setup answers. You can keep editing it. Choose ⋯ → Regenerate in Documents to try again.",
-            );
-          }
-        } catch {
-          brief = fallbackPrd(current0);
-          briefSource = 'local';
-          setError(
-            "Muse couldn't finish your product brief, so I saved a local draft from your setup answers. You can keep editing it. Choose ⋯ → Regenerate in Documents to try again.",
-          );
-        }
-        useVibe.getState().setPrd(projectId, brief);
+      // Legacy local outlines are never documents. Remove them before reading
+      // planning context so they cannot leak into a new AI prompt.
+      const legacyDocs = (useVibe.getState().docsByProject[projectId] ?? EMPTY_DOCS)
+        .filter((doc) => doc.source === "local" && doc.kind !== "note");
+      for (const target of legacyDocs) {
+        useVibe.getState().updateDoc(projectId, target.id, {
+          markdown: "",
+          source: undefined,
+          updatedAt: new Date().toISOString(),
+        });
+        if (target.kind === "prd") useVibe.getState().setPrd(projectId, "");
       }
-      saveDocMarkdown(
-        "doc-prd",
-        brief,
-        briefSource ?? useVibe.getState().docsByProject[projectId]?.find((entry) => entry.id === "doc-prd")?.source ?? 'local',
+      // Generate the product brief first; downstream jobs share a compact
+      // planning memory rather than replaying the complete PRD each time.
+      const seededPrd = (useVibe.getState().docsByProject[projectId] ?? []).find(
+        (doc) => doc.kind === "prd",
       );
+      let brief =
+        seededPrd?.source === "local"
+          ? ""
+          : useVibe.getState().prdByProject[projectId] ?? seededPrd?.markdown ?? "";
+      let briefSource: ProjectDoc["source"] =
+        seededPrd?.source === "local" ? undefined : seededPrd?.source;
+      if (!brief.trim()) {
+        run = beginUnit(run, planningUnitId("prd"));
+        saveRun();
+        const result = await generateValidatedDocument({
+          kind: "prd",
+          project: current0,
+          brief: "",
+          signal,
+          request: (requestKind, prompt, requestSignal) =>
+            requestAi(requestKind, prompt, current0.model, requestSignal),
+          onPhase: (phase) => {
+            const percent = phase === "generating" ? 25 : phase === "checking" ? 85 : 70;
+            updatePrepProgress("doc-prd", phase, percent);
+          },
+        });
+        if (signal.aborted || (!result.ok && result.reason === "cancelled")) return;
+        if (!(await canCommitGeneration(signal))) return;
+        if (result.ok) {
+          brief = result.markdown;
+          briefSource = "ai";
+          saveDocMarkdown("doc-prd", brief, "ai");
+          run = settleUnit(run, planningUnitId("prd"), "done");
+          saveRun();
+          setDocErrors((previous) => {
+            if (!("doc-prd" in previous)) return previous;
+            const next = { ...previous };
+            delete next["doc-prd"];
+            return next;
+          });
+          updatePrepProgress("doc-prd", "done", 100);
+        } else {
+          brief = "";
+          briefSource = undefined;
+          const latestPrd = (useVibe.getState().docsByProject[projectId] ?? []).find(
+            (entry) => entry.id === "doc-prd",
+          );
+          if (latestPrd) {
+            useVibe.getState().updateDoc(projectId, latestPrd.id, {
+              markdown: "",
+              source: undefined,
+              updatedAt: new Date().toISOString(),
+            });
+          }
+          useVibe.getState().setPrd(projectId, "");
+          run = noteUnitProgress(run, planningUnitId("prd"), "failed", 0);
+          saveRun();
+          setDocErrors((previous) => ({
+            ...previous,
+            "doc-prd": documentGenerationFailureNote(result, "product brief", false),
+          }));
+          updatePrepProgress("doc-prd", "failed", 0);
+        }
+      } else {
+        saveDocMarkdown("doc-prd", brief, briefSource);
+        if (!isSettledStatus(run.units[planningUnitId("prd")]?.status ?? "queued")) {
+          run = settleUnit(run, planningUnitId("prd"), "done");
+          saveRun();
+        }
+        updatePrepProgress("doc-prd", "done", 100);
+      }
+      const planningMemory = buildPlanningMemory(current0, brief);
+      const clearDocError = (docId: string) => {
+        setDocErrors((previous) => {
+          if (!(docId in previous)) return previous;
+          const next = { ...previous };
+          delete next[docId];
+          return next;
+        });
+      };
+      const clearFirstRunDocError = (docId: string) => {
+        clearDocError(docId);
+      };
+      const setFirstRunDocError = (docId: string, message: string) => {
+        setDocErrors((prev) => ({ ...prev, [docId]: message }));
+      };
       const rest = (
         useVibe.getState().docsByProject[projectId] ?? []
       ).filter((doc) => doc.kind !== "prd" && doc.kind !== "note");
-      await Promise.all(
-        rest.map(async (doc) => {
-          const kind = doc.kind as DocKind;
-          let reply: AiReply;
-          try {
-            reply = await requestAi(
-              "doc",
-              buildDocPrompt(kind, current0, brief),
-              current0.model,
-            );
-          } catch {
-            saveDocMarkdown(
-              doc.id,
-              buildDocFallback(kind, current0, brief),
-              "local",
-            );
-            return;
-          }
-          const first = parseDocMarkdown(reply.text);
-          if (reply.source === "ai" && inspectDocMarkdown(kind, first).ok) {
-            saveDocMarkdown(doc.id, first, "ai");
-            return;
-          }
-          if (reply.source === "ai") {
-            try {
-              const retry = await requestAi(
-                "doc",
-                buildDocRepairPrompt(
-                  kind,
-                  current0,
-                  brief,
-                  first,
-                  inspectDocMarkdown(kind, first).missing,
-                ),
-                current0.model,
-              );
-              const fixed = parseDocMarkdown(retry.text);
-              if (
-                retry.source === "ai" &&
-                inspectDocMarkdown(kind, fixed).ok
-              ) {
-                saveDocMarkdown(doc.id, fixed, "ai");
-                return;
-              }
-            } catch {
-              // Fall through to the local outline below.
-            }
-          }
-          saveDocMarkdown(
-            doc.id,
-            buildDocFallback(kind, current0, brief),
-            "local",
-          );
-        }),
+      for (const doc of rest) {
+        if (!doc.markdown.trim()) continue;
+        updatePrepProgress(`doc-${doc.kind}`, "done", 100);
+      }
+      const pendingDocs = rest.filter(
+        (doc) => !doc.markdown.trim() || doc.source === "local",
       );
-      setPrepDoneIds(["documents"]);
-      setPrepActive("tasks");
-      // Task board.
-      st = useVibe.getState();
-      if (!(st.tasksByProject[projectId] ?? []).length) {
+      const writeDoc = async (doc: ProjectDoc) => {
+        const kind = doc.kind as DocKind;
+        const unitId = planningUnitId(kind);
+        run = beginUnit(run, unitId);
+        saveRun();
+        updatePrepProgress(`doc-${kind}`, "generating", 25);
+        const result = await generateValidatedDocument({
+          kind,
+          project: current0,
+          brief: planningMemory,
+          signal,
+          request: (requestKind, prompt, requestSignal) =>
+            requestAi(requestKind, prompt, current0.model, requestSignal),
+          onPhase: (phase) => {
+            const percent = phase === "generating" ? 25 : phase === "checking" ? 85 : 70;
+            run = noteUnitProgress(run, unitId, phase, percent);
+            saveRun();
+            updatePrepProgress(`doc-${kind}`, phase, percent);
+          },
+        });
+        if (signal.aborted || (!result.ok && result.reason === "cancelled")) return;
+        if (!(await canCommitGeneration(signal))) return;
+        if (result.ok) {
+          saveDocMarkdown(doc.id, result.markdown, "ai");
+          run = settleUnit(run, unitId, "done");
+          saveRun();
+          clearFirstRunDocError(doc.id);
+          updatePrepProgress(`doc-${kind}`, "done", 100);
+          return;
+        }
+        useVibe.getState().updateDoc(projectId, doc.id, {
+          markdown: "",
+          source: undefined,
+          updatedAt: new Date().toISOString(),
+        });
+        run = noteUnitProgress(run, unitId, "failed", 0);
+        saveRun();
+        setFirstRunDocError(
+          doc.id,
+          documentGenerationFailureNote(result, doc.title, false),
+        );
+        updatePrepProgress(`doc-${kind}`, "failed", 0);
+      };
+      const writeTasks = async () => {
+        run = beginUnit(run, "tasks");
+        saveRun();
         try {
+          updatePrepProgress("tasks", "generating", 25);
           const reply = await requestAi(
             "tasks",
             buildTasksPrompt(current0, brief),
             current0.model,
+            signal,
           );
+          if (signal.aborted) return;
+          run = noteUnitProgress(run, "tasks", "checking", 85);
+          saveRun();
+          updatePrepProgress("tasks", "checking", 85);
           const parsed =
             reply.source === "ai"
               ? parseTasks(reply.text, `task-${projectId.slice(0, 8)}`)
               : null;
           if (parsed) {
             useVibe.getState().setTasks(projectId, parsed);
+            run = settleUnit(run, "tasks", "done");
+            saveRun();
+            updatePrepProgress("tasks", "done", 100);
           } else {
             useVibe.getState().setTasks(projectId, fallbackTasks(current0));
+            run = settleUnit(run, "tasks", "local");
+            saveRun();
             setTasksLocal(true);
+            updatePrepProgress("tasks", "local", 100);
           }
         } catch {
+          if (!(await canCommitGeneration(signal))) return;
           useVibe.getState().setTasks(projectId, fallbackTasks(current0));
+          run = settleUnit(run, "tasks", "local");
+          saveRun();
           setTasksLocal(true);
+          updatePrepProgress("tasks", "local", 100);
         }
+      };
+
+      // Docs and tasks are independent once the PRD exists. Keep both in one
+      // small pool so the task list starts sooner without exceeding 3 calls.
+      type PrepJob = { type: "doc"; doc: ProjectDoc } | { type: "tasks" };
+      const queue: PrepJob[] = pendingDocs.map((doc) => ({ type: "doc", doc }));
+      st = useVibe.getState();
+      const savedTasks = st.tasksByProject[projectId] ?? [];
+      const savedTasksAreLocal =
+        savedTasks.length > 0 && savedTasks.every((task) => task.id.startsWith("local-task-"));
+      if (savedTasks.length && !(resumingIncomplete && savedTasksAreLocal)) {
+        run = settleUnit(run, "tasks", savedTasksAreLocal ? "local" : "done");
+        saveRun();
+        updatePrepProgress("tasks", savedTasksAreLocal ? "local" : "done", 100);
+      } else {
+        queue.push({ type: "tasks" });
       }
-      setPrepDoneIds(["documents", "tasks"]);
+      const workers = Array.from({ length: Math.min(3, queue.length) }, async () => {
+        while (!signal.aborted && queue.length) {
+          const job = queue.shift();
+          if (!job) continue;
+          if (job.type === "doc") await writeDoc(job.doc);
+          else await writeTasks();
+        }
+      });
+      await Promise.all(workers);
+      if (signal.aborted) return;
       setPrepActive("design");
       // Page plan, suggested automatically. No page is generated here:
       // the first workspace view shows only the design system plus the
       // suggested page list, and each page waits for its own Generate.
       st = useVibe.getState();
-      if (!st.projects.find((entry) => entry.id === projectId)?.pagePlan) {
+      const savedProject = st.projects.find((entry) => entry.id === projectId);
+      if (
+        !savedProject?.pagePlan ||
+        (resumingIncomplete && savedProject.pagePlanSource === "local")
+      ) {
+        run = beginUnit(run, "pages");
+        saveRun();
         try {
+          updatePrepProgress("pages", "generating", 25);
           const reply = await requestAi(
             "pages",
             buildPagePlanPrompt(
-              current0.name,
               current0.idea,
-              brief,
+              planningMemory,
               (
                 useVibe.getState().docsByProject[projectId] ?? EMPTY_DOCS
               ).find((doc) => doc.kind === "afd")?.markdown ?? "",
             ),
             current0.model,
+            signal,
           );
-          const plan = parsePagePlan(reply.text) ?? fallbackPagePlan();
-          useVibe.getState().updateProject(projectId, { pagePlan: plan });
+          if (signal.aborted) return;
+          run = noteUnitProgress(run, "pages", "checking", 85);
+          saveRun();
+          updatePrepProgress("pages", "checking", 85);
+          const parsed = reply.source === "ai" ? parsePagePlan(reply.text) : null;
+          const plan = parsed ?? fallbackPagePlan();
+          useVibe.getState().updateProject(projectId, {
+            pagePlan: plan,
+            pagePlanSource: parsed ? "ai" : "local",
+          });
+          run = settleUnit(run, "pages", parsed ? "done" : "local");
+          saveRun();
+          updatePrepProgress("pages", parsed ? "done" : "local", 100);
         } catch {
+          if (!(await canCommitGeneration(signal))) return;
           useVibe
             .getState()
-            .updateProject(projectId, { pagePlan: fallbackPagePlan() });
+            .updateProject(projectId, {
+              pagePlan: fallbackPagePlan(),
+              pagePlanSource: "local",
+            });
+          run = settleUnit(run, "pages", "local");
+          saveRun();
+          updatePrepProgress("pages", "local", 100);
         }
+      } else {
+        run = settleUnit(run, "pages", "done");
+        saveRun();
+        updatePrepProgress("pages", "done", 100);
       }
-      setPrepDoneIds(["documents", "tasks", "design"]);
+      if (signal.aborted) return;
+      const allDocumentsComplete = DOC_TYPES.every(
+        (entry) => run.units[planningUnitId(entry.kind)]?.status === "done",
+      );
+      if (allDocumentsComplete) {
+        run = finishPlanningRun(run);
+        saveRun();
+        useVibe.getState().updateProject(projectId, { planningPrep: "complete" });
+      } else {
+        // Failed documents remain unsettled; a later mount resumes them once.
+        useVibe.getState().updateProject(projectId, { planningPrep: "in-progress" });
+      }
     } finally {
-      setPrepActive(null);
+      if (prepAbortRef.current === controller) prepAbortRef.current = null;
+      if (!signal.aborted) setPrepActive(null);
     }
-  }, [projectId, saveDocMarkdown]);
+  }, [projectId, saveDocMarkdown, updatePrepProgress]);
 
   // Saved page files are never deleted automatically: even output that
   // fails the HTML quality guards stays in the store so no user data is
   // lost. Regeneration replaces a frame explicitly via its Generate /
   // Regenerate button.
 
-  // Fresh projects prepare once behind the blur overlay. Anything already
-  // seeded keeps the old lazy path: the effects below fill the gaps.
+  // Fresh or interrupted projects prepare behind the blur overlay. Valid
+  // documents remain untouched; missing/failed documents are retried.
   useEffect(() => {
     if (!hydrated || !project || project.status === "draft") return;
     if (preparedRef.current) return;
     const st = useVibe.getState();
-    if (st.docsByProject[projectId] !== undefined) return;
+    const savedDocs = st.docsByProject[projectId];
+    const hasBlankPlanDoc = docs.some(
+      (doc) => DOC_TYPES.some((entry) => entry.kind === doc.kind) && !doc.markdown.trim(),
+    );
+    const shouldResume =
+      savedDocs === undefined ||
+      hasBlankPlanDoc ||
+      project.planningPrep === "in-progress";
+    if (!shouldResume) return;
     preparedRef.current = true;
     // Start after this effect finishes; the first state update belongs to
     // the request, not to the render that mounted the page.
     queueMicrotask(() => {
       void prepareProject();
     });
-  }, [hydrated, project, projectId, prepareProject]);
+  }, [hydrated, project, projectId, prepareProject, docs]);
 
   const handleShapes = useCallback(
     (screenId: string, shapesJson: string) => {
@@ -1666,7 +1921,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 if (event.key === "Enter") commitName();
                 if (event.key === "Escape") setEditingName(false);
               }}
-              aria-label="Project name"
+              aria-label="Project label"
               className="h-8 min-w-0 flex-1 rounded-lg border border-white/25 bg-[#17181d] px-2 text-[15px] font-semibold text-[#f5f6f8] focus:outline-none"
             />
           ) : (
@@ -1680,8 +1935,8 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                   setNameDraft(project.name);
                   setEditingName(true);
                 }}
-                title="Rename project"
-                aria-label="Rename project"
+                title="Rename project label"
+                aria-label="Rename project label"
                 className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[#5b6472] opacity-0 transition hover:bg-white/10 hover:text-white focus-visible:opacity-100 group-hover:opacity-100">
                 <svg
                   aria-hidden
@@ -1727,6 +1982,18 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
             );
           })}
         </nav>
+        <button
+          type="button"
+          onClick={() => setAgentModalOpen(true)}
+          aria-haspopup="dialog"
+          title="Connect a local coding agent"
+          className="ml-auto flex h-9 shrink-0 items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 text-[12px] font-medium text-[#d5d9e1] transition hover:border-white/25 hover:bg-white/10 hover:text-white"
+        >
+          <svg aria-hidden width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m8 9-3 3 3 3m8-6 3 3-3 3m-3-9-2 12" />
+          </svg>
+          <span>Local agent</span>
+        </button>
       </header>
 
       {isMobile && (
@@ -1769,7 +2036,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
       )}
 
       <div className="flex min-h-0 flex-1">
-        <main ref={mainRef} className="flex min-w-0 flex-1 flex-col bg-[#0b0c10]">
+        <main ref={mainRef} className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#0b0c10]">
           {view.kind === "documents" && (
             <DocumentsView
               docs={docs}
@@ -1869,6 +2136,12 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 pendingCount={pendingPageCount}
                 planDone={planDone}
                 planTotal={pagePlan?.length ?? 0}
+                brandName={project.brandName ?? ""}
+                onBrandName={(brandName) =>
+                  useVibe.getState().updateProject(projectId, { brandName })
+                }
+                planSource={project.pagePlanSource}
+                allSummary={allSummary}
                 pageErrors={pageErrors}
                 pageSources={Object.fromEntries(
                   files
@@ -1885,7 +2158,7 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
                 onRetryShowcase={() => void generateShowcase()}
                 allProgress={allProgress}
               />
-              <div className="relative min-h-[40vh] min-w-0 flex-1 md:min-h-0">
+              <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
                 <div className="h-full min-h-0">
                   <DesignCanvas
                     key={prototypeScreen?.id ?? "canvas"}
@@ -1949,71 +2222,107 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           aria-label="Preparing your project"
           className="fixed inset-0 z-50 grid place-items-center bg-[#0b0c10]/70 px-5 backdrop-blur-md"
         >
-          <div className="w-[min(360px,calc(100vw-3rem))] rounded-2xl border border-white/10 bg-[#17181d] p-5 shadow-2xl">
+          <div className="max-h-[88vh] w-[min(360px,calc(100vw-3rem))] overflow-hidden rounded-2xl border border-white/10 bg-[#17181d] p-5 shadow-2xl">
             <div aria-hidden="true" className="mb-3 flex justify-center">
               <LoadingSticker
                 size={104}
-                label="A folder opening while your project is prepared"
+                purpose={prepActive === "design" ? "pages" : prepActive}
+                label={
+                prepActive === "documents"
+                  ? "Writing plan documents and tasks"
+                    : prepActive === "tasks"
+                      ? "Checking off your task list"
+                      : "Sketching suggested pages"
+                }
               />
             </div>
             <p className="text-[15px] font-semibold text-[#f5f6f8]">
               Setting up your workspace
             </p>
             <p className="mt-1 text-[12px] leading-5 text-[#9aa0ae]">
-              Setting up plan documents, your task list, and page suggestions. Each step updates as it finishes.
+              {prepActive === "documents"
+                ? "Writing the plan documents and task list from the setup answers."
+                : prepActive === "tasks"
+                  ? "Turning the product brief into a practical task checklist."
+                  : "Sketching the screens your first version needs."}
             </p>
-            <ul className="mt-4 space-y-2.5">
-              {(
-                [
-                  { id: "documents", label: "Plan documents" },
-                  { id: "tasks", label: "Task list" },
-                  { id: "design", label: "Page suggestions" },
-                ] as const
-              ).map((step) => {
-                const done = prepDoneIds.includes(step.id);
-                const active = prepActive === step.id;
+            <div className="mt-4 max-h-[48vh] space-y-3 overflow-y-auto pr-1">
+              {(() => {
+                const ids = DOC_TYPES.map((entry) => `doc-${entry.kind}`);
+                const percent = prepPercent(prepProgress, ids);
                 return (
-                  <li key={step.id} className="flex items-center gap-2.5">
-                    {done ? (
-                      <svg
-                        aria-hidden
-                        width="16"
-                        height="16"
-                        viewBox="0 0 24 24"
-                        fill="none"
-                        stroke="#7ee2a8"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      >
-                        <path d="M20 6L9 17l-5-5" />
-                      </svg>
-                    ) : (
-                      <span
-                        aria-hidden
-                        className={`size-4 rounded-full border ${
-                          active
-                            ? "animate-pulse border-[#8ab4ff] bg-[#8ab4ff]/30"
-                            : "border-white/15"
-                        }`}
-                      />
-                    )}
-                    <span
-                      className={`text-[13px] ${
-                        done || active ? "text-[#f5f6f8]" : "text-[#5b6472]"
-                      }`}
+                  <section aria-label="Plan documents progress" className="rounded-xl border border-white/8 bg-black/10 p-3">
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span className="font-medium text-[#f5f6f8]">Plan documents</span>
+                      <span className="text-[#9aa0ae]">{percent}%</span>
+                    </div>
+                    <div
+                      role="progressbar"
+                      aria-label="Plan documents overall progress"
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={percent}
+                      className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"
                     >
-                      {step.label}
-                    </span>
-                    {active && (
-                      <span className="ml-auto text-[11px] text-[#9aa0ae]">
-                        {step.id === "design" ? "Suggesting…" : "Preparing…"}
-                      </span>
-                    )}
-                  </li>
+                      <div className="h-full rounded-full bg-[#8ab4ff] transition-[width] duration-300" style={{ width: `${percent}%` }} />
+                    </div>
+                    <ul className="mt-3 space-y-2">
+                      {DOC_TYPES.map((entry) => {
+                        const id = `doc-${entry.kind}`;
+                        const item = prepProgress[id] ?? { status: "queued" as const, percent: 0 };
+                        return (
+                          <li key={id}>
+                            <div className="flex items-center justify-between gap-2 text-[11px]">
+                              <span className="text-[#c9cdd6]">{entry.label}</span>
+                              <span className="shrink-0 text-[#9aa0ae]">
+                                {prepStatusLabel(item.status)} · {item.percent}%
+                              </span>
+                            </div>
+                            <div
+                              role="progressbar"
+                              aria-label={`${entry.label} progress`}
+                              aria-valuemin={0}
+                              aria-valuemax={100}
+                              aria-valuenow={item.percent}
+                              className="mt-1 h-1 overflow-hidden rounded-full bg-white/10"
+                            >
+                              <div className="h-full rounded-full bg-[#8ab4ff] transition-[width] duration-300" style={{ width: `${item.percent}%` }} />
+                            </div>
+                          </li>
+                        );
+                      })}
+                    </ul>
+                  </section>
+                );
+              })()}
+              {([
+                { id: "tasks", label: "Task list" },
+                { id: "pages", label: "Page suggestions" },
+              ] as const).map((step) => {
+                const item = prepProgress[step.id] ?? { status: "queued" as const, percent: 0 };
+                return (
+                  <section key={step.id} aria-label={`${step.label} progress`} className="rounded-xl border border-white/8 bg-black/10 p-3">
+                    <div className="flex items-center justify-between text-[12px]">
+                      <span className="font-medium text-[#f5f6f8]">{step.label}</span>
+                      <span className="text-[#9aa0ae]">{prepStatusLabel(item.status)} · {item.percent}%</span>
+                    </div>
+                    <div
+                      role="progressbar"
+                      aria-label={`${step.label} progress`}
+                      aria-valuemin={0}
+                      aria-valuemax={100}
+                      aria-valuenow={item.percent}
+                      className="mt-2 h-1.5 overflow-hidden rounded-full bg-white/10"
+                    >
+                      <div className="h-full rounded-full bg-[#8ab4ff] transition-[width] duration-300" style={{ width: `${item.percent}%` }} />
+                    </div>
+                  </section>
                 );
               })}
-            </ul>
+            </div>
+            <p className="mt-3 text-[10px] leading-4 text-[#737b89]">
+              Percentages reflect completed generation steps, not token-by-token output. A document is complete only after Muse returns an answer that passes all required checks.
+            </p>
           </div>
         </div>
       )}
@@ -2027,21 +2336,18 @@ export default function IdeWorkspace({ projectId }: { projectId: string }) {
           onClose={() => setLogoPickerOpen(false)}
         />
       )}
+      {agentModalOpen && agentSnapshot && (
+        <WorkspaceAgentModal
+          snapshot={agentSnapshot}
+          onClose={() => setAgentModalOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
 function OpeningProject() {
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="grid min-h-dvh place-items-center bg-[#0b0c10] text-[#f5f6f8]"
-    >
-      <span className="size-5 animate-pulse rounded-full bg-white/30" />
-      <span className="sr-only">Opening your project</span>
-    </div>
-  );
+  return <WorkspaceSkeleton label="Opening your project" />;
 }
 
 function Bar({ width }: { width: string }) {

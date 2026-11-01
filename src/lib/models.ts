@@ -12,14 +12,7 @@ export interface AiModelOption {
 
 export const DEFAULT_MODEL = "muse-spark-1.3-contributor";
 
-const ORDER = [
-  "muse-spark-1.3-contributor",
-  "muse-spark-1.3",
-  "muse-spark-1.2-contributor",
-  "muse-spark-1.2",
-  "muse-spark-1.1",
-  "muse-wonder-1.0",
-];
+const ORDER = [DEFAULT_MODEL];
 
 export const FALLBACK_MODELS: AiModelOption[] = ORDER.map((id) => ({
   id,
@@ -48,11 +41,7 @@ export function modelHint(id: string): string {
 
 /** Keep the provider order stable and drop models that are not for chat. */
 export function sortModels(ids: string[]): string[] {
-  const rank = (id: string) => {
-    const index = ORDER.indexOf(id);
-    return index === -1 ? ORDER.length : index;
-  };
   return ids
-    .filter((id) => /^muse-(spark|wonder)-/.test(id))
-    .sort((a, b) => rank(a) - rank(b) || a.localeCompare(b));
+    .filter((id) => ORDER.includes(id))
+    .sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
 }

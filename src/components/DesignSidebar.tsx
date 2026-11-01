@@ -33,6 +33,9 @@ interface DesignSidebarProps {
   pendingCount: number;
   planDone: boolean;
   planTotal: number;
+  brandName: string;
+  onBrandName: (brandName: string) => void;
+  planSource?: "ai" | "local";
   /** Per-page generation failure or local-draft notice, keyed by slug. */
   pageErrors?: Record<string, string>;
   /** Where each generated page came from, keyed by slug. */
@@ -44,7 +47,14 @@ interface DesignSidebarProps {
   /** Explicit retry for the showcase frame; no silent auto-loops. */
   onRetryShowcase?: () => void;
   /** Generate-all progress; null when idle. */
-  allProgress?: { done: number; total: number; currentTitle: string } | null;
+  allProgress?: {
+    done: number;
+    failed: number;
+    total: number;
+    currentTitle: string;
+  } | null;
+  /** Final retry summary when one or more pages could not be created. */
+  allSummary?: { done: number; failed: number; total: number } | null;
 }
 
 export default function DesignSidebar({
@@ -62,26 +72,50 @@ export default function DesignSidebar({
   pendingCount,
   planDone,
   planTotal,
+  brandName,
+  onBrandName,
+  planSource,
   pageErrors = {},
   pageSources = {},
   showcaseError = "",
   showcaseBusy = false,
   onRetryShowcase,
   allProgress = null,
+  allSummary = null,
 }: DesignSidebarProps) {
   const generateAllRunning = allProgress !== null;
   return (
     <aside
       aria-label="Design frames"
-      className="flex w-full shrink-0 flex-col border-b border-white/10 bg-[#0b0c10] md:w-60 md:border-b-0 md:border-r"
+      className="flex h-[36dvh] max-h-[300px] min-h-[220px] w-full shrink-0 flex-col border-b border-white/10 bg-[#0b0c10] md:h-auto md:max-h-none md:min-h-0 md:w-60 md:border-b-0 md:border-r"
     >
-      <div className="max-h-[24dvh] min-h-0 flex-1 overflow-y-auto p-3 md:max-h-none">
+      <div className="max-h-[28dvh] min-h-0 flex-1 overscroll-contain overflow-y-auto p-3 md:max-h-none">
+        <div className="mb-3 rounded-xl border border-white/10 bg-white/[0.02] p-3">
+          <label
+            htmlFor="website-brand-name"
+            className="mb-1 block text-[11px] font-medium text-[#c9cdd6]"
+          >
+            Website brand
+          </label>
+          <input
+            id="website-brand-name"
+            type="text"
+            maxLength={80}
+            value={brandName}
+            onChange={(event) => onBrandName(event.currentTarget.value)}
+            placeholder="Leave blank for a suggestion"
+            className="h-10 w-full rounded-lg border border-white/10 bg-[#17181d] px-3 text-[13px] text-white placeholder:text-[#5b6472] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8ab4ff]"
+          />
+          <p className="mt-1 text-[10px] leading-relaxed text-[#5b6472]">
+            Shown on generated pages, separate from the project label.
+          </p>
+        </div>
         <p className="px-2 pb-1 text-[10px] font-medium uppercase tracking-[0.12em] text-[#5b6472]">
           Style preview
         </p>
-        <ul className="flex gap-2 overflow-x-auto pb-1 md:block md:space-y-0.5 md:overflow-visible md:pb-0">
+        <ul className="flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain scroll-smooth pb-2 md:block md:space-y-0.5 md:overflow-visible md:pb-0">
           {dsFrames.map((frame) => (
-            <li key={frame.id} className="min-w-[200px] shrink-0 md:min-w-0">
+            <li key={frame.id} className="min-w-[200px] shrink-0 snap-start md:min-w-0">
               <button
                 type="button"
                 onClick={() => onFocus(frame.id)}
@@ -151,8 +185,13 @@ export default function DesignSidebar({
 
         <p className="px-2 pb-1 pt-4 text-[10px] font-medium uppercase tracking-[0.12em] text-[#5b6472]">
           Pages · {doneSlugs.size} of {planTotal} ready
+          {planSource === "local" && (
+            <span className="ml-1.5 rounded-full bg-white/5 px-1.5 py-0.5 text-[9px] font-normal normal-case tracking-normal text-[#9aa0ae]">
+              local suggestions
+            </span>
+          )}
         </p>
-        <ul className="flex gap-2 overflow-x-auto pb-1 md:block md:space-y-0.5 md:overflow-visible md:pb-0">
+        <ul className="flex snap-x snap-mandatory gap-2 overflow-x-auto overscroll-x-contain scroll-smooth pb-2 md:block md:space-y-0.5 md:overflow-visible md:pb-0">
           {pages.map((page) => {
             const done = doneSlugs.has(page.slug);
             const busy = busySlugs.has(page.slug);
@@ -160,7 +199,7 @@ export default function DesignSidebar({
             const error = pageErrors[page.slug];
             const source = pageSources[page.slug];
             return (
-              <li key={page.slug} className="min-w-[220px] shrink-0 md:min-w-0">
+              <li key={page.slug} className="min-w-[220px] shrink-0 snap-start md:min-w-0">
                 <div
                   className={`group flex items-center gap-1 rounded-xl transition-colors hover:bg-white/5 ${
                     error ? "border border-[#f0a6a6]/30" : ""
@@ -263,12 +302,21 @@ export default function DesignSidebar({
             </span>
             <span className="min-w-0">
               <span className="block font-medium text-[#c9cdd6]">
-                Generating page {Math.min(allProgress.done + 1, allProgress.total)} of {allProgress.total}
+                Generating page {Math.min(allProgress.done + allProgress.failed + 1, allProgress.total)} of {allProgress.total}
               </span>
               <span className="block truncate text-[11px]">
                 {allProgress.currentTitle}
+                {allProgress.failed > 0 && ` · ${allProgress.failed} need retry`}
               </span>
             </span>
+          </p>
+        )}
+        {allSummary && (
+          <p
+            role="status"
+            className="mb-2 rounded-xl border border-[#f2c879]/20 bg-[#f2c879]/10 px-3 py-2 text-[12px] leading-relaxed text-[#f2c879]"
+          >
+            Generated {allSummary.done} of {allSummary.total}; {allSummary.failed} {allSummary.failed === 1 ? "page needs" : "pages need"} retry. See the page-level messages above.
           </p>
         )}
         {planDone ? (
@@ -300,13 +348,13 @@ export default function DesignSidebar({
                 disabled={generateAllRunning}
                 aria-label={
                   generateAllRunning
-                  ? `Generating ${allProgress.currentTitle}, page ${allProgress.done + 1} of ${allProgress.total}`
+                  ? `Generating ${allProgress.currentTitle}, page ${allProgress.done + allProgress.failed + 1} of ${allProgress.total}`
                   : `Generate ${pendingCount} remaining pages`
                 }
                 className="inline-flex min-h-11 min-w-0 flex-1 items-center justify-center rounded-full bg-white px-3 text-[12px] font-medium text-[#0b0c10] hover:bg-white/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#8ab4ff] disabled:opacity-50 md:min-h-0 md:h-9 md:flex-none md:px-4 md:text-[13px]"
               >
                 {generateAllRunning
-                  ? `Generating ${allProgress.done + 1}/${allProgress.total}…`
+                  ? `Generating ${allProgress.done + allProgress.failed + 1}/${allProgress.total}…`
                   : `Generate ${pendingCount} remaining`}
               </button>
             )}

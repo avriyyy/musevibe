@@ -7,46 +7,24 @@
  */
 
 import { useEffect, useId, useState } from "react";
-
-/**
- * Models love inventing crow's-foot cardinalities mermaid rejects, most
- * often `oM`/`Mo` where the spec only allows `o{`/`}o`. Those lines fail
- * the whole render and the diagram degrades to a code dump, so repair the
- * relationship operator before handing the chart to the renderer. Only
- * relationship lines (containing `--`) are touched; labels after the
- * colon are left alone.
- */
-function repairChart(chart: string): string {
-  return chart
-    .split("\n")
-    .map((line) => {
-      if (!line.includes("--")) return line;
-      const cut = line.indexOf(":");
-      const head = cut === -1 ? line : line.slice(0, cut);
-      const tail = cut === -1 ? "" : line.slice(cut);
-      const fixed = head.replace(/oM/g, "o{").replace(/Mo/g, "}o");
-      return fixed + tail;
-    })
-    .join("\n");
-}
+import { normalizeMermaidChart } from "@/lib/mermaid-quality";
 
 export default function Mermaid({ chart }: { chart: string }) {
-  const [svg, setSvg] = useState<string | null>(null);
-  const [failed, setFailed] = useState(false);
+  const [render, setRender] = useState<{
+    chart: string;
+    svg: string | null;
+    failed: boolean;
+  }>({ chart: "", svg: null, failed: false });
   const rawId = useId().replace(/[^a-zA-Z0-9]/g, "");
   const diagramId = `mmd-${rawId}`;
 
   useEffect(() => {
     let alive = true;
-    // Clearing the previous render is part of loading the new chart.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setSvg(null);
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setFailed(false);
     void (async () => {
       try {
         const mermaid = (await import("mermaid")).default;
-        mermaid.initialize({          startOnLoad: false,
+        mermaid.initialize({
+          startOnLoad: false,
           theme: "dark",
           securityLevel: "strict",
           themeVariables: {
@@ -61,10 +39,13 @@ export default function Mermaid({ chart }: { chart: string }) {
             noteTextColor: "#c9cdd6",
           },
         });
-        const { svg: rendered } = await mermaid.render(diagramId, repairChart(chart));
-        if (alive) setSvg(rendered);
+        const { svg: rendered } = await mermaid.render(
+          diagramId,
+          normalizeMermaidChart(chart),
+        );
+        if (alive) setRender({ chart, svg: rendered, failed: false });
       } catch {
-        if (alive) setFailed(true);
+        if (alive) setRender({ chart, svg: null, failed: true });
       }
     })();
     return () => {
@@ -72,15 +53,20 @@ export default function Mermaid({ chart }: { chart: string }) {
     };
   }, [chart, diagramId]);
 
-  if (failed) {
+  if (render.chart === chart && render.failed) {
     return (
-      <pre className="scroll-surface overflow-x-auto rounded-xl border border-white/10 bg-black/30 p-3 font-mono text-[12px] leading-relaxed text-[#dfe3ea]">
-        <code>{chart}</code>
-      </pre>
+      <div role="alert" className="space-y-2 rounded-xl border border-white/10 bg-black/20 p-3">
+        <p className="text-[12px] leading-relaxed text-[#c9cdd6]">
+          This diagram could not be rendered. Its source is still available below to review or edit.
+        </p>
+        <pre className="scroll-surface overflow-x-auto rounded-lg bg-black/30 p-3 font-mono text-[12px] leading-relaxed text-[#dfe3ea]">
+          <code>{chart}</code>
+        </pre>
+      </div>
     );
   }
 
-  if (!svg) {
+  if (render.chart !== chart || !render.svg) {
     return (
       <div
         role="status"
@@ -101,7 +87,7 @@ export default function Mermaid({ chart }: { chart: string }) {
       className="overflow-x-auto rounded-xl border border-white/10 bg-[#17181d] p-4 [&_svg]:mx-auto [&_svg]:max-w-full [&_svg]:bg-transparent"
       // The SVG string comes from the mermaid renderer, never from model
       // output directly, and links/scripts are disabled by strict mode.
-      dangerouslySetInnerHTML={{ __html: svg }}
+      dangerouslySetInnerHTML={{ __html: render.svg }}
     />
   );
 }

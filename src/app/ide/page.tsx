@@ -9,6 +9,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import IdeWorkspace from "@/components/IdeWorkspace";
+import { WorkspaceSkeleton } from "@/components/LoadingState";
 
 export default function IdePage() {
   return (
@@ -43,14 +44,5 @@ function IdeByQuery() {
 }
 
 function OpeningIde() {
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      className="grid min-h-dvh place-items-center bg-[#0b0c10] text-[#f5f6f8]"
-    >
-      <span className="size-5 animate-pulse rounded-full bg-white/30" />
-      <span className="sr-only">Opening the IDE</span>
-    </div>
-  );
+  return <WorkspaceSkeleton label="Opening the IDE" />;
 }

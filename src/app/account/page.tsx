@@ -4,6 +4,7 @@ import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { useAuthSession } from "@/lib/supabase/use-auth-session";
 import { supabaseBrowser } from "@/lib/supabase/client";
+import { useCloudSyncStatus } from "@/lib/supabase/sync";
 import LoadingSticker from "@/stickers/LoadingSticker";
 
 type Mode = "sign-in" | "create-account";
@@ -31,6 +32,7 @@ function friendlyAuthError(error: unknown) {
 
 export default function AccountPage() {
   const { user, ready, configured } = useAuthSession();
+  const syncStatus = useCloudSyncStatus();
   const [mode, setMode] = useState<Mode>("sign-in");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -57,7 +59,7 @@ export default function AccountPage() {
         if (error) throw error;
         setNotice({
           kind: "success",
-          text: "You are signed in. Your projects remain stored in this browser; cloud sync is not enabled yet.",
+          text: "You are signed in. Your projects are syncing to your account.",
         });
       } else {
         const { data, error } = await client.auth.signUp({
@@ -69,7 +71,7 @@ export default function AccountPage() {
         setNotice({
           kind: "success",
           text: data.session
-            ? "Your account is ready. Your projects remain stored in this browser; cloud sync is not enabled yet."
+            ? "Your account is ready. Your projects are syncing to your account."
             : "Check your inbox for a confirmation link to finish creating your account.",
         });
       }
@@ -95,7 +97,7 @@ export default function AccountPage() {
   };
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[#0b0c10] px-4 py-10 text-[#f5f6f8]">
+    <main className="flex min-h-dvh items-center justify-center bg-[#0b0c10] px-4 py-10 text-[#f5f6f8]">
       <section className="w-full max-w-[440px] rounded-[28px] border border-white/10 bg-[#13151a] p-6 shadow-2xl sm:p-8">
         <div className="mb-8 flex items-center justify-between gap-4">
           <Link href="/" className="text-[15px] font-semibold tracking-tight hover:text-white">
@@ -123,7 +125,10 @@ export default function AccountPage() {
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-[#7ee2a8]">Account connected</p>
             <h1 className="mt-2 break-all text-[22px] font-semibold tracking-tight">{user.email ?? "Signed-in account"}</h1>
             <p className="mt-4 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-[13px] leading-6 text-[#b5bbc6]">
-              Sign-in is optional. Projects are still saved in this browser and are not synced to your account yet.
+              Projects sync to your account while you are signed in. When signed out, work stays in this browser.
+            </p>
+            <p role="status" className={`mt-3 text-[12px] ${syncStatus === "error" ? "text-[#ff9c9c]" : "text-[#9aa0ae]"}`}>
+              Cloud sync: {syncStatus === "syncing" ? "Syncing…" : syncStatus === "synced" ? "Up to date" : syncStatus === "error" ? "Could not sync; your local copy is safe" : "Waiting for connection"}
             </p>
             {notice && (
               <p role={notice.kind === "error" ? "alert" : "status"} className={`mt-4 text-[13px] ${notice.kind === "error" ? "text-[#ff9c9c]" : "text-[#9fe6bc]"}`}>
@@ -219,7 +224,7 @@ export default function AccountPage() {
             </form>
 
             <p className="mt-5 rounded-2xl border border-white/10 bg-white/[0.03] p-4 text-[12px] leading-5 text-[#9aa0ae]">
-              Signing in is optional. Your projects stay saved in this browser and are not synced to your account yet.
+              Sign in to sync projects to your account. If you stay signed out, projects remain saved in this browser only.
             </p>
           </>
         )}

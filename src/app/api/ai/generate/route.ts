@@ -40,7 +40,7 @@ export async function POST(req: Request) {
   }
   if (
     model !== undefined &&
-    (typeof model !== "string" || !/^muse-(spark|wonder)-[a-z0-9.]+$/.test(model))
+    (typeof model !== "string" || !/^muse-(spark|wonder)-[a-z0-9.-]+$/.test(model))
   ) {
     return NextResponse.json(
       { error: "Unknown model.", code: "invalid_model" },
@@ -48,13 +48,20 @@ export async function POST(req: Request) {
     );
   }
   const requested = kind as AiGenerateKind;
+  if (req.signal.aborted) {
+    return new Response(null, { status: 499 });
+  }
   if (requested === "logo") {
-    return NextResponse.json(await aiGenerateLogo(prompt));
+    const result = await aiGenerateLogo(prompt, req.signal);
+    if (req.signal.aborted) return new Response(null, { status: 499 });
+    return NextResponse.json(result);
   }
   const result = await aiGenerate(
     requested,
     prompt,
     typeof model === "string" ? model : undefined,
+    req.signal,
   );
+  if (req.signal.aborted) return new Response(null, { status: 499 });
   return NextResponse.json(result);
 }

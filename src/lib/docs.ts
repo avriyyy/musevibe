@@ -15,9 +15,15 @@ import {
   PRD_GUIDANCE,
   PRD_MIN_WORDS,
   PRD_SECTIONS,
-  buildPrdFallback,
   buildUnifiedPrdPrompt,
+  prdAnswersText,
+  prdStackText,
 } from "./prd-contract";
+import {
+  extractMermaidBlocks,
+  normalizeMermaidMarkdown,
+  validateMermaidMarkdown,
+} from "./mermaid-quality";
 
 export type DocKind = "prd" | "trd" | "afd" | "dbd" | "bsd" | "ipd";
 
@@ -192,6 +198,14 @@ const SPECS: Record<DocKind, DocSpec> = {
   },
 };
 
+function minimumDocWords(kind: DocKind): number {
+  if (kind === "prd") return PRD_MIN_WORDS;
+  // Keep the quality bar proportional to section count. The prompt still asks
+  // for fuller engineering docs, but complete compact answers should not incur
+  // a second full model call solely for missing a global PRD-sized threshold.
+  return Math.min(250, SPECS[kind].sections.length * 32 + 20);
+}
+
 export function buildDocPrompt(
   kind: DocKind,
   project: Project,
@@ -227,9 +241,10 @@ export function buildDocPrompt(
     ...spec.guidance.map((line) => `- ${line}`),
     "",
     "Rules:",
-    "- 350 to 600 words plus required tables and diagrams. Concrete and specific to this product.",
+    "- 250 to 400 words plus required tables and diagrams. Be concise and specific to this product; prefer concrete decisions over long rationale.",
     "- Tables carry real rows a developer can build from. Every row must hold product-specific content.",
-    "- Mermaid blocks stay minimal and valid: short labels, no special characters that break parsing, no styling directives.",
+    "- Use only facts in the idea and agreed brief. Mark unconfirmed product or technical decisions as 'Assumption:'; never invent research, metrics, competitor claims, or user needs.",
+    "- Required Mermaid diagrams must be closed fenced blocks with a valid diagram declaration on the first line, simple IDs, valid syntax, and only supported ER cardinalities. Quote labels with punctuation when needed; no HTML or styling directives.",
     `- Start with '# ${info?.label ?? kind} — ${project.name.trim() || "Untitled project"}' and nothing else before it.`,
     "- No em dashes. No pricing, growth numbers, testimonials, or invented research.",
     "- Never write TODO, TBD, lorem ipsum, or bracketed placeholders like [insert X].",
@@ -247,53 +262,124 @@ export function buildDocRepairPrompt(
   previous: string,
   missing: string[],
 ): string {
+  const targets = repairTargets(kind, previous, missing);
+  const info = DOC_TYPES.find((entry) => entry.kind === kind);
+  const spec = SPECS[kind];
+  const name = project.name.trim() || "Untitled project";
+  const idea = project.idea.replace(/\s+/g, " ").trim().slice(0, 800);
+  const trimmedBrief = brief.replace(/\s+/g, " ").trim().slice(0, 3000);
+  const sourceContext = kind === "prd"
+    ? [
+        prdAnswersText(project) ? `Setup answers: ${prdAnswersText(project)}.` : "",
+        prdStackText(project) ? `Chosen stack and timeline: ${prdStackText(project)}.` : "",
+      ]
+    : [trimmedBrief ? `Agreed product brief: """${trimmedBrief}""".` : ""];
   return [
-    buildDocPrompt(kind, project, brief),
+    `You are repairing a partial ${info?.full ?? kind} for MuseVibe. The existing draft is the source of truth for sections that are already sound.`,
+    `Project: "${name}".`,
+    `Idea: "${idea}".`,
+    ...sourceContext,
     "",
-    "YOUR PREVIOUS ANSWER WAS REJECTED",
+    "Required document headings and section guidance:",
+    ...spec.sections,
+    ...spec.guidance.map((line) => `- ${line}`),
+    "Use only facts in the idea, saved setup answers, and agreed brief. Mark unconfirmed choices as 'Assumption:'; do not invent research, metrics, competitor behavior, or user needs.",
+    "When the issue names an invalid Mermaid block, correct that block using the parser diagnostic. Keep the requested diagram type and use only valid Mermaid syntax and ER cardinalities.",
+    "",
     previous.trim()
-      ? `It was missing or malformed at: ${missing.join(", ")}.`
-      : "It was empty.",
-    "Rewrite the whole document. Keep every required heading exactly as written, in order, with real product-specific content under each one.",
-    "Do not apologise or explain what changed. Return only the corrected markdown.",
+      ? `Previous draft: """${previous.trim().slice(0, 8000)}""". It was missing or malformed at: ${missing.join(", ")}.`
+      : "The previous answer was empty.",
+    `Repair only these sections: ${targets.join(", ")}.`,
+    "Do not rewrite the title or any other section. Return only the requested ## sections, each with the exact heading and complete, product-specific content. The app will merge these fragments into the original draft and put all sections back in canonical order.",
+    `If the document is short, expand the requested sections enough that the merged document reaches at least ${minimumDocWords(kind)} words. Keep tables and Mermaid diagrams only where the section guidance requires them.`,
+    "Do not apologise or explain what changed. Return only the requested markdown section fragments.",
   ].join("\n");
 }
 
-/** A local outline with the right title and sections for this document. */
-export function buildDocFallback(
-  kind: string,
-  project: Project,
-  brief: string,
-): string {
-  if (kind === "prd") return buildPrdFallback(project);
-  const info = DOC_TYPES.find((entry) => entry.kind === kind);
-  const spec = kind in SPECS ? SPECS[kind as DocKind] : null;
-  const name = project.name.trim() || "Untitled project";
-  if (!info || !spec) {
-    return `# ${info?.full ?? kind} — ${name}\n\n> Local outline. The model is unavailable, so this page is a starting point. Generate again for the full document.\n\n## Overview\n\n${project.idea.trim()}\n`;
+/** Pick only sections that are absent, empty, placeholder-filled, or too thin. */
+function repairTargets(kind: DocKind, markdown: string, missing: string[] = []): string[] {
+  const spec = SPECS[kind];
+  const sections = splitDocSections(kind, markdown).sections;
+  const targets = new Set<string>();
+  for (const heading of spec.sections) {
+    const body = sections.get(heading)?.trim() ?? "";
+    if (missing.some((issue) => issue.includes(heading))) targets.add(heading);
+    if (
+      !body ||
+      /\b(?:TODO|TBD|lorem ipsum|placeholder|coming soon|xxx+)\b/i.test(body)
+    ) {
+      targets.add(heading);
+    }
   }
-  const briefLine = brief.replace(/\s+/g, " ").trim().slice(0, 320);
-  return [
-    `# ${info.label} — ${name}`,
-    "",
-    "> Local outline. The model is unavailable, so the section frame below is real but the detail is not finished. Generate again when the model is back; this draft is never presented as a model answer.",
-    "",
-    "## Product context",
-    "",
-    project.idea.replace(/\s+/g, " ").trim().slice(0, 700),
-    briefLine && briefLine !== project.idea.trim()
-      ? `\nAgreed brief: ${briefLine}`
-      : "",
-    "",
-    ...spec.sections.flatMap((section, index) => [
-      section,
-      "",
-      index === 0
-        ? `This section is waiting for the model. It will define the ${section.replace(/^##\s*/, "").toLowerCase()} for ${name} using the agreed brief.`
-        : `- Decision needed: ${spec.guidance[index % spec.guidance.length]}`,
-      "",
-    ]),
-  ].join("\n");
+
+  const words = markdown.trim() ? markdown.trim().split(/\s+/).length : 0;
+  if (words < minimumDocWords(kind)) {
+    const thin = spec.sections.filter((heading) => {
+      const body = sections.get(heading)?.trim() ?? "";
+      return body.split(/\s+/).filter(Boolean).length < 35;
+    });
+    for (const heading of thin) targets.add(heading);
+  }
+
+  // A title-only or ordering-only defect can be normalized locally, but keep a
+  // safe repair prompt if a caller reaches this function with no section target.
+  return targets.size ? [...targets] : [...spec.sections];
+}
+
+interface SplitDoc {
+  title: string;
+  sections: Map<string, string>;
+}
+
+/** Extract canonical sections while ignoring headings inside fenced blocks. */
+function splitDocSections(kind: DocKind, markdown: string): SplitDoc {
+  const required = SPECS[kind].sections;
+  const sections = new Map<string, string>();
+  const lines = markdown.trim().split("\n");
+  const title = lines.find((line) => line.trim())?.trim() ?? "";
+  let current: string | null = null;
+  let fenced = false;
+  for (const line of lines) {
+    if (/^\s*```/.test(line)) {
+      fenced = !fenced;
+      if (current) sections.set(current, `${sections.get(current) ?? ""}${line}\n`);
+      continue;
+    }
+    if (!fenced && /^##\s+\S/.test(line.trim())) {
+      const heading = required.find((item) => normalizeHeadingLine(item) === normalizeHeadingLine(line));
+      current = heading && !sections.has(heading) ? heading : null;
+      if (current) sections.set(current, "");
+      continue;
+    }
+    if (current) sections.set(current, `${sections.get(current) ?? ""}${line}\n`);
+  }
+  return { title, sections };
+}
+
+/** Merge repaired fragments into the original, preserving sound sections. */
+export function mergeDocRepairMarkdown(
+  kind: DocKind,
+  project: Project,
+  previous: string,
+  repaired: string,
+): string {
+  const spec = SPECS[kind];
+  const original = splitDocSections(kind, previous);
+  const replacement = splitDocSections(kind, repaired);
+  const name = project.name.trim() || "Untitled project";
+  const fallbackTitle = kind === "prd" ? `# ${name}` : `# ${DOC_TYPES.find((entry) => entry.kind === kind)?.label ?? kind} — ${name}`;
+  // The title is metadata, not model-authored content: always normalize it to
+  // the exact project/document identity required by the prompt contract.
+  const title = fallbackTitle;
+  const targetSet = new Set(repairTargets(kind, previous));
+  const output = [title, ""];
+  for (const heading of spec.sections) {
+    const newBody = replacement.sections.get(heading)?.trim();
+    const oldBody = original.sections.get(heading)?.trim();
+    const body = newBody && (targetSet.has(heading) || !oldBody) ? newBody : oldBody;
+    output.push(heading, "", body ?? "", "");
+  }
+  return output.join("\n").trim();
 }
 
 export interface DocQuality {
@@ -374,9 +460,72 @@ export function inspectDocMarkdown(kind: string, markdown: string): DocQuality {
     }
   });
 
-  // Length: the prompts ask for 350-600 words (PRD 220-380); 250 keeps the
-  // gate useful without failing table- and mermaid-heavy documents.
-  const minimum = PRD_MIN_WORDS;
+  const checkedSections = spec
+    ? splitDocSections(kind as DocKind, text).sections
+    : new Map<string, string>();
+  const getSectionBody = (heading: string): string =>
+    checkedSections.get(heading)?.trim() ?? "";
+  const hasMarkdownTable = (body: string): boolean => {
+    const rows = body.split("\n").map((line) => line.trim());
+    return rows.some(
+      (line, index) =>
+        line.startsWith("|") &&
+        /^\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?$/.test(rows[index + 1] ?? "") &&
+        (rows[index + 2] ?? "").startsWith("|"),
+    );
+  };
+  const requiredTables: Partial<Record<DocKind, string[]>> = {
+    trd: ["## Tech stack"],
+    afd: ["## Screen-by-screen flow", "## Navigation map"],
+    dbd: ["## Entities"],
+    bsd: ["## Endpoints"],
+  };
+  for (const heading of requiredTables[kind as DocKind] ?? []) {
+    if (!hasMarkdownTable(getSectionBody(heading))) {
+      missing.push(`Missing required markdown table in section: ${heading}`);
+    }
+  }
+
+  const bulletCount = (body: string): number =>
+    body.split("\n").filter((line) => /^\s*[-*+]\s+\S/.test(line)).length;
+  const hasNumberedStep = (body: string): boolean =>
+    body.split("\n").some((line) => /^\s*\d+[.)]\s+\S/.test(line));
+  if (kind === "prd") {
+    for (const [heading, minimum, maximum] of [
+      ["## What ships first", 4, 6],
+      ["## Out of scope for v1", 3, 5],
+    ] as const) {
+      const count = bulletCount(getSectionBody(heading));
+      if (count < minimum || count > maximum) {
+        missing.push(`${heading} needs ${minimum} to ${maximum} concrete bullet items; found ${count}.`);
+      }
+    }
+    if (!hasNumberedStep(getSectionBody("## The core flow"))) {
+      missing.push("The core flow must contain numbered user steps.");
+    }
+  }
+  if (kind === "ipd" && !hasNumberedStep(getSectionBody("## Build order"))) {
+    missing.push("Build order must contain a numbered dependency chain.");
+  }
+  if (kind === "bsd") {
+    const payloads = getSectionBody("## Payload schemas");
+    const jsonBlocks = [...payloads.matchAll(/```json\s*\n([\s\S]*?)\n```/gi)];
+    const validJsonBlocks = jsonBlocks.filter((match) => {
+      try {
+        JSON.parse(match[1]);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (validJsonBlocks.length < 2) {
+      missing.push("Payload schemas must include valid request and response JSON examples in separate fenced blocks.");
+    }
+  }
+
+  // Keep non-PRD gates proportional to their section count so a concise,
+  // complete engineering document is not rejected by the PRD threshold.
+  const minimum = spec ? minimumDocWords(kind as DocKind) : PRD_MIN_WORDS;
   if (words < minimum) {
     missing.push(`Too short: ${words} words, need at least ${minimum}`);
   }
@@ -385,7 +534,33 @@ export function inspectDocMarkdown(kind: string, markdown: string): DocQuality {
     missing.push('Placeholder text: remove TODO, TBD, lorem ipsum, or bracketed placeholders like [insert X]');
   }
 
+  const requiredDiagramSection =
+    kind === "afd" ? "## Flow diagram" : kind === "dbd" ? "## Entity-relationship diagram" : null;
+  if (requiredDiagramSection) {
+    const sectionBody = splitDocSections(kind as DocKind, text).sections.get(requiredDiagramSection) ?? "";
+    if (!extractMermaidBlocks(`${requiredDiagramSection}\n${sectionBody}`).length) {
+      missing.push(`Missing Mermaid diagram in section: ${requiredDiagramSection}`);
+    }
+  }
+  for (const [index, block] of extractMermaidBlocks(text).entries()) {
+    if (!/^(?:flowchart|graph|erDiagram|sequenceDiagram|stateDiagram(?:-v2)?|classDiagram(?:-v2)?|gantt|pie|journey|mindmap|timeline)\b/.test(block.chart.trim())) {
+      const where = block.section ? ` in ${block.section}` : ` in diagram ${index + 1}`;
+      missing.push(`Invalid Mermaid${where}: add a supported diagram declaration as the first line.`);
+    }
+  }
+
   return { ok: missing.length === 0, words, missing };
+}
+
+/** Add actual Mermaid parser diagnostics to the synchronous document contract. */
+export async function inspectDocMarkdownAsync(
+  kind: string,
+  markdown: string,
+): Promise<DocQuality> {
+  const quality = inspectDocMarkdown(kind, markdown);
+  const diagramIssues = await validateMermaidMarkdown(markdown);
+  const missing = [...quality.missing, ...diagramIssues];
+  return { ...quality, ok: missing.length === 0, missing };
 }
 
 export function buildPrototypePrompt(project: Project, brief: string): string {
@@ -421,7 +596,7 @@ export function parseDocMarkdown(raw: unknown): string {
   if (/^mermaid\s+(flowchart|graph|erDiagram|sequenceDiagram|stateDiagram|classDiagram|gantt|pie|journey|mindmap|timeline)/i.test(text)) {
     text = "```mermaid\n" + text.replace(/^mermaid\s*/i, "") + "\n```";
   }
-  return text;
+  return normalizeMermaidMarkdown(text);
 }
 
 /** Strip fences so the prototype file holds raw HTML. Models often wrap
