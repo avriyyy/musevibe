@@ -1,0 +1,11 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "redirects": [
+    {
+      "source": "/:path*",
+      "has": [{ "type": "host", "value": "musevibe-0xavriyyy-projects.vercel.app" }],
+      "destination": "https://musevibe.vercel.app/:path*",
+      "permanent": true
+    }
+  ]
+}
