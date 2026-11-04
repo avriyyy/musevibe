@@ -31,5 +31,10 @@ export function signInUrl(returnTo: string): string {
 
 export function getPostAuthDestination(search: string): string {
   const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-  return safeReturnTo(params.get("next"));
+  // "/" is the public landing now, so a bare sign-in drops users into the
+  // app instead of back onto marketing. Explicit unsafe values still fall
+  // back to the landing, which is always safe to show.
+  const next = params.get("next");
+  if (!next) return "/projects";
+  return safeReturnTo(next);
 }

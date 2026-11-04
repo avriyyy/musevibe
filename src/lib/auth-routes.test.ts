@@ -38,3 +38,13 @@ test("post-auth destinations accept only safe local paths", () => {
   assert.equal(getPostAuthDestination("?next=%2Fproject%2Fabc"), "/project/abc");
   assert.equal(signInUrl("/projects"), "/sign-in?next=%2Fprojects");
 });
+
+test("signed-in users land in the app, not on the marketing page", () => {
+  assert.equal(getPostAuthDestination(""), "/projects");
+  assert.equal(getPostAuthDestination("?next=%2Fnew"), "/new");
+  assert.equal(getPostAuthDestination("?next=https%3A%2F%2Fevil.example"), "/");
+});
+
+test("the new-project composer requires a session", () => {
+  assert.equal(isPublicAuthRoute("/new"), false);
+});

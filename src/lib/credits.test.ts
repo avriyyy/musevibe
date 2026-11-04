@@ -1,10 +1,12 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  CREDITS_CHANGED_EVENT,
   DAILY_CREDITS,
   PROJECT_CREATION_COST,
   balanceAfterReset,
   canAffordProject,
+  notifyCreditsChanged,
   utcTodayString,
 } from "./credits";
 
@@ -31,6 +33,11 @@ test("stale balances refill to the daily budget", () => {
     resetDate: "2026-11-04",
     reset: true,
   });
+});
+
+test("balance changes broadcast on a stable event name", () => {
+  assert.equal(CREDITS_CHANGED_EVENT, "musevibe:credits-changed");
+  assert.doesNotThrow(() => notifyCreditsChanged());
 });
 
 test("fresh balances are left untouched", () => {

@@ -40,6 +40,7 @@ import {
   type AiModelOption,
 } from "@/lib/models";
 import { canAffordProject } from "@/lib/credits";
+import { safeReturnTo } from "@/lib/auth-routes";
 import { authFetch, supabaseBrowser } from "@/lib/supabase/client";
 import { authRedirectUrl } from "@/lib/supabase/redirect-url";
 import { useAuthSession } from "@/lib/supabase/use-auth-session";
@@ -82,7 +83,10 @@ export default function SettingsModal() {
   const [signingOut, setSigningOut] = useState(false);
   const [signOutError, setSignOutError] = useState<string | null>(null);
 
-  const close = () => router.push("/projects");
+  const close = () => {
+    const returnTo = searchParams.get("returnTo");
+    router.push(returnTo ? safeReturnTo(returnTo) : "/projects");
+  };
   const signOut = async () => {
     setSigningOut(true);
     setSignOutError(null);
@@ -347,8 +351,16 @@ function ProfilePanel({ onOpenSync }: { onOpenSync: () => void }) {
 }
 
 function CreditsPanel() {
-  const credits = useCreditBalance();
+  const { state: credits, failed } = useCreditBalance();
   if (!credits) {
+    if (failed) {
+      return (
+        <PanelFallback
+          title="Credits unavailable"
+          body="We could not load your credit balance. Check your connection, then reopen settings."
+        />
+      );
+    }
     return (
       <VStack gap={3}>
         <Heading level={2}>Credits</Heading>
@@ -495,7 +507,7 @@ function ModelPanel() {
       <VStack gap={1}>
         <Heading level={2}>Default AI model</Heading>
         <Text color="secondary">
-          Choose the chat model preselected in the home composer. This preference is saved only in this browser.
+          Choose the chat model preselected in the New project composer. This preference is saved only in this browser.
         </Text>
       </VStack>
       <RadioList label="Model" value={selectedModel} onChange={selectModel}>

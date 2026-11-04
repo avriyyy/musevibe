@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { CREDITS_CHANGED_EVENT } from "@/lib/credits";
 import { authFetch } from "@/lib/supabase/client";
 
 export interface CreditBalanceState {
@@ -11,16 +12,29 @@ export interface CreditBalanceState {
   resetsAt: string;
 }
 
-/** Daily-credit balance for the signed-in account. Null while loading. */
-export function useCreditBalance(): CreditBalanceState | null {
+export interface CreditBalanceLoad {
+  /** Latest known balance. Null until the first successful load. */
+  state: CreditBalanceState | null;
+  /** True when the last load failed and no balance is known yet. */
+  failed: boolean;
+}
+
+/**
+ * Daily-credit balance for the signed-in account. Refetches after project
+ * creation and when the tab regains focus, so the pill never shows a
+ * balance that was already spent.
+ */
+export function useCreditBalance(): CreditBalanceLoad {
   const [state, setState] = useState<CreditBalanceState | null>(null);
+  const [failed, setFailed] = useState(false);
+  const loadedRef = useRef(false);
 
   useEffect(() => {
     let alive = true;
-    void (async () => {
+    const load = async () => {
       try {
         const response = await authFetch("/api/credits");
-        if (!response.ok) return;
+        if (!response.ok) throw new Error("credit load failed");
         const data = (await response.json()) as Partial<CreditBalanceState>;
         if (
           !alive ||
@@ -37,21 +51,32 @@ export function useCreditBalance(): CreditBalanceState | null {
           resetDate: typeof data.resetDate === "string" ? data.resetDate : "",
           resetsAt: typeof data.resetsAt === "string" ? data.resetsAt : "",
         });
+        loadedRef.current = true;
+        setFailed(false);
       } catch {
-        // Balance stays hidden when credit storage is unreachable.
+        // Keep a previously loaded balance; only report failure when there
+        // is nothing to show yet.
+        if (!alive || loadedRef.current) return;
+        setFailed(true);
       }
-    })();
+    };
+    void load();
+    const reload = () => void load();
+    window.addEventListener(CREDITS_CHANGED_EVENT, reload);
+    window.addEventListener("focus", reload);
     return () => {
       alive = false;
+      window.removeEventListener(CREDITS_CHANGED_EVENT, reload);
+      window.removeEventListener("focus", reload);
     };
   }, []);
 
-  return state;
+  return { state, failed };
 }
 
 /** Compact balance pill for app headers. Renders nothing while loading. */
 export default function CreditBalance() {
-  const credits = useCreditBalance();
+  const { state: credits } = useCreditBalance();
   if (!credits) return null;
   return (
     <span

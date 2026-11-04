@@ -183,13 +183,13 @@ export default function Sidebar({
             disabled={newProjectDisabled}
             aria-label={
               newProjectDisabled
-                ? "New project (already on the home screen)"
+                ? "New project (already creating one)"
                 : "New project"
             }
             title={
               newProjectDisabled
-                ? "You are already on the home screen"
-                : "Start a new project from the home screen"
+                ? "You are already creating a project"
+                : "Start a new project"
             }
             className="flex h-10 w-full shrink-0 items-center justify-center gap-1.5 rounded-full bg-meta text-[14px] font-semibold text-white hover:bg-meta-hover active:bg-meta-pressed disabled:cursor-not-allowed disabled:opacity-40"
           >
@@ -220,9 +220,9 @@ export default function Sidebar({
           </div>
           {visible.length === 0 ? (
             <p className="mt-1 text-[14px] text-[#5b6472]">
-              {projects.length === 0
-                ? "No projects yet. Describe an idea in the chat to start one."
-                : `No projects match "${query.trim()}".`}
+              {query.trim()
+                ? `No projects match "${query.trim()}".`
+                : "No projects here yet. Use New project above to start one."}
             </p>
           ) : (
             <>

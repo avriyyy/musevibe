@@ -5,6 +5,7 @@
  * to sign-in before anything is created.
  */
 import { useVibe } from "./store";
+import { notifyCreditsChanged } from "./credits";
 import { isWorkspaceSnapshot } from "./workspace-snapshot";
 import { buildNamePrompt, deriveProjectName, parseProjectName } from "./wizard";
 import { authFetch, isSupabaseAuthConfigured, supabaseBrowser } from "./supabase/client";
@@ -81,6 +82,8 @@ export async function createDraftProject(
   }
 
   void improveProjectName(project.id, trimmed, model, project.name);
+  // Server-side spend succeeded; mounted balances refetch instead of going stale.
+  notifyCreditsChanged();
   return project.id;
 }
 

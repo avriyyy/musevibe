@@ -267,7 +267,7 @@ export default function IdeaComposer({
     } catch {
       // Private mode can block storage; the visitor retypes after sign-in.
     }
-    router.push(`/sign-in?${new URLSearchParams({ next: "/" })}`);
+    router.push(`/sign-in?${new URLSearchParams({ next: "/new" })}`);
   };
 
   // Restore an idea stashed before the sign-in wall, after hydration.

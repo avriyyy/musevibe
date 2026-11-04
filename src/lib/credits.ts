@@ -31,3 +31,13 @@ export function canAffordProject(balance: number): boolean {
 export function insufficientCreditsMessage(): string {
   return "Not enough credits to create a project. New credits arrive tomorrow.";
 }
+
+/** Window event fired after the balance changes (a project was created). */
+export const CREDITS_CHANGED_EVENT = "musevibe:credits-changed";
+
+/** Tell mounted balance pills and panels to refetch. Safe on the server. */
+export function notifyCreditsChanged(): void {
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new Event(CREDITS_CHANGED_EVENT));
+  }
+}

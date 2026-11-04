@@ -2,7 +2,7 @@
 
 /**
  * Full project list. The sidebar on this page keeps its fit-to-height
- * preview, and its New project button leads back to the home composer,
+ * preview, and its New project button leads to the /new composer,
  * which is the only place new projects start.
  */
 
@@ -60,7 +60,7 @@ export default function ProjectsPage() {
           setNavPinned(false);
         }}
         newProjectDisabled={false}
-        onNewProject={() => router.push("/")}
+        onNewProject={() => router.push("/new")}
       />
 
       <div className="flex min-w-0 flex-1 flex-col">
@@ -118,11 +118,11 @@ export default function ProjectsPage() {
                   No projects yet
                 </p>
                 <p className="mx-auto mt-2 max-w-sm text-[13px] text-[#9aa0ae]">
-                  Describe an idea in the home chat to start your first one.
+                  Describe an idea to start your first one.
                 </p>
                 <button
                   type="button"
-                  onClick={() => router.push("/")}
+                  onClick={() => router.push("/new")}
                   className="mt-6 h-10 rounded-full bg-meta px-5 text-[14px] font-semibold text-white hover:bg-meta-hover active:bg-meta-pressed"
                 >
                   + New project

@@ -1839,14 +1839,14 @@ function IdeWorkspaceContent({ projectId }: { projectId: string }) {
         <div>
           <h1 className="text-[24px] font-semibold">Project not found</h1>
           <p className="mx-auto mt-2 max-w-sm text-[13px] text-[#9aa0ae]">
-            This link points at a project that is not on this device. Start from
-            the chat to create one.
+            This link points at a project that is not on this device. Start a
+            new one from the project list.
           </p>
           <Link
-            href="/"
+            href="/projects"
             className="mt-6 inline-flex h-9 items-center rounded-full bg-white px-4 text-[13px] font-medium text-[#0b0c10] hover:bg-white/90"
           >
-            Back to chat
+            Back to projects
           </Link>
         </div>
       </div>
@@ -1877,8 +1877,8 @@ function IdeWorkspaceContent({ projectId }: { projectId: string }) {
     <div className="relative flex h-dvh flex-col bg-[#0b0c10] text-[#f5f6f8]">
       <header className="relative flex h-14 shrink-0 items-center gap-3 border-b border-white/10 px-4">
         <Link
-          href="/"
-          aria-label="Back to chat"
+          href="/projects"
+          aria-label="Back to projects"
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[#c9cdd6] hover:bg-white/10 hover:text-white"
         >
           <svg

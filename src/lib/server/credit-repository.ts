@@ -43,15 +43,17 @@ export function createNeonCreditRepository(connectionString: string): CreditRepo
 
   const getBalanceWithReset = async (userId: string) => {
     await ensureSchema();
+    // The UI promises a UTC daily reset; CURRENT_DATE would follow the
+    // database session timezone instead.
     const rows = await sql`
       INSERT INTO public.musevibe_credits (user_id, balance, reset_date, updated_at)
-      VALUES (${userId}::uuid, ${DAILY_CREDITS}, CURRENT_DATE, now())
+      VALUES (${userId}::uuid, ${DAILY_CREDITS}, (now() AT TIME ZONE 'UTC')::date, now())
       ON CONFLICT (user_id) DO UPDATE SET
         balance = CASE
-          WHEN public.musevibe_credits.reset_date < CURRENT_DATE THEN ${DAILY_CREDITS}
+          WHEN public.musevibe_credits.reset_date < (now() AT TIME ZONE 'UTC')::date THEN ${DAILY_CREDITS}
           ELSE public.musevibe_credits.balance
         END,
-        reset_date = CURRENT_DATE,
+        reset_date = (now() AT TIME ZONE 'UTC')::date,
         updated_at = now()
       RETURNING balance, reset_date
     `;

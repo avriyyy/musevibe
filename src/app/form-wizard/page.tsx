@@ -211,14 +211,14 @@ function Wizard() {
                     {creationError ? "Could not create the project" : "Project not found"}
                   </Heading>
                   <Text type="supporting" color="secondary">
-                    {creationError || "This setup link has no project behind it. Start from the home screen by typing your idea into the chat."}
+                    {creationError || "This setup link has no project behind it. Start a new project by typing your idea."}
                   </Text>
               <HStack gap={3}>
                 <Button
-                  label="Back home"
+                  label="New project"
                   variant="primary"
                   className="min-h-11 md:min-h-0"
-                  onClick={() => router.push("/")}
+                  onClick={() => router.push("/new")}
                 />
               </HStack>
             </VStack>
@@ -1253,7 +1253,7 @@ function WizardBody({ projectId }: { projectId: string }) {
                 className="min-h-11 min-w-[72px] shrink-0 whitespace-nowrap md:min-h-0"
                 onClick={() => {
                   saveProgress(step);
-                  router.push("/");
+                  router.push("/projects");
                 }}
               />
             </HStack>
@@ -1544,8 +1544,8 @@ function WizardBody({ projectId }: { projectId: string }) {
               <Divider />
 
               <Text type="supporting" color="secondary">
-                Create the project to return to your home screen with it at the
-                top of the list.
+                Create the project to see it at the
+                top of your project list.
               </Text>
             </VStack>
           )}

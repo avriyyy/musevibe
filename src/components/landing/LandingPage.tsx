@@ -129,7 +129,7 @@ export default function LandingPage() {
             )}
             <HStack gap={4} vAlign="center">
               {auth.user ? (
-                <AccountShortcut />
+                <AccountShortcut returnTo="/" />
               ) : (
                 <Link href="/sign-in" isStandalone>
                   Sign in
