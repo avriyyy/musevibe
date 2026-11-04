@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState, type CSSProperties } from "react";
+import { useRef, type CSSProperties } from "react";
 import { Layout, LayoutContent } from "@astryxdesign/core/Layout";
 import { VStack } from "@astryxdesign/core/VStack";
 import { HStack } from "@astryxdesign/core/HStack";
@@ -10,24 +10,13 @@ import { Link } from "@astryxdesign/core/Link";
 import { Icon } from "@astryxdesign/core/Icon";
 import { Stepper, Step } from "@astryxdesign/core/Stepper";
 import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
-import { TextInput } from "@astryxdesign/core/TextInput";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
-import {
-  ArrowRightIcon,
-  SparklesIcon,
-} from "@heroicons/react/24/outline";
+import { ArrowRightIcon } from "@heroicons/react/24/outline";
 import AccountShortcut from "@/components/AccountShortcut";
-import IdeaComposer from "@/components/IdeaComposer";
 import { useAuthSession } from "@/lib/supabase/use-auth-session";
 import { BoardPanel, DocsPanel, PagesPanel, WizardFigure } from "./showcase";
 import { useLandingReveal } from "./reveal";
 import "./reveal.css";
-
-const SHOWCASE_CHIPS = [
-  "A habit tracker that never guilt-trips",
-  "An invoice tracker for solo founders",
-  "A portfolio site for a freelance designer",
-];
 
 const STEPS = [
   "Describe it in one sentence",
@@ -73,7 +62,7 @@ function Band({
     <section
       id={id}
       aria-labelledby={labelledBy}
-      style={{ paddingBlock: 96, scrollMarginTop: 72 }}
+      style={{ paddingBlock: 120, scrollMarginTop: 72 }}
     >
       <Layout
         height="auto"
@@ -95,16 +84,11 @@ export default function LandingPage() {
   const rootRef = useRef<HTMLDivElement>(null);
   const auth = useAuthSession();
   const showNavLinks = useMediaQuery("(min-width: 720px)");
-  const [ctaIdea, setCtaIdea] = useState("");
-  const [seed, setSeed] = useState({ text: "", nonce: 0 });
   useLandingReveal(rootRef);
 
-  const sendToComposer = () => {
-    const text = ctaIdea.trim();
-    if (!text) return;
-    setSeed({ text, nonce: Date.now() });
-    document.getElementById("start")?.scrollIntoView({ behavior: "smooth" });
-  };
+  const primaryCta = auth.user
+    ? { label: "Open projects", href: "/projects" }
+    : { label: "Start building", href: "/sign-in" };
 
   return (
     <div id="top" ref={rootRef} className="bg-body text-primary">
@@ -127,12 +111,9 @@ export default function LandingPage() {
           }}
         >
           <HStack gap={2} vAlign="center" hAlign="between" style={{ flex: 1 }}>
-            <HStack gap={2} vAlign="center">
-              <Icon icon={SparklesIcon} size="sm" color="accent" />
-              <Link href="#top" color="primary" isStandalone weight="semibold">
-                MuseVibe
-              </Link>
-            </HStack>
+            <Link href="#top" color="primary" isStandalone weight="semibold">
+              MuseVibe
+            </Link>
             {showNavLinks && (
               <HStack gap={5} vAlign="center">
                 <Link href="#workspace" isStandalone>
@@ -155,10 +136,10 @@ export default function LandingPage() {
                 </Link>
               )}
               <Button
-                label="Start building"
+                label={primaryCta.label}
                 variant="primary"
                 size="sm"
-                href="#start"
+                href={primaryCta.href}
               />
             </HStack>
           </HStack>
@@ -204,16 +185,25 @@ export default function LandingPage() {
                           context.
                         </Text>
                       </VStack>
-                      <div
-                        id="start"
-                        data-ui
-                        style={{ scrollMarginTop: 80 }}
-                      >
-                        <IdeaComposer chips={SHOWCASE_CHIPS} seed={seed} />
-                      </div>
+                      <HStack gap={3} hAlign="center" wrap="wrap">
+                        <Button
+                          label={primaryCta.label}
+                          variant="primary"
+                          href={primaryCta.href}
+                          endContent={
+                            <Icon icon={ArrowRightIcon} size="sm" color="inherit" />
+                          }
+                        />
+                        <Button
+                          label="See how it works"
+                          variant="secondary"
+                          href="#process"
+                        />
+                      </HStack>
                       <Text type="body" color="secondary" justify="center" as="p">
-                        Sign in to start building. New accounts get 10 free
-                        credits, reset every day.
+                        {auth.user
+                          ? "10 free credits a day, reset every day."
+                          : "Sign in to start building. New accounts get 10 free credits, reset every day."}
                       </Text>
                     </VStack>
                   </div>
@@ -244,9 +234,20 @@ export default function LandingPage() {
 
         <Band id="workspace" labelledBy="workspace-title">
           <VStack gap={10}>
-            <div data-reveal style={splitStyle}>
+            <div data-reveal>
               <VStack gap={3}>
                 <Heading level={2} id="workspace-title">
+                  Everything reads the same context
+                </Heading>
+                <Text type="large" as="p">
+                  Documents, board, and pages: three views over one project,
+                  all generated from the same answers.
+                </Text>
+              </VStack>
+            </div>
+            <div data-reveal style={splitStyle}>
+              <VStack gap={3}>
+                <Heading level={3}>
                   A task board that matches the plan
                 </Heading>
                 <Text type="large" as="p">
@@ -264,7 +265,7 @@ export default function LandingPage() {
                 <PagesPanel />
               </div>
               <VStack gap={3}>
-                <Heading level={2} id="workspace-design-title">
+                <Heading level={3}>
                   Prototypes you can click
                 </Heading>
                 <Text type="large" as="p">
@@ -352,39 +353,32 @@ export default function LandingPage() {
                     Your idea becomes a workspace.
                   </Heading>
                   <Text type="large" justify="center" as="p">
-                    Type a few words, and they land in the composer ready to
-                    build.
+                    One sentence in, a PRD, board, and starter code out.
                   </Text>
                 </VStack>
               </div>
-              <div data-reveal style={{ width: "100%", maxWidth: 560 }}>
-                <VStack gap={3}>
-                  <TextInput
-                    label="Your idea"
-                    placeholder="a habit tracker"
-                    value={ctaIdea}
-                    onChange={setCtaIdea}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter") sendToComposer();
-                    }}
+              <div data-reveal>
+                <HStack gap={3} hAlign="center" wrap="wrap">
+                  <Button
+                    label={primaryCta.label}
+                    variant="primary"
+                    href={primaryCta.href}
+                    endContent={
+                      <Icon icon={ArrowRightIcon} size="sm" color="inherit" />
+                    }
                   />
-                  <HStack gap={3} hAlign="center">
-                    <Button
-                      label="Start building"
-                      variant="primary"
-                      onClick={sendToComposer}
-                      endContent={
-                        <Icon icon={ArrowRightIcon} size="sm" color="inherit" />
-                      }
-                    />
-                  </HStack>
-                </VStack>
+                  <Button
+                    label="See how it works"
+                    variant="secondary"
+                    href="#process"
+                  />
+                </HStack>
               </div>
               <div data-reveal>
                 <Text type="body" color="secondary" justify="center" as="p">
-                  {ctaIdea.trim()
-                    ? "Sending your words to the composer."
-                    : "Sign in, and the composer is ready at the top of this page."}
+                  {auth.user
+                    ? "Your workspace is one click away."
+                    : "Free to start. No credit card, no API key."}
                 </Text>
               </div>
             </VStack>
