@@ -77,6 +77,45 @@ export interface CreditCharger {
   refund(userId: string, amount: number): Promise<void>;
 }
 
+/**
+ * Classify a storage failure into a short, safe code for the client.
+ * The raw error is logged server-side (Vercel logs) but never sent to
+ * the client, so no host, query, or credential detail can leak. The code
+ * lets support tell a connection failure apart from a schema/permission
+ * failure without access to the server logs.
+ */
+function storageUnavailable(error: unknown): Response {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  const lower = message.toLowerCase();
+  let code = "storage_query";
+  if (
+    lower.includes("fetch failed") ||
+    lower.includes("econnrefused") ||
+    lower.includes("enotfound") ||
+    lower.includes("etimedout") ||
+    lower.includes("network") ||
+    lower.includes("password authentication failed") ||
+    lower.includes("no pg_hba") ||
+    lower.includes("timeout")
+  ) {
+    code = "storage_connect";
+  } else if (
+    lower.includes("permission denied") ||
+    lower.includes("must be owner") ||
+    lower.includes("does not exist") ||
+    lower.includes("already exists")
+  ) {
+    code = "storage_schema";
+  } else if (lower.includes("uuid") || lower.includes("invalid input syntax")) {
+    code = "storage_account";
+  }
+  console.error(`[workspace-storage] ${code}:`, error);
+  return workspaceJson(
+    { error: `Workspace storage is unavailable [${code}].`, code },
+    503,
+  );
+}
+
 export function createWorkspaceApi(options: {
   authenticate: WorkspaceAuthenticator;
   repository: () => WorkspaceRepository | null;
@@ -115,8 +154,8 @@ export function createWorkspaceApi(options: {
           return workspaceJson({ error: "Stored workspace data needs repair." }, 500);
         }
         return workspaceJson({ workspaces: records });
-      } catch {
-        return workspaceJson({ error: "Workspace storage is unavailable." }, 503);
+      } catch (error) {
+        return storageUnavailable(error);
       }
     },
 
@@ -161,8 +200,8 @@ export function createWorkspaceApi(options: {
           return workspaceJson({ error: "Workspace not found." }, 404);
         }
         return workspaceJson({ saved: true, revision: result.revision });
-      } catch {
-        return workspaceJson({ error: "Workspace storage is unavailable." }, 503);
+      } catch (error) {
+        return storageUnavailable(error);
       }
     },
 
@@ -248,9 +287,9 @@ export function createWorkspaceApi(options: {
           return workspaceJson({ error: "This account has reached its workspace limit." }, 409);
         }
         return workspaceJson({ snapshot, revision }, 201);
-      } catch {
+      } catch (error) {
         await refundQuietly();
-        return workspaceJson({ error: "Workspace storage is unavailable." }, 503);
+        return storageUnavailable(error);
       }
     },
   };
