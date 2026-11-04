@@ -1,6 +1,12 @@
 # MuseVibe
 
-MuseVibe turns an app idea into an indie-builder workspace. Start with a short description, answer a setup wizard, then shape the project through editable planning documents, a task board, and a design canvas with generated HTML page previews.
+**Type an idea, get a workspace.** MuseVibe turns an app idea into an indie-builder workspace. Start with a short description, answer a setup wizard, then shape the project through editable planning documents, a task board, and a design canvas with generated HTML page previews.
+
+## Demo
+
+Live: [https://musevibe.vercel.app](https://musevibe.vercel.app)
+
+No signup needed: open the app, type an idea in the composer, and walk the whole flow as a guest. Guest work stays in the browser; a free account syncs it to your own database and unlocks AI-generated documents.
 
 ## Run locally
 
@@ -15,6 +21,8 @@ npm run dev
 Open [http://localhost:3000](http://localhost:3000). AI settings are optional; leave them blank for the local demo fallbacks.
 
 ## Try the main flow
+
+Works signed out (guest) or signed in. Guests get local drafts, the full wizard, local task lists, and local design previews; AI documents, voice dictation, and cloud sync need a free account.
 
 1. Describe an idea in the home composer. You can also attach a `.txt` or Markdown file and choose a Muse model.
 2. Continue through **Stack**, **Questions**, **Design**, and **Review**. The wizard saves a draft that can be resumed.

@@ -13,3 +13,8 @@ test("account workspaces stay hidden until the matching session is ready", () =>
   assert.equal(canViewWorkspace("user-a", true, "user-b"), false);
   assert.equal(canViewWorkspace("user-a", true, "user-a"), true);
 });
+
+test("guest visitors can view only unowned local workspaces", () => {
+  assert.equal(canViewWorkspace(undefined, true, null), true);
+  assert.equal(canViewWorkspace("user-a", true, null), false);
+});

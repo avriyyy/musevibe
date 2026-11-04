@@ -1,29 +1,60 @@
 /**
  * Shared draft creation: the chat hands an idea over, the model names it, and
- * a draft project exists before the wizard opens. Every project is created
- * server-side for the authenticated account; old browser data is untouched.
+ * a draft project exists before the wizard opens. Account projects are created
+ * server-side; signed-out visitors get a local-only guest draft that stays in
+ * this browser. Old browser data is untouched either way.
  */
 import { useVibe } from "./store";
 import { isWorkspaceSnapshot } from "./workspace-snapshot";
 import { buildNamePrompt, deriveProjectName, parseProjectName } from "./wizard";
 import { authFetch, isSupabaseAuthConfigured, supabaseBrowser } from "./supabase/client";
 
+/** Signed-out session lookup: null means the guest path, never an error. */
+async function currentSessionOrNull() {
+  if (!isSupabaseAuthConfigured()) return null;
+  try {
+    const { data, error } = await supabaseBrowser().auth.getSession();
+    if (error) return null;
+    return data.session;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Guest draft: a local-only project with no owner. It opens the same wizard
+ * and workspace, and every AI step degrades to the existing local fallbacks
+ * until the visitor signs in.
+ */
+function createLocalDraft(trimmed: string, model: string | undefined): string {
+  const localId =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `draft-${Date.now()}`;
+  useVibe.getState().addProject({
+    id: localId,
+    name: deriveProjectName(trimmed) || "Untitled project",
+    idea: trimmed,
+    status: "draft",
+    createdAt: new Date().toISOString(),
+    ...(model ? { model } : {}),
+  });
+  return localId;
+}
+
 export async function createDraftProject(
   ideaText: string,
   model?: string,
 ): Promise<string> {
   const trimmed = ideaText.trim();
-  const name = deriveProjectName(trimmed) || "Untitled project";
+  if (!trimmed) {
+    throw new Error("Describe your idea in a sentence or two first.");
+  }
 
-  if (!isSupabaseAuthConfigured()) {
-    throw new Error("Account sign-in is unavailable. Please configure authentication and try again.");
-  }
-  const client = supabaseBrowser();
-  const { data, error } = await client.auth.getSession();
-  if (error || !data.session) {
-    throw new Error("Sign in is required before creating a workspace.");
-  }
-  const session = data.session;
+  const session = await currentSessionOrNull();
+  if (!session) return createLocalDraft(trimmed, model);
+
+  const name = deriveProjectName(trimmed) || "Untitled project";
   const response = await fetch("/api/workspaces/create", {
         method: "POST",
         cache: "no-store",
@@ -55,6 +86,7 @@ export async function createDraftProject(
   useVibe.getState().setCloudOwner(project.id, session.user.id);
   useVibe.getState().setCloudRevision(project.id, payload.revision);
 
+  const client = supabaseBrowser();
   const { data: latest, error: latestError } = await client.auth.getSession();
   if (latestError || latest.session?.user.id !== session.user.id) {
     throw new Error("Your account changed while creating the project. Please try again.");

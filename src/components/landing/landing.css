@@ -1,0 +1,145 @@
+/* MuseVibe landing tokens. Follows the dealt direction proportions (one
+   ground, one ink, one accent, one field) in the product's own colours:
+   the dark entry surface, the light workspace wash, and meta blue. */
+.mv-landing {
+  --mv-bg: #0b0c10;
+  --mv-ink: #f5f6f8;
+  --mv-soft: #9aa0ae;
+  --mv-card: #17181d;
+  --mv-accent: #0064e0;
+  --mv-accent-hover: #0143b5;
+  --mv-field: #f0f2f5;
+  --mv-field-ink: #1c2b33;
+  --mv-field-soft: #5d6c7b;
+  --mv-margin: clamp(20px, 4vw, 56px);
+  background: var(--mv-bg);
+  color: var(--mv-ink);
+}
+
+/* Hero sentence: poster scale, tight tracking, baseline slot. */
+.mv-hero-h1 {
+  font-size: clamp(48px, 10.5vw, 168px);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+  line-height: 0.95;
+  text-wrap: balance;
+}
+
+.mv-slot {
+  display: inline-block;
+  height: 0.62em;
+  width: 1.7em;
+  margin: 0 0.08em;
+  overflow: hidden;
+  vertical-align: baseline;
+  transform: translateY(0.08em);
+  background: var(--mv-card);
+}
+
+.mv-slot-inner {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Signature move: the slot opens from the left edge on load. */
+.mv-shutter {
+  clip-path: inset(0 100% 0 0);
+}
+.is-ready .mv-shutter {
+  animation: mv-shutter-in 1.1s cubic-bezier(0.22, 0.8, 0.24, 1) 0.15s forwards;
+}
+.is-ready .mv-shutter > .mv-slot-inner {
+  transform: scale(1.12);
+  animation: mv-shutter-settle 1.1s cubic-bezier(0.22, 0.8, 0.24, 1) 0.15s forwards;
+}
+@keyframes mv-shutter-in {
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes mv-shutter-settle {
+  to {
+    transform: scale(1);
+  }
+}
+
+/* Slow drift inside the slot: the page's moving picture. */
+.mv-drift {
+  animation: mv-drift 9s ease-in-out infinite alternate;
+}
+@keyframes mv-drift {
+  from {
+    transform: translateX(-6%);
+  }
+  to {
+    transform: translateX(6%);
+  }
+}
+
+/* Ribbon: doc-type marquee in the accent field. */
+.mv-ribbon {
+  background: var(--mv-accent);
+  color: #fff;
+  overflow: hidden;
+}
+.mv-ribbon-track {
+  display: flex;
+  width: max-content;
+  animation: mv-marquee 26s linear infinite;
+}
+@keyframes mv-marquee {
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+/* Entrances: hidden only when script runs, staggered per section part. */
+.mv-js .mv-reveal {
+  opacity: 0;
+  transform: translateY(24px);
+}
+.mv-js .mv-reveal.is-in {
+  opacity: 1;
+  transform: none;
+  transition:
+    opacity 0.6s ease-out,
+    transform 0.6s ease-out;
+  transition-delay: calc(var(--mv-d, 0) * 75ms);
+}
+
+/* Phone: the slot leaves the line and becomes a full-width band between
+   the two halves, so the screen reads word, picture, word. */
+@media (max-width: 767px) {
+  .mv-slot {
+    display: block;
+    width: 100%;
+    height: 64px;
+    margin: 14px 0;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mv-ribbon-track,
+  .mv-drift {
+    animation: none;
+  }
+  .mv-shutter {
+    clip-path: none;
+    animation: none;
+  }
+  .is-ready .mv-shutter,
+  .is-ready .mv-shutter > .mv-slot-inner {
+    animation: none;
+    transform: none;
+  }
+  .mv-js .mv-reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+  .mv-landing {
+    scroll-behavior: auto;
+  }
+}

@@ -16,22 +16,46 @@ export default function ProjectAccessGate({
 }) {
   const ownerId = useVibe((state) => state.cloudOwnerByProject[projectId]);
   const auth = useAuthSession();
+  const userId = auth.user?.id ?? null;
+  const allowed = canViewWorkspace(ownerId, auth.ready, userId);
 
-  if (canViewWorkspace(ownerId, auth.ready, auth.user?.id ?? null)) return children;
+  if (allowed) {
+    if (ownerId === undefined && auth.ready && !userId) {
+      return (
+        <>
+          <p
+            role="note"
+            className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b border-white/10 bg-[#13151a] px-4 py-2 text-center text-[12px] text-[#9aa0ae]"
+          >
+            <span>Guest workspace. Work stays in this browser.</span>
+            <Link href="/sign-in" className="font-medium text-white underline decoration-white/30 underline-offset-2 hover:decoration-white">
+              Sign in to sync
+            </Link>
+          </p>
+          {children}
+        </>
+      );
+    }
+    return children;
+  }
   if (!auth.ready) return <WorkspaceSkeleton label="Checking workspace access" />;
 
   return (
     <main className="grid min-h-dvh place-items-center bg-[#0b0c10] px-5 text-center text-[#f5f6f8]">
       <section className="max-w-md">
-        <h1 className="text-[22px] font-semibold">This workspace is not available</h1>
+        <h1 className="text-[22px] font-semibold">
+          {userId ? "This workspace is not available" : "This workspace needs an account"}
+        </h1>
         <p className="mt-3 text-[14px] leading-6 text-[#9aa0ae]">
-          This workspace is not linked to the signed-in account. Its saved browser data has been left untouched.
+          {userId
+            ? "This workspace is not linked to the signed-in account. Its saved browser data has been left untouched."
+            : "This workspace belongs to an account. Sign in with that account to open it."}
         </p>
         <Link
-          href="/projects"
+          href={userId ? "/projects" : "/sign-in"}
           className="mt-6 inline-flex h-10 items-center justify-center rounded-full bg-white px-5 text-[13px] font-semibold text-[#0b0c10] hover:bg-white/90"
         >
-          Back to your projects
+          {userId ? "Back to your projects" : "Sign in"}
         </Link>
       </section>
     </main>
