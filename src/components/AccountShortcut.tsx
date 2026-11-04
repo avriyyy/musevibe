@@ -18,7 +18,7 @@ export default function AccountShortcut() {
     : user.email ?? "Profile";
   return (
     <Link
-      href="/profile"
+      href="/settings?section=profile"
       aria-label={`Open profile for ${label}`}
       className="flex h-9 items-center gap-2 rounded-full border border-white/15 bg-white/5 px-2.5 text-[12px] font-medium text-[#e5e7eb] hover:border-white/25 hover:bg-white/10"
     >

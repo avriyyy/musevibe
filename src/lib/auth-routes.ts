@@ -6,14 +6,12 @@ const PUBLIC_AUTH_ROUTES = new Set([
   "/reset-password",
   "/account",
   "/login",
-  "/form-wizard",
 ]);
 
 export function isPublicAuthRoute(pathname: string): boolean {
-  if (PUBLIC_AUTH_ROUTES.has(pathname)) return true;
-  // Guest workspaces live under /project/[id]; the project-level ownership
-  // gate still decides which workspaces a visitor may actually view.
-  return pathname.startsWith("/project/");
+  // Signed-out visitors stop at the landing and auth pages. Everything else,
+  // including /form-wizard and /project/[id], requires a session.
+  return PUBLIC_AUTH_ROUTES.has(pathname);
 }
 
 export function isAuthEntryRoute(pathname: string): boolean {

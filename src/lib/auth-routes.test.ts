@@ -14,12 +14,14 @@ test("landing, auth, and recovery pages are public", () => {
   assert.equal(isPublicAuthRoute("/ide"), false);
 });
 
-test("guest demo path is public but project ownership still gates viewing", () => {
-  assert.equal(isPublicAuthRoute("/form-wizard"), true);
-  assert.equal(isPublicAuthRoute("/project/abc"), true);
-  assert.equal(isPublicAuthRoute("/project/a/b"), true);
+test("wizard and workspaces require a session; guests stop at landing and auth", () => {
+  assert.equal(isPublicAuthRoute("/form-wizard"), false);
+  assert.equal(isPublicAuthRoute("/project/abc"), false);
+  assert.equal(isPublicAuthRoute("/project/a/b"), false);
   assert.equal(isPublicAuthRoute("/projects"), false);
   assert.equal(isPublicAuthRoute("/project"), false);
+  assert.equal(isPublicAuthRoute("/login"), true);
+  assert.equal(isPublicAuthRoute("/account"), true);
 });
 
 test("auth entry pages can be left automatically after a session is established", () => {

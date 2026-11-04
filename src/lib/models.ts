@@ -8,11 +8,20 @@ export interface AiModelOption {
   id: string;
   label: string;
   hint: string;
+  locked?: boolean;
 }
 
 export const DEFAULT_MODEL = "muse-spark-1.3-contributor";
 
 const ORDER = [DEFAULT_MODEL];
+
+export const LOCKED_MODEL_MESSAGE =
+  "This workspace is limited to Muse Spark 1.3 Contributor.";
+
+/** Only the Contributor release may generate; everything else stays locked. */
+export function isModelAllowed(id: string): boolean {
+  return id === DEFAULT_MODEL;
+}
 
 export const FALLBACK_MODELS: AiModelOption[] = ORDER.map((id) => ({
   id,
@@ -44,4 +53,18 @@ export function sortModels(ids: string[]): string[] {
   return ids
     .filter((id) => ORDER.includes(id))
     .sort((a, b) => ORDER.indexOf(a) - ORDER.indexOf(b));
+}
+
+/**
+ * Provider models the workspace will not use, shown locked in the picker so
+ * the restriction is visible instead of silent. Image, voice, and
+ * segmentation models stay hidden: they cannot answer text prompts at all.
+ */
+export function lockedModelIds(ids: string[]): string[] {
+  return ids
+    .filter((id) => !ORDER.includes(id))
+    .filter((id) => /^muse-(spark|wonder)/.test(id))
+    .filter((id) => !/(image|voice|transcribe|segment|embed)/.test(id))
+    .filter((id, index, all) => all.indexOf(id) === index)
+    .slice(0, 6);
 }

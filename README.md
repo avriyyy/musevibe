@@ -6,7 +6,7 @@
 
 Live: [https://musevibe.vercel.app](https://musevibe.vercel.app)
 
-No signup needed: open the app, type an idea in the composer, and walk the whole flow as a guest. Guest work stays in the browser; a free account syncs it to your own database and unlocks AI-generated documents.
+Sign in with an email and password to use the app. Every account gets 10 free credits a day, reset daily — one full project per day. Workspaces sync to your own Neon database with owner-scoped reads and writes.
 
 ## Run locally
 
@@ -22,9 +22,9 @@ Open [http://localhost:3000](http://localhost:3000). AI settings are optional; l
 
 ## Try the main flow
 
-Works signed out (guest) or signed in. Guests get local drafts, the full wizard, local task lists, and local design previews; AI documents, voice dictation, and cloud sync need a free account.
+Requires sign-in. Guests can browse the landing page only; creating a project needs an account.
 
-1. Describe an idea in the home composer. You can also attach a `.txt` or Markdown file and choose a Muse model.
+1. Sign in with an email and password, then describe an idea in the home composer. You can also attach a `.txt` or Markdown file. Generation uses Muse Spark 1.3 Contributor.
 2. Continue through **Stack**, **Questions**, **Design**, and **Review**. The wizard saves a draft that can be resumed.
 3. Open the workspace. It prepares a product brief, six planning documents, a task board, and a suggested page plan.
 4. Edit the Markdown documents, move or update tasks, and use the Design canvas to preview the chosen design system and generate planned pages as standalone HTML.
@@ -33,7 +33,7 @@ The workspace has **Documents**, **Design**, and **Tasks** views. The six genera
 
 ## Sign-in, profile, and settings
 
-Email/password registration and sign-in use Supabase Auth. The home, projects, and workspace headers link directly to **Sign in** and **Create account**; dedicated routes are `/sign-in` and `/register`, with `/account` for account status. After signing in, **Profile** lets you edit the display name stored in Supabase user metadata, and **Settings** shows workspace sync status, sends password-reset links, and saves the default AI model in this browser. Display metadata is never used to authorize workspace access. Signing out ends only the current device session.
+Email-and-password registration and sign-in use Supabase Auth, with password reset via a link sent to your email. The home, projects, and workspace headers link directly to **Sign in** and **Create account**; dedicated routes are `/sign-in` and `/register`, with `/account` for account status. After signing in, **Settings** opens as a modal with four sections: **Profile** (display name stored in Supabase user metadata), **Credits** (10 free credits a day, one full project), **Sync** (Neon cloud backup status), and **Model** (default AI model saved in this browser; only `muse-spark-1.3-contributor` is enabled, the rest are locked). Display metadata is never used to authorize workspace access. Signing out ends only the current device session.
 
 If email confirmation is enabled in Supabase, registration sends a confirmation email. Supabase Auth must allow the callback URLs listed under deployment setup below. Password recovery uses `/reset-password` after a secure email link.
 
@@ -51,9 +51,9 @@ Without AI credentials, naming, stack suggestions, setup questions, planning doc
 
 ## Data and persistence
 
-Guest projects, drafts, documents, tasks, design data, and code files stay in this browser's `localStorage` under `musevibe-store`. The selected model is stored separately under `musevibe:model`. Guest workspaces are never automatically uploaded when someone signs in.
+Drafts, documents, tasks, design data, and code files stay in this browser's `localStorage` under `musevibe-store`. The selected model is stored separately under `musevibe:model`.
 
-Projects created while signed in are created through an authenticated server route and stored in Neon. The server verifies the Supabase access token and derives the owner ID itself. Workspace reads and writes are owner-scoped. The browser keeps an owner-tagged recovery copy of account workspaces; those copies are hidden while signed out and from other accounts, and reconcile against Neon when the matching user signs in again. Optimistic revisions preserve local pending edits and flag conflicts rather than silently overwriting remote changes.
+Projects are created through an authenticated server route and stored in Neon. The server verifies the Supabase access token and derives the owner ID itself. Workspace reads and writes are owner-scoped. The browser keeps an owner-tagged recovery copy of account workspaces; those copies are hidden while signed out and from other accounts, and reconcile against Neon when the matching user signs in again. Optimistic revisions preserve local pending edits and flag conflicts rather than silently overwriting remote changes.
 
 The existing Supabase workspace schema and RLS migration are legacy artifacts and are not used by the app's workspace API. They are left untouched; existing Supabase workspace rows are not automatically copied to Neon or deleted.
 
@@ -71,7 +71,7 @@ Vercel can build this as a standard Next.js App Router project; no Cloudflare ad
 
 In Supabase Auth, set the production Site URL to `https://musevibe.vercel.app` and allow the exact email redirect URLs `https://musevibe.vercel.app/account` and `https://musevibe.vercel.app/reset-password`. Also allow `http://localhost:3000/account` and `http://localhost:3000/reset-password` for local development; add preview URLs only if they are used. Never add `SUPABASE_SERVICE_ROLE_KEY` to the browser environment.
 
-A push to the connected production branch should trigger Vercel's standard Next.js deployment. Verify the deployed `/sign-in`, `/register`, `/profile`, and `/settings` routes; test email confirmation/password recovery; then sign in and create, reload, and edit an account-owned workspace to verify Neon persistence. Guest projects should remain local.
+A push to the connected production branch should trigger Vercel's standard Next.js deployment. Verify the deployed `/sign-in`, `/register`, and `/settings` routes (`/profile` redirects to `/settings`); test the password login and the Gmail reset-link flow; then sign in and create, reload, and edit an account-owned workspace to verify Neon persistence. Signed-out visitors should only reach the landing and auth pages.
 
 ## Checks
 

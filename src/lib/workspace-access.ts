@@ -4,9 +4,9 @@ export function canViewWorkspace(
   userId: string | null,
 ): boolean {
   if (!authReady) return false;
-  // Local-only work belongs to whoever holds this browser: guests may view
-  // unowned workspaces, while a signed-in session keeps the legacy boundary
-  // and still requires explicit account ownership.
-  if (ownerId === undefined) return userId === null;
-  return userId !== null && ownerId === userId;
+  // Viewing requires a session and explicit account ownership. Signed-out
+  // visitors cannot view any workspace, owned or local-only.
+  if (userId === null) return false;
+  if (ownerId === undefined) return false;
+  return ownerId === userId;
 }

@@ -1,14 +1,13 @@
-import AccountFrame from "@/components/AccountFrame";
-import SettingsScreen from "@/components/SettingsScreen";
+import { Suspense } from "react";
+import AuthRouteGate from "@/components/AuthRouteGate";
+import SettingsModal from "@/components/SettingsModal";
 
 export default function SettingsPage() {
   return (
-    <AccountFrame
-      active="settings"
-      title="Settings"
-      description="Review account security, workspace sync, and this browser’s default AI model."
-    >
-      <SettingsScreen />
-    </AccountFrame>
+    <AuthRouteGate>
+      <Suspense fallback={null}>
+        <SettingsModal />
+      </Suspense>
+    </AuthRouteGate>
   );
 }

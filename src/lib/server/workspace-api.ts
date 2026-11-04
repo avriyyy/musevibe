@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { PROJECT_CREATION_COST, insufficientCreditsMessage } from "../credits";
 import type { CloudWorkspaceSnapshot } from "../types";
 import {
   isCloudWorkspaceRecord,
@@ -71,9 +72,15 @@ async function readLimitedJson(request: Request, maxBytes: number): Promise<Json
   }
 }
 
+export interface CreditCharger {
+  spendForProject(userId: string): Promise<"ok" | "insufficient">;
+  refund(userId: string, amount: number): Promise<void>;
+}
+
 export function createWorkspaceApi(options: {
   authenticate: WorkspaceAuthenticator;
   repository: () => WorkspaceRepository | null;
+  credits?: () => CreditCharger | null;
   newId?: () => string;
   now?: () => string;
 }) {
@@ -192,9 +199,29 @@ export function createWorkspaceApi(options: {
         return workspaceJson({ error: "Project details are invalid." }, 400);
       }
 
+      const charger = options.credits?.() ?? null;
+      let charged = false;
+      const refundQuietly = async () => {
+        if (!charger || !charged) return;
+        charged = false;
+        await charger.refund(context.user.id, PROJECT_CREATION_COST).catch(() => {
+          // Storage is already failing; the daily reset heals the balance.
+        });
+      };
+
       try {
         if (await context.repository.countOwned(context.user.id) >= MAX_WORKSPACES_PER_ACCOUNT) {
           return workspaceJson({ error: "This account has reached its workspace limit." }, 409);
+        }
+        if (charger) {
+          const spend = await charger.spendForProject(context.user.id);
+          if (spend === "insufficient") {
+            return workspaceJson(
+              { error: insufficientCreditsMessage(), code: "insufficient_credits" },
+              402,
+            );
+          }
+          charged = true;
         }
 
         const project = {
@@ -217,10 +244,12 @@ export function createWorkspaceApi(options: {
         };
         const revision = await context.repository.createOwned(context.user.id, snapshot);
         if (!revision) {
+          await refundQuietly();
           return workspaceJson({ error: "This account has reached its workspace limit." }, 409);
         }
         return workspaceJson({ snapshot, revision }, 201);
       } catch {
+        await refundQuietly();
         return workspaceJson({ error: "Workspace storage is unavailable." }, 503);
       }
     },

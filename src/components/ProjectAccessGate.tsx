@@ -20,22 +20,6 @@ export default function ProjectAccessGate({
   const allowed = canViewWorkspace(ownerId, auth.ready, userId);
 
   if (allowed) {
-    if (ownerId === undefined && auth.ready && !userId) {
-      return (
-        <>
-          <p
-            role="note"
-            className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 border-b border-white/10 bg-[#13151a] px-4 py-2 text-center text-[12px] text-[#9aa0ae]"
-          >
-            <span>Guest workspace. Work stays in this browser.</span>
-            <Link href="/sign-in" className="font-medium text-white underline decoration-white/30 underline-offset-2 hover:decoration-white">
-              Sign in to sync
-            </Link>
-          </p>
-          {children}
-        </>
-      );
-    }
     return children;
   }
   if (!auth.ready) return <WorkspaceSkeleton label="Checking workspace access" />;

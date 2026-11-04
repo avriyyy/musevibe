@@ -10,6 +10,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Sidebar, { useOpenProject } from "@/components/Sidebar";
 import AccountShortcut from "@/components/AccountShortcut";
+import CreditBalance from "@/components/CreditBalance";
 import { useVibe } from "@/lib/store";
 import { useAuthSession } from "@/lib/supabase/use-auth-session";
 import { canViewWorkspace } from "@/lib/workspace-access";
@@ -103,7 +104,8 @@ export default function ProjectsPage() {
           <span className="text-[13px] text-[#5b6472]">
             {sorted.length} {sorted.length === 1 ? "project" : "projects"}
           </span>
-          <div className="ml-auto">
+          <div className="ml-auto flex items-center gap-2">
+            <CreditBalance />
             <AccountShortcut />
           </div>
         </header>

@@ -5,6 +5,7 @@ import {
   DEFAULT_MODEL,
   FALLBACK_MODELS,
   formatModelLabel,
+  lockedModelIds,
   modelHint,
   sortModels,
 } from "@/lib/models";
@@ -42,7 +43,13 @@ export async function GET(req: Request) {
             label: formatModelLabel(id),
             hint: modelHint(id),
           }));
-          return NextResponse.json({ models, default: DEFAULT_MODEL, source: "ai" });
+          const locked = lockedModelIds(ids).map((id) => ({
+            id,
+            label: formatModelLabel(id),
+            hint: "Locked in this workspace",
+            locked: true,
+          }));
+          return NextResponse.json({ models: [...models, ...locked], default: DEFAULT_MODEL, source: "ai" });
         }
       }
     } catch {

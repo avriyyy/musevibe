@@ -1,15 +1,15 @@
 /**
  * Shared draft creation: the chat hands an idea over, the model names it, and
- * a draft project exists before the wizard opens. Account projects are created
- * server-side; signed-out visitors get a local-only guest draft that stays in
- * this browser. Old browser data is untouched either way.
+ * a draft project exists before the wizard opens. Projects are created
+ * server-side and require a signed-in account; signed-out visitors are sent
+ * to sign-in before anything is created.
  */
 import { useVibe } from "./store";
 import { isWorkspaceSnapshot } from "./workspace-snapshot";
 import { buildNamePrompt, deriveProjectName, parseProjectName } from "./wizard";
 import { authFetch, isSupabaseAuthConfigured, supabaseBrowser } from "./supabase/client";
 
-/** Signed-out session lookup: null means the guest path, never an error. */
+/** Session lookup for draft creation. Null means sign-in is required. */
 async function currentSessionOrNull() {
   if (!isSupabaseAuthConfigured()) return null;
   try {
@@ -21,25 +21,8 @@ async function currentSessionOrNull() {
   }
 }
 
-/**
- * Guest draft: a local-only project with no owner. It opens the same wizard
- * and workspace, and every AI step degrades to the existing local fallbacks
- * until the visitor signs in.
- */
-function createLocalDraft(trimmed: string, model: string | undefined): string {
-  const localId =
-    typeof crypto !== "undefined" && "randomUUID" in crypto
-      ? crypto.randomUUID()
-      : `draft-${Date.now()}`;
-  useVibe.getState().addProject({
-    id: localId,
-    name: deriveProjectName(trimmed) || "Untitled project",
-    idea: trimmed,
-    status: "draft",
-    createdAt: new Date().toISOString(),
-    ...(model ? { model } : {}),
-  });
-  return localId;
+function requireSignedInMessage(): string {
+  return "Sign in is required to create a project.";
 }
 
 export async function createDraftProject(
@@ -52,7 +35,7 @@ export async function createDraftProject(
   }
 
   const session = await currentSessionOrNull();
-  if (!session) return createLocalDraft(trimmed, model);
+  if (!session) throw new Error(requireSignedInMessage());
 
   const name = deriveProjectName(trimmed) || "Untitled project";
   const response = await fetch("/api/workspaces/create", {
@@ -67,7 +50,7 @@ export async function createDraftProject(
         }),
   });
   const payload = (await response.json().catch(() => null)) as
-        | { snapshot?: unknown; revision?: unknown }
+        | { snapshot?: unknown; revision?: unknown; error?: unknown }
         | null;
   if (
         !response.ok ||
@@ -76,7 +59,12 @@ export async function createDraftProject(
         typeof payload.revision !== "string" ||
         !Number.isFinite(Date.parse(payload.revision))
   ) {
+    const serverMessage =
+      !response.ok && payload && typeof payload.error === "string"
+        ? payload.error
+        : null;
     throw new Error(
+      serverMessage ??
           "Could not create your account workspace. Check your connection and try again.",
     );
   }

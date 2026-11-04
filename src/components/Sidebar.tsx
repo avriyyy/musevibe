@@ -370,7 +370,7 @@ export default function Sidebar({
                 </div>
                 {auth.user && (
                   <>
-                    <Link href="/profile" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Profile<span aria-hidden className="text-[#5b6472]">→</span></Link>
+                    <Link href="/settings?section=profile" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Profile<span aria-hidden className="text-[#5b6472]">→</span></Link>
                     <Link href="/settings" onClick={() => setProfileOpen(false)} className="flex items-center justify-between gap-3 rounded-xl px-3 py-2 text-[13px] text-[#c9cdd6] hover:bg-white/5 hover:text-white">Settings<span aria-hidden className="text-[#5b6472]">→</span></Link>
                   </>
                 )}

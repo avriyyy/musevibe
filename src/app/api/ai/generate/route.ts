@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { aiGenerate, aiGenerateLogo, type AiGenerateKind } from "@/lib/ai";
+import { LOCKED_MODEL_MESSAGE, isModelAllowed } from "@/lib/models";
 import { requireWorkspaceUser } from "@/lib/server/workspace-auth";
 
 const KINDS: AiGenerateKind[] = ["prd", "tasks", "brief", "code", "questions", "logo", "stack", "name", "doc", "prototype", "chat", "design-system", "pages", "logo-svg"];
@@ -48,6 +49,12 @@ export async function POST(req: Request) {
   ) {
     return NextResponse.json(
       { error: "Unknown model.", code: "invalid_model" },
+      { status: 400 },
+    );
+  }
+  if (typeof model === "string" && !isModelAllowed(model)) {
+    return NextResponse.json(
+      { error: LOCKED_MODEL_MESSAGE, code: "model_locked" },
       { status: 400 },
     );
   }

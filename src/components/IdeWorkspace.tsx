@@ -18,6 +18,8 @@ import {
 import Link from "next/link";
 import dynamic from "next/dynamic";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
+import { Theme } from "@astryxdesign/core/theme";
+import { themes, defaultThemeSlug } from "@/astryx-themes";
 import type { ChatQuote } from "@/lib/pick";
 import { authFetch } from "@/lib/supabase/client";
 import {
@@ -311,9 +313,11 @@ function localDraftNote(reply: AiReply, item: string): string {
 
 export default function IdeWorkspace({ projectId }: { projectId: string }) {
   return (
-    <ProjectAccessGate projectId={projectId}>
-      <IdeWorkspaceContent projectId={projectId} />
-    </ProjectAccessGate>
+    <Theme theme={themes[defaultThemeSlug]} mode="dark">
+      <ProjectAccessGate projectId={projectId}>
+        <IdeWorkspaceContent projectId={projectId} />
+      </ProjectAccessGate>
+    </Theme>
   );
 }
 

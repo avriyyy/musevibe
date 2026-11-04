@@ -88,7 +88,7 @@ export function ResetPasswordScreen() {
     return <RecoveryCard title="Reset link not verified" body="Open the most recent password reset email on this device, or request a new link. The link may have expired."><Link href="/forgot-password" className="inline-flex h-10 items-center rounded-full bg-meta px-4 text-[13px] font-semibold text-white hover:bg-meta-hover">Request another link</Link></RecoveryCard>;
   }
   if (saved) {
-    return <RecoveryCard title="Password updated" body="Your password has been changed. You can continue to your profile."><Link href="/profile" className="inline-flex h-10 items-center rounded-full bg-meta px-4 text-[13px] font-semibold text-white hover:bg-meta-hover">Open profile</Link></RecoveryCard>;
+    return <RecoveryCard title="Password updated" body="Your password has been changed. You can continue to your settings."><Link href="/settings" className="inline-flex h-10 items-center rounded-full bg-meta px-4 text-[13px] font-semibold text-white hover:bg-meta-hover">Open settings</Link></RecoveryCard>;
   }
 
   return (

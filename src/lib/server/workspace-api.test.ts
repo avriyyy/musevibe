@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createWorkspaceApi, type WorkspaceRepository } from "./workspace-api";
+import { createWorkspaceApi, type CreditCharger, type WorkspaceRepository } from "./workspace-api";
 import type { CloudWorkspaceRecord, CloudWorkspaceSnapshot } from "../types";
 
 const USER_A = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
@@ -29,7 +29,7 @@ function record(): CloudWorkspaceRecord {
   return { snapshot: snapshot(), revision: REVISION };
 }
 
-function createHarness(overrides: Partial<WorkspaceRepository> = {}) {
+function createHarness(overrides: Partial<WorkspaceRepository> = {}, charger: CreditCharger | null = null) {
   const calls: Array<{ method: string; args: unknown[] }> = [];
   const repo: WorkspaceRepository = {
     listOwned: async (...args) => {
@@ -53,6 +53,7 @@ function createHarness(overrides: Partial<WorkspaceRepository> = {}) {
   const api = createWorkspaceApi({
     authenticate: async () => ({ user: { id: USER_A } }),
     repository: () => repo,
+    ...(charger ? { credits: () => charger } : {}),
     newId: () => "dddddddd-dddd-4ddd-8ddd-dddddddddddd",
     now: () => "2026-11-01T00:00:00.000Z",
   });
@@ -168,4 +169,70 @@ test("oversized create bodies are bounded before repository access", async () =>
   }));
   assert.equal(response.status, 413);
   assert.equal(calls.length, 0);
+});
+
+function createCharger(spend: "ok" | "insufficient") {
+  const calls: Array<{ method: string; args: unknown[] }> = [];
+  const charger: CreditCharger = {
+    spendForProject: async (userId) => {
+      calls.push({ method: "spendForProject", args: [userId] });
+      return spend;
+    },
+    refund: async (userId, amount) => {
+      calls.push({ method: "refund", args: [userId, amount] });
+    },
+  };
+  return { charger, calls };
+}
+
+function createBody() {
+  return { project: { name: "New idea", idea: "A local-first board" } };
+}
+
+test("project creation spends daily credits before writing", async () => {
+  const { charger, calls: creditCalls } = createCharger("ok");
+  const { api, calls } = createHarness({}, charger);
+  const response = await api.create(jsonRequest("POST", createBody()));
+  assert.equal(response.status, 201);
+  assert.deepEqual(creditCalls, [{ method: "spendForProject", args: [USER_A] }]);
+  assert.equal(calls.some((call) => call.method === "createOwned"), true);
+});
+
+test("insufficient credits block creation with 402 and no write", async () => {
+  const { charger } = createCharger("insufficient");
+  const { api, calls } = createHarness({}, charger);
+  const response = await api.create(jsonRequest("POST", createBody()));
+  const data = (await response.json()) as { code?: unknown };
+  assert.equal(response.status, 402);
+  assert.equal(data.code, "insufficient_credits");
+  assert.equal(calls.some((call) => call.method === "createOwned"), false);
+});
+
+test("failed creation refunds the spent credits", async () => {
+  const { charger, calls: creditCalls } = createCharger("ok");
+  const { api } = createHarness({ createOwned: async () => null }, charger);
+  const response = await api.create(jsonRequest("POST", createBody()));
+  assert.equal(response.status, 409);
+  assert.deepEqual(creditCalls[creditCalls.length - 1], {
+    method: "refund",
+    args: [USER_A, 10],
+  });
+});
+
+test("storage failure after charging refunds the spent credits", async () => {
+  const { charger, calls: creditCalls } = createCharger("ok");
+  const { api } = createHarness(
+    {
+      createOwned: async () => {
+        throw new Error("neon is down");
+      },
+    },
+    charger,
+  );
+  const response = await api.create(jsonRequest("POST", createBody()));
+  assert.equal(response.status, 503);
+  assert.deepEqual(creditCalls[creditCalls.length - 1], {
+    method: "refund",
+    args: [USER_A, 10],
+  });
 });

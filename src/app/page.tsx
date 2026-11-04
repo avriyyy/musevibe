@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import LandingPage from "@/components/landing/LandingPage";
+import LandingTheme from "@/components/landing/LandingTheme";
 
 export const metadata: Metadata = {
   title: "MuseVibe — Type an idea, get a workspace",
@@ -13,5 +14,9 @@ export const metadata: Metadata = {
 };
 
 export default function Home() {
-  return <LandingPage />;
+  return (
+    <LandingTheme>
+      <LandingPage />
+    </LandingTheme>
+  );
 }
